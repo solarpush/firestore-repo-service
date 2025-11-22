@@ -1,5 +1,5 @@
 import type { Query, QuerySnapshot } from "firebase-admin/firestore";
-import type { QueryOptions, WhereClause } from "./types";
+import type { QueryOptions, WhereClause } from "./shared/types";
 
 /**
  * Chunk array into smaller arrays

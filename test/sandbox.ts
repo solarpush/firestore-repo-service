@@ -57,9 +57,10 @@ const repositoryMapping = {
     path: "posts",
     isGroup: false,
     foreignKeys: ["docId", "userId"] as const,
-    queryKeys: ["status"] as const,
+    queryKeys: ["status", "userId"] as const,
     type: {} as PostModel,
     refCb: (db: Firestore, docId: string) => db.collection("posts").doc(docId),
+    relationalKeys: {},
   }),
 } as const;
 
@@ -72,61 +73,73 @@ export const repos = createRepositoryMapping(db, repositoryMapping);
 async function test() {
   console.log("🧪 Starting sandbox test...\n");
 
-  // Exemple 1: Pagination simple avec curseur
-  console.log("📄 Test de pagination simple (10 par page):");
-  const page1 = await repos.users.query.paginate({
-    pageSize: 10,
-    where: [{ field: "isActive", operator: "==", value: true }],
-    orderBy: [{ field: "createdAt", direction: "desc" }],
+  // Test 1: Créer des utilisateurs
+  console.log("👤 Création d'utilisateurs de test:");
+  const user1 = await repos.users.create({
+    name: "Alice",
+    email: "alice@test.com",
+    age: 25,
+    isActive: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
   });
+  console.log(`  ✅ User créé: ${user1.name} (${user1.docId})`);
 
-  console.log(`  - Page 1: ${page1.pageSize} utilisateurs`);
-  console.log(`  - Plus de pages: ${page1.hasNextPage}`);
-  page1.data.forEach((u) => console.log(`    • ${u.name} (${u.email})`));
+  const user2 = await repos.users.create({
+    name: "Bob",
+    email: "bob@test.com",
+    age: 30,
+    isActive: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  console.log(`  ✅ User créé: ${user2.name} (${user2.docId})`);
 
-  // Page suivante avec curseur
-  if (page1.hasNextPage) {
-    const page2 = await repos.users.query.paginate({
-      pageSize: 10,
-      cursor: page1.nextCursor,
-      direction: "next",
-      where: [{ field: "isActive", operator: "==", value: true }],
-      orderBy: [{ field: "createdAt", direction: "desc" }],
-    });
-    console.log(`\n  - Page 2: ${page2.pageSize} utilisateurs`);
-    page2.data.forEach((u) => console.log(`    • ${u.name} (${u.email})`));
-    // Page suivante avec curseur
-    if (page2.hasNextPage) {
-      const page3 = await repos.users.query.paginate({
-        pageSize: 10,
-        cursor: page2.nextCursor,
-        direction: "next",
-        where: [{ field: "isActive", operator: "==", value: true }],
-        orderBy: [{ field: "createdAt", direction: "desc" }],
-      });
-      console.log(`\n  - Page 3: ${page3.pageSize} utilisateurs`);
-      page3.data.forEach((u) => console.log(`    • ${u.name} (${u.email})`));
-      console.log(page3.hasNextPage);
-    }
-  }
+  // Test 2: Créer des posts liés aux users
+  console.log("\n📝 Création de posts:");
+  const post1 = await repos.posts.create({
+    userId: user1.docId,
+    title: "Premier post d'Alice",
+    content: "Contenu du post",
+    status: "published",
+    views: 42,
+    createdAt: new Date(),
+  });
+  console.log(`  ✅ Post créé: ${post1.title} par userId=${post1.userId}`);
 
-  // Exemple 2: Itération automatique avec générateur
-  console.log("\n🔄 Test d'itération avec générateur (5 par page):");
-  let pageNum = 0;
-  let totalUsers = 0;
-  for await (const page of repos.users.query.paginateAll({
-    pageSize: 5,
-    where: [{ field: "isActive", operator: "==", value: true }],
-    orderBy: [{ field: "createdAt", direction: "desc" }],
-  })) {
-    pageNum++;
-    totalUsers += page.pageSize;
+  const post2 = await repos.posts.create({
+    userId: user2.docId,
+    title: "Post de Bob",
+    content: "Un autre contenu",
+    status: "draft",
+    views: 10,
+    createdAt: new Date(),
+  });
+  console.log(`  ✅ Post créé: ${post2.title} par userId=${post2.userId}`);
+
+  // Test 3: Populate one-to-one (post -> user)
+  console.log("\n🔗 Test populate (one-to-one):");
+  const postWithUser = await repos.posts.populate(post1, "userId");
+  console.log(`  Post: "${postWithUser.title}"`);
+  console.log(
+    `  Auteur: ${postWithUser.userId?.name} (${postWithUser.userId?.email})`
+  );
+
+  // Test 4: Query posts par userId
+  console.log("\n🔍 Query posts par userId:");
+  const alicePosts = await repos.posts.query.byUserId(user1.docId);
+  console.log(`  Alice a ${alicePosts.length} post(s)`);
+  alicePosts.forEach((p) => console.log(`    • ${p.title}`));
+
+  // Test 5: Populate multiple posts
+  console.log("\n🔗 Populate plusieurs posts:");
+  const allPosts = await repos.posts.query.getAll();
+  console.log(`  Total: ${allPosts.length} posts`);
+  for (const post of allPosts) {
+    const populated = await repos.posts.populate(post, "userId");
     console.log(
-      `  - Page ${pageNum}: ${page.pageSize} utilisateurs (total: ${totalUsers})`
+      `  • "${populated.title}" par ${populated.userId?.name || "unknown"}`
     );
-
-    // Arrêter après 3 pages pour l'exemple
-    if (pageNum >= 3) break;
   }
 
   console.log("\n✅ Sandbox test completed!");

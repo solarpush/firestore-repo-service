@@ -32,14 +32,6 @@ export type ExtractUpdateSignature<T, TType> = T extends (
 /**
  * Type for a where condition with strict value typing based on the field
  * @template T - Data model type
- * @example
- * ```typescript
- * const condition: WhereClause<EventModel> = {
- *   field: 'status',
- *   operator: '==',
- *   value: 'signed'
- * }
- * ```
  */
 export type WhereClause<T = any> = {
   [K in keyof T]: {
@@ -52,41 +44,6 @@ export type WhereClause<T = any> = {
 /**
  * Query options for filtering, sorting and paginating results
  * @template T - Data model type
- *
- * @property {WhereClause<T>[]} [where] - AND conditions
- * @property {WhereClause<T>[][]} [orWhere] - OR conditions (array of AND groups)
- * @property {Array<{field: keyof T; direction?: "asc" | "desc"}>} [orderBy] - Sort criteria
- * @property {number} [limit] - Maximum number of results to return
- * @property {number} [offset] - Number of results to skip (pagination)
- *
- * @example
- * // Simple AND search
- * ```typescript
- * const options: QueryOptions<EventModel> = {
- *   where: [
- *     { field: 'status', operator: '==', value: 'signed' },
- *     { field: 'dateTime', operator: '>=', value: startDate }
- *   ],
- *   orderBy: [{ field: 'dateTime', direction: 'desc' }],
- *   limit: 10
- * }
- * ```
- *
- * @example
- * // OR search: (status == 'draft' AND userId == '123') OR (status == 'published')
- * ```typescript
- * const options: QueryOptions<EventModel> = {
- *   orWhere: [
- *     [
- *       { field: 'status', operator: '==', value: 'draft' },
- *       { field: 'userId', operator: '==', value: '123' }
- *     ],
- *     [
- *       { field: 'status', operator: '==', value: 'published' }
- *     ]
- *   ]
- * }
- * ```
  */
 export interface QueryOptions<T = any> {
   where?: WhereClause<T>[];
@@ -109,39 +66,81 @@ export type GetResult<T, ReturnDoc extends boolean> = ReturnDoc extends true
   : T | null;
 
 /**
+ * Relation configuration for a field with strict typing
+ * @template TRepoKey - Target repository name (key from mapping)
+ * @template TForeignKey - Target foreign key name
+ * @template TType - Relation type: "one" for one-to-one, "many" for one-to-many
+ */
+export interface RelationConfig<
+  TRepoKey extends string = string,
+  TForeignKey extends string = string,
+  TType extends "one" | "many" = "one" | "many"
+> {
+  repo: TRepoKey;
+  key: TForeignKey;
+  type: TType;
+}
+
+/**
+ * Relational key mapping between repositories with strict typing
+ * Maps a field from the current model to a target repository and foreign key
+ * @template T - Current model type
+ * @template TMapping - All repositories mapping for validation
+ * @example { userId: { repo: "users", key: "docId", type: "one" } }
+ *
+ * IMPORTANT: Keys must exist in T (the current model)
+ * This prevents creating relations on non-existent fields
+ */
+export type RelationalKeys<T = any, TMapping = any> = {
+  [K in keyof T]?: TMapping extends Record<string, any>
+    ? {
+        [R in keyof TMapping]: TMapping[R] extends RepositoryConfig<
+          any,
+          infer FKeys,
+          any,
+          any,
+          any,
+          any
+        >
+          ? {
+              repo: R;
+              key: FKeys[number];
+              type: "one" | "many";
+            }
+          : never;
+      }[keyof TMapping]
+    : RelationConfig;
+};
+
+/**
  * Configuration interface for repositories with strict literal type inference
  * @template T - The data model type
- * @template TForeignKeys - Foreign keys used for unique document retrieval (get methods)
- * @template TQueryKeys - Query keys used for multiple document searches (query methods)
+ * @template TForeignKeys - Foreign keys used for unique document retrieval
+ * @template TQueryKeys - Query keys used for multiple document searches
  * @template TIsGroup - Whether this is a collection group query
  * @template TRefCb - Callback function signature for creating document references
+ * @template TRelationalKeys - Relational keys mapping to other repositories
  */
 export interface RepositoryConfig<
   T,
   TForeignKeys extends readonly (keyof T)[],
   TQueryKeys extends readonly (keyof T)[],
   TIsGroup extends boolean = boolean,
-  TRefCb = any
+  TRefCb = any,
+  TRelationalKeys extends RelationalKeys<T> = {}
 > {
-  /** Firestore collection path */
   path: string;
-  /** Whether this is a collection group query */
   isGroup: TIsGroup;
-  /** Keys used for unique document retrieval (generates get.by* methods) */
   foreignKeys: TForeignKeys;
-  /** Keys used for querying multiple documents (generates query.by* methods) */
   queryKeys: TQueryKeys;
-  /** Type definition for the data model */
   type: T;
-  /** Callback to construct document reference */
   refCb?: TRefCb;
-  /** Exposes the same signature as refCb but without the db parameter */
+  relationalKeys?: TRelationalKeys;
   documentRef: TRefCb extends undefined
     ? TIsGroup extends true
       ? (...pathSegments: string[]) => DocumentReference
       : (docId: string) => DocumentReference
     : ExtractDocumentRefSignature<TRefCb>;
-  /** Exposes the same signature as refCb but with data parameter and returns the updated object */
   update: TRefCb extends undefined
     ? TIsGroup extends true
       ? (...args: [...string[], Partial<T>]) => Promise<T>

@@ -1,6 +1,6 @@
 import type { DocumentSnapshot, Query } from "firebase-admin/firestore";
 import { buildAndExecuteQuery } from "./query-builder";
-import type { QueryOptions } from "./types";
+import type { QueryOptions } from "./shared/types";
 
 /**
  * Pagination result with data and cursor information
