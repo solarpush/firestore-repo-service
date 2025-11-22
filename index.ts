@@ -1,29 +1,43 @@
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 
-import {
+import type {
   CollectionReference,
   DocumentReference,
+  DocumentSnapshot,
+  Firestore,
+  Query,
   QuerySnapshot,
+  Transaction,
   WriteBatch,
-  collection,
-  collectionGroup,
-  and as filterAnd,
-  or as filterOr,
-  where as filterWhere,
-  getDoc,
-  getDocs,
-  getFirestore,
-  limit,
-  orderBy,
-  query,
-  updateDoc,
-  where,
-  writeBatch,
-  type DocumentData,
-  type DocumentSnapshot,
-  type Firestore,
-  type WhereFilterOp,
-} from "firebase/firestore";
+} from "firebase-admin/firestore";
+
+// Re-export types and utilities from modules
+export type {
+  ExtractDocumentRefSignature,
+  ExtractUpdateSignature,
+  GetResult,
+  QueryOptions,
+  RepositoryConfig,
+  WhereClause,
+} from "./src/types";
+
+export type { PaginationOptions, PaginationResult } from "./src/pagination";
+
+export {
+  applyQueryOptions,
+  createPaginationIterator,
+  executePaginatedQuery,
+} from "./src/pagination";
+
+export { buildAndExecuteQuery } from "./src/query-builder";
+
+import type { GetResult, QueryOptions, RepositoryConfig } from "./src/types";
+
+import {
+  createPaginationIterator,
+  executePaginatedQuery,
+  type PaginationOptions,
+} from "./src/pagination";
 
 /**
  * Example repository mapping configuration
@@ -45,75 +59,12 @@ import {
  *     foreignKeys: ["docId", "email"] as const,
  *     queryKeys: ["name"] as const,
  *     type: {} as UserModel,
- *     refCb: (db, docId: string) => doc(db, "users", docId),
+ *     refCb: (db, docId: string) => db.collection("users").doc(docId),
  *   }),
  * } as const;
  * ```
  */
 const repositoryMapping = {} as const;
-
-/**
- * Extract the documentRef signature from refCb (without the db parameter)
- * @internal
- */
-type ExtractDocumentRefSignature<T> = T extends (
-  db: Firestore,
-  ...args: infer P
-) => DocumentReference<DocumentData>
-  ? (...args: P) => DocumentReference<DocumentData>
-  : never;
-
-/**
- * Extract the update signature from refCb
- * @internal
- */
-type ExtractUpdateSignature<T, TType> = T extends (
-  db: Firestore,
-  ...args: infer P
-) => DocumentReference<DocumentData>
-  ? (...args: [...P, Partial<TType>]) => Promise<TType>
-  : never;
-
-/**
- * Configuration interface for repositories with strict literal type inference
- * @template T - The data model type
- * @template TForeignKeys - Foreign keys used for unique document retrieval (get methods)
- * @template TQueryKeys - Query keys used for multiple document searches (query methods)
- * @template TIsGroup - Whether this is a collection group query
- * @template TRefCb - Callback function signature for creating document references
- */
-interface RepositoryConfig<
-  T,
-  TForeignKeys extends readonly (keyof T)[],
-  TQueryKeys extends readonly (keyof T)[],
-  TIsGroup extends boolean = boolean,
-  TRefCb = any
-> {
-  /** Firestore collection path */
-  path: string;
-  /** Whether this is a collection group query */
-  isGroup: TIsGroup;
-  /** Keys used for unique document retrieval (generates get.by* methods) */
-  foreignKeys: TForeignKeys;
-  /** Keys used for querying multiple documents (generates query.by* methods) */
-  queryKeys: TQueryKeys;
-  /** Type definition for the data model */
-  type: T;
-  /** Callback to construct document reference */
-  refCb?: TRefCb;
-  /** Exposes the same signature as refCb but without the db parameter */
-  documentRef: TRefCb extends undefined
-    ? TIsGroup extends true
-      ? (...pathSegments: string[]) => DocumentReference<DocumentData>
-      : (docId: string) => DocumentReference<DocumentData>
-    : ExtractDocumentRefSignature<TRefCb>;
-  /** Exposes the same signature as refCb but with data parameter and returns the updated object */
-  update: TRefCb extends undefined
-    ? TIsGroup extends true
-      ? (...args: [...string[], Partial<T>]) => Promise<T>
-      : (docId: string, data: Partial<T>) => Promise<T>
-    : ExtractUpdateSignature<TRefCb, T>;
-}
 
 /**
  * Helper to create a typed repository configuration with literal type preservation
@@ -132,7 +83,7 @@ interface RepositoryConfig<
  *   foreignKeys: ["docId", "email"] as const,
  *   queryKeys: ["isActive"] as const,
  *   type: {} as UserModel,
- *   refCb: (db, docId: string) => doc(db, "users", docId),
+ *   refCb: (db, docId: string) => db.collection("users").doc(docId),
  * });
  * ```
  */
@@ -157,92 +108,6 @@ export function createRepositoryConfig<
     update: null as any, // Will be replaced in constructor
   };
 }
-
-/**
- * Type for a where condition with strict value typing based on the field
- * @template T - Data model type
- * @example
- * ```typescript
- * const condition: WhereClause<EventModel> = {
- *   field: 'status',
- *   operator: '==',
- *   value: 'signed'
- * }
- * ```
- */
-export type WhereClause<T = any> = {
-  [K in keyof T]: {
-    field: K;
-    operator: WhereFilterOp;
-    value: T[K] | T[K][];
-  };
-}[keyof T];
-
-/**
- * Type for composite OR/AND conditions
- * @template T - Data model type
- * @deprecated Use QueryOptions with orWhere directly
- */
-export type CompositeFilter<T = any> = {
-  or?: WhereClause<T>[][];
-  and?: WhereClause<T>[];
-};
-
-/**
- * Query options for filtering, sorting and paginating results
- * @template T - Data model type
- *
- * @property {WhereClause<T>[]} [where] - Simple AND conditions
- * @property {WhereClause<T>[][]} [orWhere] - Composite OR conditions. Each sub-array represents an AND group, and groups are combined with OR
- * @property {Array<{field: keyof T; direction?: "asc" | "desc"}>} [orderBy] - Sort criteria
- * @property {number} [limit] - Maximum number of results to return
- * @property {number} [offset] - Number of results to skip (pagination)
- *
- * @example
- * // Simple search with AND
- * ```typescript
- * const options: QueryOptions<EventModel> = {
- *   where: [
- *     { field: 'status', operator: '==', value: 'signed' },
- *     { field: 'dateTime', operator: '>=', value: startDate }
- *   ],
- *   orderBy: [{ field: 'dateTime', direction: 'desc' }],
- *   limit: 10
- * }
- * ```
- *
- * @example
- * // Search with OR: (status = 'signed' AND dateTime > date1) OR (status = 'scheduled' AND dateTime > date2)
- * ```typescript
- * const options: QueryOptions<EventModel> = {
- *   orWhere: [
- *     [
- *       { field: 'status', operator: '==', value: 'signed' },
- *       { field: 'dateTime', operator: '>=', value: date1 }
- *     ],
- *     [
- *       { field: 'status', operator: '==', value: 'scheduled' },
- *       { field: 'dateTime', operator: '>=', value: date2 }
- *     ]
- *   ]
- * }
- * ```
- */
-export interface QueryOptions<T = any> {
-  where?: WhereClause<T>[];
-  orWhere?: WhereClause<T>[][];
-  orderBy?: { field: keyof T; direction?: "asc" | "desc" }[];
-  limit?: number;
-  offset?: number;
-}
-
-/**
- * Result type for get operations with optional document snapshot
- * @internal
- */
-type GetResult<T, ReturnDoc extends boolean> = ReturnDoc extends true
-  ? { data: T; doc: DocumentSnapshot<DocumentData> } | null
-  : T | null;
 
 /**
  * Generates get.by* methods from foreign keys
@@ -279,7 +144,7 @@ type GenerateQueryMethods<
  */
 type ConfiguredRepository<T extends RepositoryConfig<any, any, any, any>> = {
   /** Firestore collection reference */
-  ref: CollectionReference<DocumentData>;
+  ref: CollectionReference | Query;
 
   /** Retrieval methods (getBy*) */
   get: GenerateGetMethods<T> & {
@@ -293,7 +158,7 @@ type ConfiguredRepository<T extends RepositoryConfig<any, any, any, any>> = {
       ReturnDoc extends true
         ? Array<{
             data: T["type"];
-            doc: DocumentSnapshot<DocumentData>;
+            doc: DocumentSnapshot;
           }>
         : T["type"][]
     >;
@@ -302,13 +167,107 @@ type ConfiguredRepository<T extends RepositoryConfig<any, any, any, any>> = {
   /** Query methods (queryBy*) */
   query: GenerateQueryMethods<T> & {
     by: (options: QueryOptions<T["type"]>) => Promise<T["type"][]>;
+    getAll: (options?: QueryOptions<T["type"]>) => Promise<T["type"][]>;
+    onSnapshot: (
+      options: QueryOptions<T["type"]>,
+      onNext: (data: T["type"][]) => void,
+      onError?: (error: Error) => void
+    ) => () => void;
+    /** Executes a paginated query with cursor-based pagination */
+    paginate: (
+      options: PaginationOptions<T["type"]>
+    ) => ReturnType<typeof executePaginatedQuery<T["type"]>>;
+    /** Creates an async iterator for iterating through all pages */
+    paginateAll: (
+      options: Omit<PaginationOptions<T["type"]>, "cursor" | "direction">
+    ) => ReturnType<typeof createPaginationIterator<T["type"]>>;
+  };
+
+  /** Aggregate methods for server-side computations */
+  aggregate: {
+    /**
+     * Gets the count of documents matching the query options
+     * @param options - Optional query options to filter documents
+     * @returns Promise with the count of documents
+     * @example
+     * ```typescript
+     * const count = await repos.users.aggregate.count();
+     * const activeCount = await repos.users.aggregate.count({
+     *   where: [{ field: 'isActive', operator: '==', value: true }]
+     * });
+     * ```
+     */
+    count: (options?: QueryOptions<T["type"]>) => Promise<number>;
+
+    /**
+     * Gets the sum of a numeric field across documents matching the query options
+     * @param field - The field to sum
+     * @param options - Optional query options to filter documents
+     * @returns Promise with the sum value
+     * @example
+     * ```typescript
+     * const totalAge = await repos.users.aggregate.sum('age');
+     * const activeUsersAge = await repos.users.aggregate.sum('age', {
+     *   where: [{ field: 'isActive', operator: '==', value: true }]
+     * });
+     * ```
+     */
+    sum: <K extends keyof T["type"]>(
+      field: K,
+      options?: QueryOptions<T["type"]>
+    ) => Promise<number>;
+
+    /**
+     * Gets the average of a numeric field across documents matching the query options
+     * @param field - The field to average
+     * @param options - Optional query options to filter documents
+     * @returns Promise with the average value
+     * @example
+     * ```typescript
+     * const avgAge = await repos.users.aggregate.average('age');
+     * const activeUsersAvgAge = await repos.users.aggregate.average('age', {
+     *   where: [{ field: 'isActive', operator: '==', value: true }]
+     * });
+     * ```
+     */
+    average: <K extends keyof T["type"]>(
+      field: K,
+      options?: QueryOptions<T["type"]>
+    ) => Promise<number | null>;
   };
 
   /** Method to get a document reference */
   documentRef: T["documentRef"];
 
-  /** Method to update a document */
+  /**
+   * Creates a new document with auto-generated ID
+   * @param data - Document data
+   * @returns Promise with the created document including its generated ID
+   */
+  create: (data: Partial<T["type"]>) => Promise<T["type"] & { docId: string }>;
+
+  /**
+   * Sets a document (creates or replaces)
+   * @param args - Path arguments followed by data and optional merge option
+   * @returns Promise with the set document
+   */
+  set: (
+    ...args: [
+      ...Parameters<T["documentRef"]>,
+      Partial<T["type"]>,
+      { merge?: boolean }?
+    ]
+  ) => Promise<T["type"]>;
+
+  /** Updates a document and returns the updated data */
   update: T["update"];
+
+  /**
+   * Deletes a document
+   * @param args - Path arguments for the document to delete
+   * @returns Promise that resolves when deletion is complete
+   */
+  delete: (...args: Parameters<T["documentRef"]>) => Promise<void>;
 
   /** Batch operations for atomic transactions */
   batch: {
@@ -316,17 +275,60 @@ type ConfiguredRepository<T extends RepositoryConfig<any, any, any, any>> = {
     create: () => {
       batch: WriteBatch;
       set: (
-        docRef: DocumentReference<DocumentData>,
-        data: Partial<T["type"]>,
-        merge?: boolean
+        ...args: [
+          ...Parameters<T["documentRef"]>,
+          Partial<T["type"]>,
+          { merge?: boolean }?
+        ]
       ) => void;
       update: (
-        docRef: DocumentReference<DocumentData>,
-        data: Partial<T["type"]>
+        ...args: [...Parameters<T["documentRef"]>, Partial<T["type"]>]
       ) => void;
-      delete: (docRef: DocumentReference<DocumentData>) => void;
+      delete: (...args: Parameters<T["documentRef"]>) => void;
       commit: () => Promise<void>;
     };
+  };
+
+  /** Transaction operations for atomic read-write operations */
+  transaction: {
+    /**
+     * Runs a transaction with type-safe read and write operations
+     * @param updateFunction - Function that receives a typed transaction wrapper
+     * @returns Promise that resolves with the transaction result
+     * @example
+     * ```typescript
+     * await repos.users.transaction.run(async (txn) => {
+     *   const user = await txn.get("user123");
+     *   if (user) {
+     *     await txn.update("user123", { balance: user.balance + 100 });
+     *   }
+     * });
+     * ```
+     */
+    run: <R>(
+      updateFunction: (transaction: {
+        /** Get a document by its reference (type-safe) */
+        get: (
+          ...args: Parameters<T["documentRef"]>
+        ) => Promise<T["type"] | null>;
+        /** Set a document (type-safe) */
+        set: (
+          ...args: [
+            ...Parameters<T["documentRef"]>,
+            Partial<T["type"]>,
+            { merge?: boolean }?
+          ]
+        ) => void;
+        /** Update a document (type-safe) */
+        update: (
+          ...args: [...Parameters<T["documentRef"]>, Partial<T["type"]>]
+        ) => void;
+        /** Delete a document */
+        delete: (...args: Parameters<T["documentRef"]>) => void;
+        /** Access raw Firestore transaction if needed */
+        raw: Transaction;
+      }) => Promise<R>
+    ) => Promise<R>;
   };
 
   /** Bulk operations for processing large quantities */
@@ -334,7 +336,7 @@ type ConfiguredRepository<T extends RepositoryConfig<any, any, any, any>> = {
     /** Creates/updates multiple documents (automatically divided into batches of 500) */
     set: (
       items: Array<{
-        docRef: DocumentReference<DocumentData>;
+        docRef: DocumentReference;
         data: Partial<T["type"]>;
         merge?: boolean;
       }>
@@ -343,13 +345,13 @@ type ConfiguredRepository<T extends RepositoryConfig<any, any, any, any>> = {
     /** Updates multiple documents (automatically divided into batches of 500) */
     update: (
       items: Array<{
-        docRef: DocumentReference<DocumentData>;
+        docRef: DocumentReference;
         data: Partial<T["type"]>;
       }>
     ) => Promise<void>;
 
     /** Deletes multiple documents (automatically divided into batches of 500) */
-    delete: (docRefs: DocumentReference<DocumentData>[]) => Promise<void>;
+    delete: (docRefs: DocumentReference[]) => Promise<void>;
   };
 };
 
@@ -360,28 +362,18 @@ type ConfiguredRepository<T extends RepositoryConfig<any, any, any, any>> = {
 export class RepositoryMapping<
   T extends Record<string, any> = typeof repositoryMapping
 > {
-  private db?: Firestore;
+  private db: Firestore;
   private repositoryCache = new Map<string, any>();
   private mapping: T;
 
   /**
    * Creates a new RepositoryMapping instance
+   * @param db - Firestore instance from firebase-admin
    * @param mapping - Repository configuration mapping
    */
-  constructor(mapping: T) {
+  constructor(db: Firestore, mapping: T) {
+    this.db = db;
     this.mapping = mapping;
-  }
-
-  /**
-   * Initializes and returns the Firestore instance
-   * @private
-   * @returns Firestore instance
-   */
-  private init(): Firestore {
-    if (!this.db) {
-      this.db = getFirestore();
-    }
-    return this.db;
   }
 
   /**
@@ -409,17 +401,22 @@ export class RepositoryMapping<
   private createRepository<K extends keyof T>(
     key: K
   ): ConfiguredRepository<T[K]> {
-    const db = this.init();
     const element = this.mapping[key];
-    const collectionRef = element.isGroup
-      ? collectionGroup(db, element.path)
-      : collection(db, element.path);
+    const collectionRef: CollectionReference | Query = element.isGroup
+      ? this.db.collectionGroup(element.path)
+      : this.db.collection(element.path);
+
+    // Keep a reference to the actual collection for create operations
+    const actualCollection = element.isGroup
+      ? null
+      : this.db.collection(element.path);
 
     const getMethods: any = {};
     const queryMethods: any = {};
 
     // Create the documentRef method with the db instance
-    const documentRef = (...args: any[]) => (element.refCb as any)(db, ...args);
+    const documentRef = (...args: any[]) =>
+      (element.refCb as any)(this.db, ...args);
 
     // Helper to split an array into chunks
     const chunkArray = <T>(array: T[], size: number): T[][] => {
@@ -443,13 +440,13 @@ export class RepositoryMapping<
       const chunks = chunkArray(values, 30); // Firestore limits 'in' to 30 elements
 
       for (const chunk of chunks) {
-        const q = query(collectionRef, where(key, operator, chunk));
-        const snapshot: QuerySnapshot<DocumentData> = await getDocs(q);
+        let q: Query = collectionRef as any;
+        q = q.where(key, operator, chunk);
+        const snapshot: QuerySnapshot = await q.get();
 
         snapshot.forEach((doc) => {
-          results.push(
-            returnDoc ? { data: doc.data(), doc } : { ...doc.data() }
-          );
+          const data = doc.data();
+          results.push(returnDoc ? { data, doc } : { ...data, docId: doc.id });
         });
       }
 
@@ -466,16 +463,14 @@ export class RepositoryMapping<
         value: string,
         returnDoc = false
       ): Promise<any | null> => {
-        const q = query(
-          collectionRef,
-          where(String(foreignKey), "==", value),
-          limit(1)
-        );
-        const snapshot: QuerySnapshot<DocumentData> = await getDocs(q);
+        let q: Query = collectionRef as any;
+        q = q.where(String(foreignKey), "==", value).limit(1);
+        const snapshot: QuerySnapshot = await q.get();
         if (snapshot.empty) return null;
         const doc = snapshot.docs[0];
         if (!doc) return null;
-        return returnDoc ? { data: doc.data(), doc } : { ...doc.data() };
+        const data = doc.data();
+        return returnDoc ? { data, doc } : { ...data, docId: doc.id };
       };
     });
 
@@ -488,77 +483,195 @@ export class RepositoryMapping<
         value: string,
         options: QueryOptions = {}
       ): Promise<any[]> => {
-        const constraints: any[] = [where(String(queryKey), "==", value)];
-
-        if (options.where) {
-          options.where.forEach((w) => {
-            constraints.push(where(String(w.field), w.operator, w.value));
-          });
-        }
-
-        // Handle OR conditions
-        if (options.orWhere && options.orWhere.length > 0) {
-          const orFilters = options.orWhere.map((orGroup) =>
-            filterAnd(
-              ...orGroup.map((w) =>
-                filterWhere(String(w.field), w.operator, w.value)
-              )
-            )
-          );
-          constraints.push(filterOr(...orFilters));
-        }
-
-        if (options.orderBy) {
-          options.orderBy.forEach((o) => {
-            constraints.push(orderBy(String(o.field), o.direction || "asc"));
-          });
-        }
-
-        if (options.limit) {
-          constraints.push(limit(options.limit));
-        }
-
-        const q = query(collectionRef, ...constraints);
-        const snapshot: QuerySnapshot<DocumentData> = await getDocs(q);
-        return snapshot.docs.map((doc) => ({ ...doc.data() }));
+        let q: Query = collectionRef as any;
+        q = q.where(String(queryKey), "==", value);
+        q = applyQueryOptions(q, options);
+        const snapshot: QuerySnapshot = await q.get();
+        return snapshot.docs.map((doc) => ({ ...doc.data(), docId: doc.id }));
       };
     });
 
-    // Add generic query.by method
-    queryMethods.by = async (options: QueryOptions): Promise<any[]> => {
-      const constraints: any[] = [];
-
+    // Helper function to apply query options
+    const applyQueryOptions = (q: Query, options: QueryOptions): Query => {
       if (options.where) {
         options.where.forEach((w) => {
-          constraints.push(where(String(w.field), w.operator, w.value));
+          q = q.where(String(w.field), w.operator, w.value);
         });
-      }
-
-      // Gestion des conditions OR
-      if (options.orWhere && options.orWhere.length > 0) {
-        const orFilters = options.orWhere.map((orGroup) =>
-          filterAnd(
-            ...orGroup.map((w) =>
-              filterWhere(String(w.field), w.operator, w.value)
-            )
-          )
-        );
-        constraints.push(filterOr(...orFilters));
       }
 
       if (options.orderBy) {
         options.orderBy.forEach((o) => {
-          constraints.push(orderBy(String(o.field), o.direction || "asc"));
+          q = q.orderBy(String(o.field), o.direction || "asc");
         });
       }
 
       if (options.limit) {
-        constraints.push(limit(options.limit));
+        q = q.limit(options.limit);
       }
 
-      const q = query(collectionRef, ...constraints);
-      const snapshot: QuerySnapshot<DocumentData> = await getDocs(q);
-      return snapshot.docs.map((doc) => ({ ...doc.data() }));
+      if (options.offset) {
+        q = q.offset(options.offset);
+      }
+
+      // Cursor-based pagination
+      if (options.startAt) {
+        q = Array.isArray(options.startAt)
+          ? q.startAt(...options.startAt)
+          : q.startAt(options.startAt);
+      }
+
+      if (options.startAfter) {
+        q = Array.isArray(options.startAfter)
+          ? q.startAfter(...options.startAfter)
+          : q.startAfter(options.startAfter);
+      }
+
+      if (options.endAt) {
+        q = Array.isArray(options.endAt)
+          ? q.endAt(...options.endAt)
+          : q.endAt(options.endAt);
+      }
+
+      if (options.endBefore) {
+        q = Array.isArray(options.endBefore)
+          ? q.endBefore(...options.endBefore)
+          : q.endBefore(options.endBefore);
+      }
+
+      return q;
+    };
+
+    // Add generic query.by method
+    queryMethods.by = async (options: QueryOptions): Promise<any[]> => {
+      let q: Query = collectionRef as any;
+      q = applyQueryOptions(q, options);
+      const snapshot: QuerySnapshot = await q.get();
+      return snapshot.docs.map((doc) => ({ ...doc.data(), docId: doc.id }));
+    };
+
+    // Add getAll method to retrieve all documents from the collection
+    queryMethods.getAll = async (
+      options: QueryOptions = {}
+    ): Promise<any[]> => {
+      let q: Query = collectionRef as any;
+      q = applyQueryOptions(q, options);
+      const snapshot: QuerySnapshot = await q.get();
+      return snapshot.docs.map((doc) => ({ ...doc.data(), docId: doc.id }));
+    };
+
+    // Add onSnapshot method for real-time listeners
+    queryMethods.onSnapshot = (
+      options: QueryOptions,
+      onNext: (data: any[]) => void,
+      onError?: (error: Error) => void
+    ): (() => void) => {
+      let q: Query = collectionRef as any;
+      q = applyQueryOptions(q, options);
+
+      return q.onSnapshot((snapshot) => {
+        const data = snapshot.docs.map((doc) => ({
+          ...doc.data(),
+          docId: doc.id,
+        }));
+        onNext(data);
+      }, onError);
+    };
+
+    // Add pagination methods
+    queryMethods.paginate = async (options: PaginationOptions<any>) => {
+      return executePaginatedQuery(collectionRef as Query, options);
+    };
+
+    queryMethods.paginateAll = (
+      options: Omit<PaginationOptions<any>, "cursor" | "direction">
+    ) => {
+      return createPaginationIterator(collectionRef as Query, options);
+    };
+
+    // Aggregate methods for server-side computations
+    const aggregateMethods = {
+      // Count documents matching query options
+      count: async (options: QueryOptions = {}): Promise<number> => {
+        let q: Query = collectionRef as any;
+        q = applyQueryOptions(q, options);
+        const snapshot = await q.count().get();
+        return snapshot.data().count;
+      },
+
+      // Sum of a numeric field
+      sum: async (
+        field: string,
+        options: QueryOptions = {}
+      ): Promise<number> => {
+        let q: Query = collectionRef as any;
+        q = applyQueryOptions(q, options);
+        const snapshot = await q.get();
+
+        let total = 0;
+        snapshot.forEach((doc) => {
+          const value = doc.data()[field];
+          if (typeof value === "number") {
+            total += value;
+          }
+        });
+
+        return total;
+      },
+
+      // Average of a numeric field
+      average: async (
+        field: string,
+        options: QueryOptions = {}
+      ): Promise<number | null> => {
+        let q: Query = collectionRef as any;
+        q = applyQueryOptions(q, options);
+        const snapshot = await q.get();
+
+        if (snapshot.empty) return null;
+
+        let total = 0;
+        let count = 0;
+
+        snapshot.forEach((doc) => {
+          const value = doc.data()[field];
+          if (typeof value === "number") {
+            total += value;
+            count++;
+          }
+        });
+
+        return count > 0 ? total / count : null;
+      },
+    };
+
+    // Create method - adds a new document with auto-generated ID
+    const create = async (data: any): Promise<any> => {
+      if (!actualCollection) {
+        throw new Error(
+          "Cannot use create() on collection groups. Use set() with a specific document ID instead."
+        );
+      }
+      const docRef = await actualCollection.add(data);
+      const createdDoc = await docRef.get();
+      return { ...createdDoc.data(), docId: docRef.id };
+    };
+
+    // Set method - creates or replaces a document
+    const set = async (...args: any[]): Promise<any> => {
+      const lastArg = args[args.length - 1];
+      const hasOptions =
+        typeof lastArg === "object" && lastArg !== null && "merge" in lastArg;
+
+      const data = hasOptions ? args[args.length - 2] : args[args.length - 1];
+      const pathArgs = hasOptions ? args.slice(0, -2) : args.slice(0, -1);
+      const mergeOption = hasOptions ? lastArg : { merge: true };
+
+      const docRef = documentRef(...pathArgs);
+      await docRef.set(data, mergeOption);
+
+      // Fetch and return the set document
+      const setDocument = await docRef.get();
+      return { ...setDocument.data(), docId: docRef.id };
     };
 
     // Update method that uses documentRef and returns the merged object
@@ -567,30 +680,49 @@ export class RepositoryMapping<
       const pathArgs = args; // Rest are path arguments
 
       const docRef = documentRef(...pathArgs);
-      await updateDoc(docRef, data);
+      await docRef.update(data);
 
       // Fetch and return the updated object
-      const updatedDoc = await getDoc(docRef);
-      return updatedDoc.data();
+      const updatedDoc = await docRef.get();
+      return { ...updatedDoc.data(), docId: docRef.id };
+    };
+
+    // Delete method - removes a document
+    const deleteMethod = async (...args: any[]): Promise<void> => {
+      const docRef = documentRef(...args);
+      await docRef.delete();
     };
 
     // Batch methods for atomic operations
     const batchMethods = {
       create: () => {
-        const batch = writeBatch(db);
+        const batch = this.db.batch();
         return {
           batch,
-          set: (
-            docRef: DocumentReference<DocumentData>,
-            data: any,
-            merge = true
-          ) => {
-            batch.set(docRef, data, { merge });
+          set: (...args: any[]) => {
+            const lastArg = args[args.length - 1];
+            const hasOptions =
+              typeof lastArg === "object" &&
+              lastArg !== null &&
+              "merge" in lastArg;
+
+            const data = hasOptions
+              ? args[args.length - 2]
+              : args[args.length - 1];
+            const pathArgs = hasOptions ? args.slice(0, -2) : args.slice(0, -1);
+            const mergeOption = hasOptions ? lastArg : { merge: true };
+
+            const docRef = documentRef(...pathArgs);
+            batch.set(docRef, data, mergeOption);
           },
-          update: (docRef: DocumentReference<DocumentData>, data: any) => {
+          update: (...args: any[]) => {
+            const data = args.pop();
+            const pathArgs = args;
+            const docRef = documentRef(...pathArgs);
             batch.update(docRef, data);
           },
-          delete: (docRef: DocumentReference<DocumentData>) => {
+          delete: (...args: any[]) => {
+            const docRef = documentRef(...args);
             batch.delete(docRef);
           },
           commit: async () => {
@@ -600,60 +732,145 @@ export class RepositoryMapping<
       },
     };
 
-    // Bulk methods for processing large quantities (max 500 per batch)
+    // Transaction methods for atomic read-write operations
+    const transactionMethods = {
+      run: async <R>(
+        updateFunction: (transaction: any) => Promise<R>
+      ): Promise<R> => {
+        return this.db.runTransaction(async (rawTransaction) => {
+          // Create a typed transaction wrapper
+          const typedTransaction = {
+            // Type-safe get method
+            get: async (...args: any[]) => {
+              const docRef = documentRef(...args);
+              const docSnap = (await rawTransaction.get(docRef)) as any;
+              if (!docSnap.exists) return null;
+              return { ...docSnap.data(), docId: docSnap.id } as any;
+            },
+
+            // Type-safe set method
+            set: (...args: any[]) => {
+              const options = args[args.length - 1];
+              const hasOptions =
+                typeof options === "object" &&
+                options !== null &&
+                "merge" in options;
+
+              const data = hasOptions
+                ? args[args.length - 2]
+                : args[args.length - 1];
+              const pathArgs = hasOptions
+                ? args.slice(0, -2)
+                : args.slice(0, -1);
+              const mergeOption = hasOptions ? options : { merge: true };
+
+              const docRef = documentRef(...pathArgs);
+              rawTransaction.set(docRef, data, mergeOption);
+            },
+
+            // Type-safe update method
+            update: (...args: any[]) => {
+              const data = args[args.length - 1];
+              const pathArgs = args.slice(0, -1);
+              const docRef = documentRef(...pathArgs);
+              rawTransaction.update(docRef, data);
+            },
+
+            // Delete method
+            delete: (...args: any[]) => {
+              const docRef = documentRef(...args);
+              rawTransaction.delete(docRef);
+            },
+
+            // Access to raw transaction if needed
+            raw: rawTransaction,
+          };
+
+          return updateFunction(typedTransaction);
+        });
+      },
+    };
+
+    // Bulk methods using BulkWriter with manual flush every 500 operations
     const bulkMethods = {
       set: async (
         items: Array<{
-          docRef: DocumentReference<DocumentData>;
+          docRef: DocumentReference;
           data: any;
           merge?: boolean;
         }>
       ) => {
-        const chunks = chunkArray(items, 500); // Firestore limits batches to 500 operations
+        const bulkWriter = this.db.bulkWriter();
+        let pendingOps = 0;
 
-        for (const chunk of chunks) {
-          const batch = writeBatch(db);
-          chunk.forEach(({ docRef, data, merge = true }) => {
-            batch.set(docRef, data, { merge });
-          });
-          await batch.commit();
+        for (const item of items) {
+          if (!item) continue;
+          const { docRef, data, merge = true } = item;
+          bulkWriter.set(docRef, data, { merge });
+          pendingOps++;
+
+          // Flush every 500 operations to control memory usage
+          if (pendingOps >= 500) {
+            await bulkWriter.flush();
+            pendingOps = 0;
+          }
         }
+
+        await bulkWriter.close();
       },
 
       update: async (
-        items: Array<{ docRef: DocumentReference<DocumentData>; data: any }>
+        items: Array<{ docRef: DocumentReference; data: any }>
       ) => {
-        const chunks = chunkArray(items, 500);
+        const bulkWriter = this.db.bulkWriter();
+        let pendingOps = 0;
 
-        for (const chunk of chunks) {
-          const batch = writeBatch(db);
-          chunk.forEach(({ docRef, data }) => {
-            batch.update(docRef, data);
-          });
-          await batch.commit();
+        for (const item of items) {
+          if (!item) continue;
+          const { docRef, data } = item;
+          bulkWriter.update(docRef, data);
+          pendingOps++;
+
+          if (pendingOps >= 500) {
+            await bulkWriter.flush();
+            pendingOps = 0;
+          }
         }
+
+        await bulkWriter.close();
       },
 
-      delete: async (docRefs: DocumentReference<DocumentData>[]) => {
-        const chunks = chunkArray(docRefs, 500);
+      delete: async (docRefs: DocumentReference[]) => {
+        const bulkWriter = this.db.bulkWriter();
+        let pendingOps = 0;
 
-        for (const chunk of chunks) {
-          const batch = writeBatch(db);
-          chunk.forEach((docRef) => {
-            batch.delete(docRef);
-          });
-          await batch.commit();
+        for (const docRef of docRefs) {
+          if (!docRef) continue;
+          bulkWriter.delete(docRef);
+          pendingOps++;
+
+          if (pendingOps >= 500) {
+            await bulkWriter.flush();
+            pendingOps = 0;
+          }
         }
+
+        await bulkWriter.close();
       },
     };
 
     return {
       ref: collectionRef,
       documentRef,
+      create,
+      set,
       update,
+      delete: deleteMethod,
       get: getMethods,
       query: queryMethods,
+      aggregate: aggregateMethods,
       batch: batchMethods,
+      transaction: transactionMethods,
       bulk: bulkMethods,
     } as unknown as ConfiguredRepository<T[K]>;
   }
@@ -662,18 +879,24 @@ export class RepositoryMapping<
 /**
  * Helper function to create a RepositoryMapping instance with full typing
  * @template T - Record of repository configurations
+ * @param db - Firestore instance from firebase-admin
  * @param mapping - Repository configurations
  * @returns RepositoryMapping instance with repository access via getters
  * @example
  * ```typescript
- * const repos = createRepositoryMapping({
+ * import * as admin from 'firebase-admin';
+ *
+ * admin.initializeApp();
+ * const db = admin.firestore();
+ *
+ * const repos = createRepositoryMapping(db, {
  *   users: createRepositoryConfig({
  *     path: "users",
  *     isGroup: false,
  *     foreignKeys: ["docId", "email"] as const,
  *     queryKeys: ["isActive"] as const,
  *     type: {} as UserModel,
- *     refCb: (db, docId: string) => doc(db, "users", docId),
+ *     refCb: (db, docId: string) => db.collection("users").doc(docId),
  *   }),
  * });
  *
@@ -682,9 +905,10 @@ export class RepositoryMapping<
  * ```
  */
 export function createRepositoryMapping<T extends Record<string, any>>(
+  db: Firestore,
   mapping: T
 ): RepositoryMapping<T> & { [K in keyof T]: ConfiguredRepository<T[K]> } {
-  const instance = new RepositoryMapping(mapping);
+  const instance = new RepositoryMapping(db, mapping);
 
   // Create a Proxy to dynamically generate getters
   return new Proxy(instance, {

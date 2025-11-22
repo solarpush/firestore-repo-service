@@ -6,10 +6,14 @@ Un service de repository type-safe pour Firestore avec génération automatique 
 
 - 🎯 **Type-safe** : TypeScript avec inférence complète des types
 - 🚀 **Auto-génération** : Méthodes `get.by*` et `query.by*` générées automatiquement
-- 🔍 **Requêtes avancées** : Support des conditions OR, tri, pagination
+- 🔍 **Requêtes avancées** : Support des conditions OR, tri, pagination avec curseurs
 - 📦 **Opérations en masse** : Batch et bulk operations
 - 🏗️ **Collections et sous-collections** : Support complet
 - 💡 **API intuitive** : Accesseurs directs via getters
+- 📡 **Real-time** : Listeners `onSnapshot` pour les mises à jour en temps réel
+- 🔢 **Agrégations** : Count, sum, average avec support serveur
+- ✏️ **CRUD complet** : Create, set, update, delete avec types préservés
+- 🔄 **Transactions** : Opérations transactionnelles type-safe
 
 ## 📦 Installation
 
@@ -214,6 +218,10 @@ interface QueryOptions<T> {
   }[];
   limit?: number; // Nombre max de résultats
   offset?: number; // Pagination (skip)
+  startAt?: DocumentSnapshot | any[]; // Cursor pagination - start at
+  startAfter?: DocumentSnapshot | any[]; // Cursor pagination - start after
+  endAt?: DocumentSnapshot | any[]; // Cursor pagination - end at
+  endBefore?: DocumentSnapshot | any[]; // Cursor pagination - end before
 }
 ```
 
@@ -294,6 +302,168 @@ await repos.users.bulk.delete([
 ]);
 ```
 
+### Récupérer tous les documents
+
+```typescript
+// Récupère tous les documents de la collection
+const allUsers = await repos.users.query.getAll();
+
+// Avec des options de filtrage et tri
+const filteredUsers = await repos.users.query.getAll({
+  where: [{ field: "isActive", operator: "==", value: true }],
+  orderBy: [{ field: "createdAt", direction: "desc" }],
+  limit: 100,
+});
+```
+
+### Real-time listeners (onSnapshot)
+
+```typescript
+// Écouter les changements en temps réel
+const unsubscribe = repos.users.query.onSnapshot(
+  {
+    where: [{ field: "isActive", operator: "==", value: true }],
+    orderBy: [{ field: "name", direction: "asc" }],
+  },
+  (users) => {
+    console.log("Données mises à jour:", users);
+  },
+  (error) => {
+    console.error("Erreur:", error);
+  }
+);
+
+// Arrêter l'écoute
+unsubscribe();
+```
+
+### Pagination avec curseurs
+
+La pagination basée sur les curseurs est plus efficace que `offset` pour de grandes collections.
+
+```typescript
+// Première page
+const firstPage = await repos.users.query.by({
+  orderBy: [{ field: "createdAt", direction: "desc" }],
+  limit: 10,
+});
+
+// Page suivante en utilisant le dernier document
+const lastDoc = firstPage[firstPage.length - 1];
+const nextPage = await repos.users.query.by({
+  orderBy: [{ field: "createdAt", direction: "desc" }],
+  startAfter: lastDoc, // ou utiliser un tableau de valeurs
+  limit: 10,
+});
+
+// Exemple avec des valeurs
+const page = await repos.users.query.by({
+  orderBy: [{ field: "createdAt", direction: "desc" }],
+  startAfter: [new Date("2024-01-01")],
+  limit: 10,
+});
+```
+
+### CRUD complet
+
+```typescript
+// Create - Créer avec ID auto-généré
+const newUser = await repos.users.create({
+  email: "new@example.com",
+  name: "New User",
+  age: 25,
+  isActive: true,
+});
+console.log(newUser.docId); // ID auto-généré
+
+// Set - Créer ou remplacer complètement
+await repos.users.set("user123", {
+  email: "user@example.com",
+  name: "User",
+  age: 30,
+  isActive: true,
+});
+
+// Set avec merge - Fusion partielle
+await repos.users.set(
+  "user123",
+  { age: 31 }, // Seul 'age' sera modifié
+  { merge: true }
+);
+
+// Update - Mise à jour partielle
+const updated = await repos.users.update("user123", {
+  age: 32,
+  name: "Updated Name",
+});
+
+// Delete - Supprimer un document
+await repos.users.delete("user123");
+```
+
+### Transactions
+
+```typescript
+// Transaction avec méthodes type-safe
+const result = await repos.users.transaction.run(async (txn) => {
+  // Get document dans la transaction
+  const user = await txn.get(repos.users.documentRef("user123"));
+
+  if (user.exists()) {
+    const userData = user.data();
+
+    // Update dans la transaction
+    txn.update(repos.users.documentRef("user123"), {
+      age: userData.age + 1,
+    });
+
+    // Set dans la transaction
+    txn.set(repos.users.documentRef("user124"), {
+      email: "new@example.com",
+      name: "New User",
+    });
+
+    // Delete dans la transaction
+    txn.delete(repos.users.documentRef("user125"));
+  }
+
+  return { success: true };
+});
+
+// Accès à la transaction Firestore brute si nécessaire
+await repos.users.transaction.run(async (txn) => {
+  const rawTransaction = txn.raw;
+  // Utiliser rawTransaction avec l'API Firestore native
+});
+```
+
+### Agrégations
+
+```typescript
+import { count, sum, average } from "@lpdjs/firestore-repo-service";
+
+// Compter les documents
+const activeCount = await repos.users.aggregate.count({
+  where: [{ field: "isActive", operator: "==", value: true }],
+});
+
+// Agrégations personnalisées (count, sum, average)
+const stats = await repos.users.aggregate.query(
+  {
+    totalUsers: count(),
+    totalAge: sum("age"),
+    averageAge: average("age"),
+  },
+  {
+    where: [{ field: "isActive", operator: "==", value: true }],
+  }
+);
+
+console.log(stats.totalUsers); // nombre total
+console.log(stats.totalAge); // somme des âges
+console.log(stats.averageAge); // moyenne des âges
+```
+
 ### Accès à la collection Firestore
 
 ```typescript
@@ -371,6 +541,25 @@ import type {
   RepositoryModelType,
 } from "@lpdjs/firestore-repo-service";
 ```
+
+## 🧪 Tests avec l'émulateur
+
+Pour tester rapidement sans projet Firebase :
+
+```bash
+# 1. Installer Firebase CLI (si nécessaire)
+npm install -g firebase-tools
+
+# 2. Démarrer l'émulateur (terminal 1)
+bun run emulator
+
+# 3. Lancer les tests (terminal 2)
+bun run test:emulator
+```
+
+L'émulateur Firestore démarre sur `localhost:8080` avec une UI sur `http://localhost:4000`.
+
+Voir `test/README.md` pour plus de détails.
 
 ## 📝 Licence
 

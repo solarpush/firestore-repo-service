@@ -1,10 +1,17 @@
 /**
- * Exemple d'utilisation du package firestore-repo-service
+ * Exemple d'utilisation du package firestore-repo-service avec firebase-admin
  */
 
-import type { Firestore } from "firebase/firestore";
-import { doc } from "firebase/firestore";
+import * as admin from "firebase-admin";
+import type { Firestore } from "firebase-admin/firestore";
 import { createRepositoryConfig, createRepositoryMapping } from "./index";
+
+// Initialiser Firebase Admin
+admin.initializeApp({
+  // Votre configuration Firebase
+});
+
+const db = admin.firestore();
 
 // 1. Définir vos modèles TypeScript
 interface UserModel {
@@ -44,7 +51,7 @@ const myRepositoryMapping = {
     queryKeys: ["name", "isActive"] as const,
     type: {} as UserModel,
     refCb: (db: Firestore, docId: string) => {
-      return doc(db, "users", docId);
+      return db.collection("users").doc(docId);
     },
   }),
 
@@ -56,7 +63,7 @@ const myRepositoryMapping = {
     queryKeys: ["status", "publishedAt"] as const,
     type: {} as PostModel,
     refCb: (db: Firestore, docId: string) => {
-      return doc(db, "posts", docId);
+      return db.collection("posts").doc(docId);
     },
   }),
 
@@ -68,13 +75,17 @@ const myRepositoryMapping = {
     queryKeys: ["postId", "userId"] as const,
     type: {} as CommentModel,
     refCb: (db: Firestore, postId: string, commentId: string) => {
-      return doc(db, "posts", postId, "comments", commentId);
+      return db
+        .collection("posts")
+        .doc(postId)
+        .collection("comments")
+        .doc(commentId);
     },
   }),
 } as const;
 
 // 3. Créer l'instance du mapping avec getters automatiques
-const repos = createRepositoryMapping(myRepositoryMapping);
+const repos = createRepositoryMapping(db, myRepositoryMapping);
 
 // 4. Utiliser les repositories
 async function exemples() {
@@ -131,13 +142,8 @@ async function exemples() {
     limit: 50,
   });
 
-  // Recherche avec conditions OR
-  const publishedOrDraftPosts = await posts.query.by({
-    orWhere: [
-      [{ field: "status", operator: "==", value: "published" }],
-      [{ field: "status", operator: "==", value: "draft" }],
-    ],
-  });
+  // Recherche avec where simple
+  const draftPosts = await posts.query.byStatus("draft");
 
   // === UPDATE: Mettre à jour un document ===
 
@@ -163,16 +169,16 @@ async function exemples() {
 
   const batch = users.batch.create();
 
-  batch.set(users.documentRef("user1"), {
+  batch.set("user3", {
     name: "User One",
     email: "user1@example.com",
   });
 
-  batch.update(users.documentRef("user2"), {
+  batch.update("user3", {
     age: 25,
   });
 
-  batch.delete(users.documentRef("user3"));
+  batch.delete("user3");
 
   await batch.commit();
 
