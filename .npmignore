@@ -1,0 +1,28 @@
+# Source files
+*.ts
+!*.d.ts
+
+# Config files
+tsconfig.json
+.eslintrc*
+.prettierrc*
+
+# Development files
+example.ts
+*.test.ts
+*.spec.ts
+
+# Build artifacts
+node_modules/
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Misc
+*.log
+.env
+.env.*

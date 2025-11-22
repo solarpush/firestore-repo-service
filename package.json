@@ -1,0 +1,55 @@
+{
+  "name": "@lpdjs/firestore-repo-service",
+  "version": "1.0.0",
+  "description": "Type-safe Firestore repository service with automatic query and CRUD methods generation",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "bun run build",
+    "test": "bun test",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "firestore",
+    "firebase",
+    "repository",
+    "orm",
+    "typescript",
+    "type-safe",
+    "crud",
+    "database"
+  ],
+  "author": "LPDJS",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/solarpush/firestore-repo-service.git"
+  },
+  "bugs": {
+    "url": "https://github.com/solarpush/firestore-repo-service/issues"
+  },
+  "homepage": "https://github.com/solarpush/firestore-repo-service#readme",
+  "peerDependencies": {
+    "firebase": "^10.0.0 || ^11.0.0 || ^12.0.0 ",
+    "typescript": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "firebase": "^12.6.0",
+    "typescript": "^5.0.0"
+  }
+}

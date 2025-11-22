@@ -1,0 +1,385 @@
+# 🔥 Firestore Repository Service
+
+Un service de repository type-safe pour Firestore avec génération automatique des méthodes de requête et CRUD.
+
+## ✨ Fonctionnalités
+
+- 🎯 **Type-safe** : TypeScript avec inférence complète des types
+- 🚀 **Auto-génération** : Méthodes `get.by*` et `query.by*` générées automatiquement
+- 🔍 **Requêtes avancées** : Support des conditions OR, tri, pagination
+- 📦 **Opérations en masse** : Batch et bulk operations
+- 🏗️ **Collections et sous-collections** : Support complet
+- 💡 **API intuitive** : Accesseurs directs via getters
+
+## 📦 Installation
+
+```bash
+npm install @lpdjs/firestore-repo-service firebase
+# ou
+yarn add @lpdjs/firestore-repo-service firebase
+# ou
+bun add @lpdjs/firestore-repo-service firebase
+```
+
+## 🚀 Démarrage rapide
+
+### 1. Définir vos modèles
+
+```typescript
+interface UserModel {
+  docId: string;
+  email: string;
+  name: string;
+  age: number;
+  isActive: boolean;
+}
+
+interface PostModel {
+  docId: string;
+  userId: string;
+  title: string;
+  status: "draft" | "published";
+}
+```
+
+### 2. Créer votre mapping
+
+```typescript
+import {
+  createRepositoryConfig,
+  createRepositoryMapping,
+} from "@lpdjs/firestore-repo-service";
+import { doc } from "firebase/firestore";
+import type { Firestore } from "firebase/firestore";
+
+const repositoryMapping = {
+  users: createRepositoryConfig({
+    path: "users",
+    isGroup: false,
+    foreignKeys: ["docId", "email"] as const,
+    queryKeys: ["name", "isActive"] as const,
+    type: {} as UserModel,
+    refCb: (db: Firestore, docId: string) => doc(db, "users", docId),
+  }),
+
+  posts: createRepositoryConfig({
+    path: "posts",
+    isGroup: false,
+    foreignKeys: ["docId", "userId"] as const,
+    queryKeys: ["status"] as const,
+    type: {} as PostModel,
+    refCb: (db: Firestore, docId: string) => doc(db, "posts", docId),
+  }),
+} as const;
+
+export const repos = createRepositoryMapping(repositoryMapping);
+```
+
+### 3. Utiliser les repositories
+
+```typescript
+// Récupérer un document unique
+const user = await repos.users.get.byDocId("user123");
+const userByEmail = await repos.users.get.byEmail("john@example.com");
+
+// Rechercher des documents
+const activeUsers = await repos.users.query.byIsActive(true);
+
+// Recherche avec options
+const filteredUsers = await repos.users.query.byName("John", {
+  where: [{ field: "age", operator: ">=", value: 18 }],
+  orderBy: [{ field: "createdAt", direction: "desc" }],
+  limit: 10,
+});
+
+// Mettre à jour un document
+const updated = await repos.users.update("user123", {
+  name: "John Updated",
+  age: 31,
+});
+```
+
+## 📚 Guide complet
+
+### Configuration
+
+#### `createRepositoryConfig()`
+
+Configure un repository avec ses clés et méthodes.
+
+**Paramètres :**
+
+- `path` : Chemin de la collection dans Firestore
+- `isGroup` : `true` pour une collection group, `false` pour une collection simple
+- `foreignKeys` : Clés pour les méthodes `get.by*` (recherche unique)
+- `queryKeys` : Clés pour les méthodes `query.by*` (recherche multiple)
+- `type` : Type TypeScript du modèle
+- `refCb` : Fonction pour créer la référence du document
+
+**Exemple collection simple :**
+
+```typescript
+users: createRepositoryConfig({
+  path: "users",
+  isGroup: false,
+  foreignKeys: ["docId", "email"] as const,
+  queryKeys: ["isActive", "role"] as const,
+  type: {} as UserModel,
+  refCb: (db: Firestore, docId: string) => doc(db, "users", docId),
+});
+```
+
+**Exemple sous-collection :**
+
+```typescript
+comments: createRepositoryConfig({
+  path: "comments",
+  isGroup: true,
+  foreignKeys: ["docId"] as const,
+  queryKeys: ["postId", "userId"] as const,
+  type: {} as CommentModel,
+  refCb: (db: Firestore, postId: string, commentId: string) =>
+    doc(db, "posts", postId, "comments", commentId),
+});
+```
+
+### Méthodes GET
+
+Récupère un **document unique** par une clé étrangère.
+
+```typescript
+// Méthodes générées automatiquement depuis foreignKeys
+const user = await repos.users.get.byDocId("user123");
+const userByEmail = await repos.users.get.byEmail("john@example.com");
+
+// Avec le DocumentSnapshot
+const result = await repos.users.get.byDocId("user123", true);
+if (result) {
+  console.log(result.data); // UserModel
+  console.log(result.doc); // DocumentSnapshot
+}
+
+// Récupérer par liste de valeurs
+const users = await repos.users.get.byList("docId", [
+  "user1",
+  "user2",
+  "user3",
+]);
+```
+
+### Méthodes QUERY
+
+Recherche **plusieurs documents** par une clé de requête.
+
+```typescript
+// Méthodes générées automatiquement depuis queryKeys
+const activeUsers = await repos.users.query.byIsActive(true);
+const usersByName = await repos.users.query.byName("John");
+
+// Avec options
+const results = await repos.users.query.byIsActive(true, {
+  where: [{ field: "age", operator: ">=", value: 18 }],
+  orderBy: [{ field: "name", direction: "asc" }],
+  limit: 50,
+});
+
+// Requête générique
+const users = await repos.users.query.by({
+  where: [
+    { field: "isActive", operator: "==", value: true },
+    { field: "age", operator: ">=", value: 18 },
+  ],
+  orderBy: [{ field: "createdAt", direction: "desc" }],
+  limit: 10,
+});
+
+// Conditions OR
+const posts = await repos.posts.query.by({
+  orWhere: [
+    [{ field: "status", operator: "==", value: "published" }],
+    [{ field: "status", operator: "==", value: "draft" }],
+  ],
+});
+```
+
+### Options de requête
+
+```typescript
+interface QueryOptions<T> {
+  where?: WhereClause<T>[]; // Conditions AND
+  orWhere?: WhereClause<T>[][]; // Conditions OR
+  orderBy?: {
+    field: keyof T;
+    direction?: "asc" | "desc";
+  }[];
+  limit?: number; // Nombre max de résultats
+  offset?: number; // Pagination (skip)
+}
+```
+
+### Mise à jour
+
+```typescript
+// Met à jour et retourne le document mis à jour
+const updated = await repos.users.update("user123", {
+  name: "New Name",
+  age: 30,
+});
+
+// Pour sous-collections
+const updatedComment = await repos.comments.update(
+  "post123", // postId
+  "comment456", // commentId
+  { text: "Updated text" }
+);
+```
+
+### Références de documents
+
+```typescript
+const userRef = repos.users.documentRef("user123");
+const commentRef = repos.comments.documentRef("post123", "comment456");
+```
+
+### Opérations Batch
+
+Pour des opérations atomiques (max 500 opérations).
+
+```typescript
+const batch = repos.users.batch.create();
+
+batch.set(repos.users.documentRef("user1"), {
+  name: "User One",
+  email: "user1@example.com",
+});
+
+batch.update(repos.users.documentRef("user2"), {
+  age: 25,
+});
+
+batch.delete(repos.users.documentRef("user3"));
+
+await batch.commit();
+```
+
+### Opérations Bulk
+
+Pour traiter de grandes quantités (automatiquement divisées en batches de 500).
+
+```typescript
+// Set multiple
+await repos.users.bulk.set([
+  {
+    docRef: repos.users.documentRef("user1"),
+    data: { name: "User 1", email: "user1@example.com" },
+    merge: true,
+  },
+  {
+    docRef: repos.users.documentRef("user2"),
+    data: { name: "User 2", email: "user2@example.com" },
+  },
+  // ... jusqu'à des milliers de documents
+]);
+
+// Update multiple
+await repos.users.bulk.update([
+  { docRef: repos.users.documentRef("user1"), data: { age: 30 } },
+  { docRef: repos.users.documentRef("user2"), data: { age: 25 } },
+]);
+
+// Delete multiple
+await repos.users.bulk.delete([
+  repos.users.documentRef("user1"),
+  repos.users.documentRef("user2"),
+]);
+```
+
+### Accès à la collection Firestore
+
+```typescript
+// Référence brute si besoin
+const collectionRef = repos.users.ref;
+```
+
+## 🎯 Exemples avancés
+
+### Collection imbriquée complexe
+
+```typescript
+const repositoryMapping = {
+  eventRatings: createRepositoryConfig({
+    path: "ratings",
+    isGroup: true,
+    foreignKeys: ["docId"] as const,
+    queryKeys: ["eventId", "rating"] as const,
+    type: {} as RatingModel,
+    refCb: (
+      db: Firestore,
+      residenceId: string,
+      eventId: string,
+      ratingId: string
+    ) =>
+      doc(
+        db,
+        "residences",
+        residenceId,
+        "events",
+        eventId,
+        "ratings",
+        ratingId
+      ),
+  }),
+} as const;
+
+// Utilisation
+const rating = await repos.eventRatings.update(
+  "residence123",
+  "event456",
+  "rating789",
+  { score: 5 }
+);
+```
+
+### Recherche complexe avec OR
+
+```typescript
+// (status = 'active' AND age >= 18) OR (status = 'pending' AND verified = true)
+const users = await repos.users.query.by({
+  orWhere: [
+    [
+      { field: "status", operator: "==", value: "active" },
+      { field: "age", operator: ">=", value: 18 },
+    ],
+    [
+      { field: "status", operator: "==", value: "pending" },
+      { field: "verified", operator: "==", value: true },
+    ],
+  ],
+  orderBy: [{ field: "createdAt", direction: "desc" }],
+  limit: 100,
+});
+```
+
+## 🔧 Types exportés
+
+```typescript
+// Types utiles
+import type {
+  WhereClause,
+  QueryOptions,
+  RepositoryKey,
+  RepositoryModelType,
+} from "@lpdjs/firestore-repo-service";
+```
+
+## 📝 Licence
+
+MIT
+
+## 🤝 Contribution
+
+Les contributions sont les bienvenues ! N'hésitez pas à ouvrir une issue ou une pull request.
+
+## 📬 Support
+
+Pour toute question ou problème, ouvrez une issue sur GitHub.
