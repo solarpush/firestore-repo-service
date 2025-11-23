@@ -51,32 +51,40 @@ interface PostModel {
 ```typescript
 import {
   createRepositoryConfig,
+  buildRepositoryRelations,
   createRepositoryMapping,
 } from "@lpdjs/firestore-repo-service";
 import { doc } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 
+// 1. Définir la configuration de base
 const repositoryMapping = {
-  users: createRepositoryConfig({
+  users: createRepositoryConfig<UserModel>()({
     path: "users",
     isGroup: false,
     foreignKeys: ["docId", "email"] as const,
     queryKeys: ["name", "isActive"] as const,
-    type: {} as UserModel,
     refCb: (db: Firestore, docId: string) => doc(db, "users", docId),
   }),
 
-  posts: createRepositoryConfig({
+  posts: createRepositoryConfig<PostModel>()({
     path: "posts",
     isGroup: false,
     foreignKeys: ["docId", "userId"] as const,
     queryKeys: ["status"] as const,
-    type: {} as PostModel,
     refCb: (db: Firestore, docId: string) => doc(db, "posts", docId),
   }),
-} as const;
+};
 
-export const repos = createRepositoryMapping(repositoryMapping);
+// 2. Ajouter les relations (Optionnel)
+const mappingWithRelations = buildRepositoryRelations(repositoryMapping, {
+  posts: {
+    userId: { repo: "users", key: "docId", type: "one" as const },
+  },
+});
+
+// 3. Créer le service
+export const repos = createRepositoryMapping(db, mappingWithRelations);
 ```
 
 ### 3. Utiliser les repositories
@@ -88,6 +96,13 @@ const userByEmail = await repos.users.get.byEmail("john@example.com");
 
 // Rechercher des documents
 const activeUsers = await repos.users.query.byIsActive(true);
+
+// Relations (Populate)
+const post = await repos.posts.get.byDocId("post123");
+if (post) {
+  const postWithUser = await repos.posts.populate(post, "userId");
+  console.log(postWithUser.populated.users?.name); // Type-safe!
+}
 
 // Recherche avec options
 const filteredUsers = await repos.users.query.byName("John", {
@@ -123,12 +138,11 @@ Configure un repository avec ses clés et méthodes.
 **Exemple collection simple :**
 
 ```typescript
-users: createRepositoryConfig({
+users: createRepositoryConfig<UserModel>()({
   path: "users",
   isGroup: false,
   foreignKeys: ["docId", "email"] as const,
   queryKeys: ["isActive", "role"] as const,
-  type: {} as UserModel,
   refCb: (db: Firestore, docId: string) => doc(db, "users", docId),
 });
 ```
@@ -136,12 +150,11 @@ users: createRepositoryConfig({
 **Exemple sous-collection :**
 
 ```typescript
-comments: createRepositoryConfig({
+comments: createRepositoryConfig<CommentModel>()({
   path: "comments",
   isGroup: true,
   foreignKeys: ["docId"] as const,
   queryKeys: ["postId", "userId"] as const,
-  type: {} as CommentModel,
   refCb: (db: Firestore, postId: string, commentId: string) =>
     doc(db, "posts", postId, "comments", commentId),
 });
@@ -477,12 +490,11 @@ const collectionRef = repos.users.ref;
 
 ```typescript
 const repositoryMapping = {
-  eventRatings: createRepositoryConfig({
+  eventRatings: createRepositoryConfig<RatingModel>()({
     path: "ratings",
     isGroup: true,
     foreignKeys: ["docId"] as const,
     queryKeys: ["eventId", "rating"] as const,
-    type: {} as RatingModel,
     refCb: (
       db: Firestore,
       residenceId: string,
@@ -499,7 +511,7 @@ const repositoryMapping = {
         ratingId
       ),
   }),
-} as const;
+};
 
 // Utilisation
 const rating = await repos.eventRatings.update(
