@@ -12,8 +12,8 @@ export type {
   ExtractUpdateSignature,
   GetResult,
   QueryOptions,
-  RelationConfig,
   RelationalKeys,
+  RelationConfig,
   RepositoryConfig,
   WhereClause,
 } from "./src/shared/types";
@@ -50,55 +50,163 @@ import type { RelationConfig, RepositoryConfig } from "./src/shared/types";
 
 /**
  * Helper to create a typed repository configuration with literal type preservation
+ * Uses currying pattern to allow type parameter inference
  * @template T - The data model type
- * @template TForeignKeys - Readonly array of foreign keys
- * @template TQueryKeys - Readonly array of query keys
- * @template TIsGroup - Boolean indicating if it's a collection group
- * @template TRefCb - Type of the reference callback function
- * @param config - Repository configuration object
- * @returns Configured repository with typed methods
+ * @returns Builder function that accepts repository configuration with withRelations method
  * @example
  * ```typescript
- * const usersRepo = createRepositoryConfig({
- *   path: "users",
- *   isGroup: false,
- *   foreignKeys: ["docId", "email"] as const,
- *   queryKeys: ["isActive"] as const,
- *   type: {} as UserModel,
- *   refCb: (db, docId: string) => db.collection("users").doc(docId),
- * });
+ * const mapping = {
+ *   users: createRepositoryConfig<UserModel>()({
+ *     path: "users",
+ *     foreignKeys: ["docId", "email"] as const,
+ *     queryKeys: ["isActive"] as const,
+ *     refCb: (db, docId: string) => db.collection("users").doc(docId),
+ *   }),
+ *   posts: createRepositoryConfig<PostModel>()({
+ *     path: "posts",
+ *     foreignKeys: ["docId", "userId"] as const,
+ *     queryKeys: ["status"] as const,
+ *     refCb: (db, docId: string) => db.collection("posts").doc(docId),
+ *   }).withRelations<typeof mapping>()({
+ *     userId: { repo: "users", key: "docId", type: "one" as const }
+ *   })
+ * };
  * ```
  */
-export function createRepositoryConfig<
-  T,
-  const TForeignKeys extends readonly (keyof T)[],
-  const TQueryKeys extends readonly (keyof T)[],
-  const TIsGroup extends boolean,
-  TRefCb = undefined,
-  const TRelationalKeys extends {
-    [K in keyof TRelationalKeys]: K extends keyof T ? RelationConfig : never;
-  } = {}
->(config: {
-  path: string;
-  isGroup: TIsGroup;
-  foreignKeys: TForeignKeys;
-  queryKeys: TQueryKeys;
-  type: T;
-  refCb: TRefCb;
-  relationalKeys?: TRelationalKeys;
-}): RepositoryConfig<
-  T,
-  TForeignKeys,
-  TQueryKeys,
-  TIsGroup,
-  TRefCb,
-  TRelationalKeys
-> {
-  return {
-    ...config,
-    documentRef: null as any, // Will be created in factory
-    update: null as any, // Will be created in factory
-  } as any;
+export function createRepositoryConfig<T>() {
+  return <
+    const TForeignKeys extends readonly (keyof T)[],
+    const TQueryKeys extends readonly (keyof T)[],
+    const TIsGroup extends boolean,
+    TRefCb = undefined
+  >(config: {
+    path: string;
+    isGroup: TIsGroup;
+    foreignKeys: TForeignKeys;
+    queryKeys: TQueryKeys;
+    refCb: TRefCb;
+  }): RepositoryConfig<T, TForeignKeys, TQueryKeys, TIsGroup, TRefCb, {}> => {
+    return {
+      ...config,
+      type: null as any as T,
+      documentRef: null as any,
+      update: null as any,
+    } as any;
+  };
+}
+
+/**
+ * Helper type to resolve a single relation configuration
+ * Extracts the target model type from the mapping
+ */
+type ResolveRelation<TMapping, TRelationConfig> = TRelationConfig extends {
+  repo: infer R;
+  key: infer FK;
+  type: infer RT;
+}
+  ? R extends keyof TMapping
+    ? TMapping[R] extends { type: infer TTarget }
+      ? RelationConfig<R & string, FK & string, RT & ("one" | "many"), TTarget>
+      : never
+    : never
+  : never;
+
+/**
+ * Helper to add relations to a repository mapping with full type validation
+ * Validates that repo names and foreign keys exist in the mapping
+ * @template TMapping - The complete repository mapping for validation
+ * @template TRelations - Relations configuration with strict typing
+ * @param mapping - The base repository mapping
+ * @param relations - Relations configuration for each repository
+ * @returns Updated mapping with relations and full type safety
+ * @example
+ * ```typescript
+ * const mapping = {
+ *   users: createRepositoryConfig<UserModel>()({ ... }),
+ *   posts: createRepositoryConfig<PostModel>()({ ... }),
+ * };
+ *
+ * const mappingWithRelations = buildRepositoryRelations(mapping, {
+ *   posts: {
+ *     userId: { repo: "users", key: "docId", type: "one" as const }
+ *   }
+ * });
+ *
+ * const repos = createRepositoryMapping(db, mappingWithRelations);
+ * ```
+ */
+export function buildRepositoryRelations<
+  TMapping extends Record<string, any>,
+  const TRelations extends {
+    [K in keyof TMapping]?: TMapping[K] extends RepositoryConfig<
+      infer T,
+      any,
+      any,
+      any,
+      any,
+      any
+    >
+      ? {
+          [RK in keyof T]?: {
+            [R in keyof TMapping]: TMapping[R] extends RepositoryConfig<
+              infer TTargetModel,
+              infer TForeignKeys,
+              any,
+              any,
+              any,
+              any
+            >
+              ? {
+                  repo: R;
+                  key: TForeignKeys[number];
+                  type: "one" | "many";
+                }
+              : never;
+          }[keyof TMapping];
+        }
+      : never;
+  }
+>(
+  mapping: TMapping,
+  relations: TRelations
+): {
+  [K in keyof TMapping]: K extends keyof TRelations
+    ? TMapping[K] extends RepositoryConfig<
+        infer T,
+        infer TForeignKeys,
+        infer TQueryKeys,
+        infer TIsGroup,
+        infer TRefCb,
+        any
+      >
+      ? RepositoryConfig<
+          T,
+          TForeignKeys,
+          TQueryKeys,
+          TIsGroup,
+          TRefCb,
+          {
+            [RK in keyof TRelations[K]]: ResolveRelation<
+              TMapping,
+              TRelations[K][RK]
+            >;
+          }
+        >
+      : TMapping[K]
+    : TMapping[K];
+} {
+  const result: any = { ...mapping };
+
+  for (const repoKey in relations) {
+    if (relations[repoKey]) {
+      result[repoKey] = {
+        ...mapping[repoKey],
+        relationalKeys: relations[repoKey],
+      };
+    }
+  }
+
+  return result as any;
 }
 
 // ============================================
@@ -180,12 +288,11 @@ export class RepositoryMapping<T extends Record<string, any>> {
  * const db = admin.firestore();
  *
  * const repos = createRepositoryMapping(db, {
- *   users: createRepositoryConfig({
+ *   users: createRepositoryConfig<UserModel>()({
  *     path: "users",
  *     isGroup: false,
  *     foreignKeys: ["docId", "email"] as const,
  *     queryKeys: ["isActive"] as const,
- *     type: {} as UserModel,
  *     refCb: (db, docId: string) => db.collection("users").doc(docId),
  *   }),
  * });

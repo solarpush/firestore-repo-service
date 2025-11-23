@@ -70,15 +70,18 @@ export type GetResult<T, ReturnDoc extends boolean> = ReturnDoc extends true
  * @template TRepoKey - Target repository name (key from mapping)
  * @template TForeignKey - Target foreign key name
  * @template TType - Relation type: "one" for one-to-one, "many" for one-to-many
+ * @template TTargetModel - Type of the target model (inferred from mapping)
  */
 export interface RelationConfig<
   TRepoKey extends string = string,
   TForeignKey extends string = string,
-  TType extends "one" | "many" = "one" | "many"
+  TType extends "one" | "many" = "one" | "many",
+  TTargetModel = any
 > {
   repo: TRepoKey;
   key: TForeignKey;
   type: TType;
+  targetType?: TTargetModel;
 }
 
 /**
@@ -127,7 +130,7 @@ export interface RepositoryConfig<
   TQueryKeys extends readonly (keyof T)[],
   TIsGroup extends boolean = boolean,
   TRefCb = any,
-  TRelationalKeys extends RelationalKeys<T> = {}
+  TRelationalKeys = {}
 > {
   path: string;
   isGroup: TIsGroup;

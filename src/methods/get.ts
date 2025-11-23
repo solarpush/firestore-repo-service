@@ -1,4 +1,9 @@
-import type { Query, QuerySnapshot } from "firebase-admin/firestore";
+import type {
+  CollectionReference,
+  DocumentReference,
+  Query,
+  QuerySnapshot,
+} from "firebase-admin/firestore";
 import { capitalize, chunkArray } from "../shared/utils";
 
 /**
@@ -6,7 +11,9 @@ import { capitalize, chunkArray } from "../shared/utils";
  */
 export function createGetMethods(
   collectionRef: Query,
-  foreignKeys: readonly string[]
+  foreignKeys: readonly string[],
+  actualCollection: CollectionReference | null,
+  documentRef: (...args: any[]) => DocumentReference
 ) {
   const getMethods: any = {};
 
@@ -43,6 +50,16 @@ export function createGetMethods(
       value: string,
       returnDoc = false
     ): Promise<any | null> => {
+      // Special case: if foreignKey is "docId", use direct document reference
+      if (String(foreignKey) === "docId") {
+        const docRef = documentRef(value);
+        const doc = await docRef.get();
+        if (!doc.exists) return null;
+        const data = doc.data();
+        return returnDoc ? { data, doc } : { ...data, docId: doc.id };
+      }
+
+      // For other keys, query by field value
       let q: Query = collectionRef as any;
       q = q.where(String(foreignKey), "==", value).limit(1);
       const snapshot: QuerySnapshot = await q.get();

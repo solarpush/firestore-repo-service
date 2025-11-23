@@ -19,11 +19,34 @@ import type {
 } from "../shared/types";
 
 /**
+ * Helper type to extract populated data structure from a single relation
+ * @internal
+ */
+type ExtractPopulatedFromRelation<TRelation> = TRelation extends RelationConfig<
+  infer TRepo,
+  any,
+  infer TType,
+  infer TTargetModel
+>
+  ? { [P in TRepo]: TType extends "one" ? TTargetModel | null : TTargetModel[] }
+  : Record<string, never>;
+
+/**
+ * Helper type to merge multiple populated objects into one
+ * @internal
+ */
+type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (
+  k: infer I
+) => void
+  ? I
+  : never;
+
+/**
  * Generates get.by* methods from foreign keys
  * @internal
  */
 export type GenerateGetMethods<
-  TConfig extends RepositoryConfig<any, any, any, any>
+  TConfig extends RepositoryConfig<any, any, any, any, any, any>
 > = {
   [K in TConfig["foreignKeys"][number] as K extends string
     ? `by${Capitalize<K>}`
@@ -38,7 +61,7 @@ export type GenerateGetMethods<
  * @internal
  */
 export type GenerateQueryMethods<
-  TConfig extends RepositoryConfig<any, any, any, any>
+  TConfig extends RepositoryConfig<any, any, any, any, any, any>
 > = {
   [K in TConfig["queryKeys"][number] as K extends string
     ? `by${Capitalize<K>}`
@@ -52,7 +75,7 @@ export type GenerateQueryMethods<
  * Configured repository with organized methods
  */
 export type ConfiguredRepository<
-  T extends RepositoryConfig<any, any, any, any>
+  T extends RepositoryConfig<any, any, any, any, any, any>
 > = {
   ref: CollectionReference | Query;
 
@@ -167,19 +190,16 @@ export type ConfiguredRepository<
     delete: (docRefs: DocumentReference[]) => Promise<void>;
   };
 
-  populate: <
-    K extends keyof NonNullable<T["relationalKeys"]>,
-    TRelation extends NonNullable<T["relationalKeys"]>[K]
-  >(
+  populate: <K extends keyof NonNullable<T["relationalKeys"]>>(
     document: T["type"],
     relationKey: K | K[]
   ) => Promise<
     T["type"] & {
-      [R in K]: TRelation extends RelationConfig
-        ? TRelation["type"] extends "one"
-          ? any | null
-          : any[]
-        : never;
+      populated: UnionToIntersection<
+        K extends keyof NonNullable<T["relationalKeys"]>
+          ? ExtractPopulatedFromRelation<NonNullable<T["relationalKeys"]>[K]>
+          : Record<string, never>
+      >;
     }
   >;
 };

@@ -38,7 +38,9 @@ export function createRepository<
   // Create all method groups
   const getMethods = createGetMethods(
     collectionRef as Query,
-    config.foreignKeys
+    config.foreignKeys,
+    actualCollection,
+    documentRef
   );
   const queryMethods = createQueryMethods(
     collectionRef as Query,
