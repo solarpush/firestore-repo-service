@@ -18,11 +18,11 @@ Un service de repository type-safe pour Firestore avec génération automatique 
 ## 📦 Installation
 
 ```bash
-npm install @lpdjs/firestore-repo-service firebase
+npm install @lpdjs/firestore-repo-service firebase-admin
 # ou
-yarn add @lpdjs/firestore-repo-service firebase
+yarn add @lpdjs/firestore-repo-service firebase-admin
 # ou
-bun add @lpdjs/firestore-repo-service firebase
+bun add @lpdjs/firestore-repo-service firebase-admin
 ```
 
 ## 🚀 Démarrage rapide
