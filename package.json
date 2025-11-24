@@ -23,6 +23,16 @@
     "README.md",
     "LICENSE"
   ],
+  "authors": [
+    {
+      "name": "@LPDJS Pierre Nicolas",
+      "email": "pierre@lpdjs.fr"
+    }
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "build": "tsup",
     "prepublishOnly": "bun run build",
