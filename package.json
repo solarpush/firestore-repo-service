@@ -1,15 +1,21 @@
 {
   "name": "@lpdjs/firestore-repo-service",
   "version": "1.0.0",
-  "description": "Type-safe Firestore repository service with automatic query and CRUD methods generation",
+  "description": "⚡ Type-safe Firestore ORM with auto-generated repositories, advanced queries, and zero boilerplate, includes pagination, transaction and relations support.",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      },
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     }
   },
   "files": [
@@ -18,9 +24,11 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsup",
     "prepublishOnly": "bun run build",
     "test": "bun test",
+    "test:emulator": "bun run test/emulator-test.ts",
+    "emulator": "firebase emulators:start --only firestore",
     "lint": "tsc --noEmit"
   },
   "keywords": [
@@ -44,12 +52,13 @@
   },
   "homepage": "https://github.com/solarpush/firestore-repo-service#readme",
   "peerDependencies": {
-    "firebase": "^10.0.0 || ^11.0.0 || ^12.0.0 ",
+    "firebase-admin": "^11.0.0 || ^12.0.0 || ^13.0.0",
     "typescript": "^5.0.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "firebase": "^12.6.0",
+    "firebase-admin": "^13.6.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.0.0"
   }
 }
