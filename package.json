@@ -50,7 +50,7 @@
   "bugs": {
     "url": "https://github.com/solarpush/firestore-repo-service/issues"
   },
-  "homepage": "https://github.com/solarpush/firestore-repo-service#readme",
+  "homepage": "https://frs.lpdjs.fr",
   "peerDependencies": {
     "firebase-admin": "^11.0.0 || ^12.0.0 || ^13.0.0",
     "typescript": "^5.0.0"

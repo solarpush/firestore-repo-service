@@ -1,0 +1,53 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frs-docs-root
+  namespace: storage
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    nginx.ingress.kubernetes.io/rewrite-target: /lpdjs/frs/index.html
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - frs.lpdjs.fr
+      secretName: frs-docs-secret
+  rules:
+    - host: frs.lpdjs.fr
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: my-minio
+                port:
+                  number: 9000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frs-docs-assets
+  namespace: storage
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    nginx.ingress.kubernetes.io/proxy-body-size: "2000m"
+    nginx.ingress.kubernetes.io/rewrite-target: /lpdjs/frs/$1
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - frs.lpdjs.fr
+      secretName: frs-docs-secret
+  rules:
+    - host: frs.lpdjs.fr
+      http:
+        paths:
+          - path: /(.+)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: my-minio
+                port:
+                  number: 9000

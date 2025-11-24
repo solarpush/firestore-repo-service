@@ -1,6 +1,12 @@
 # 🔥 Firestore Repository Service
 
+[![Documentation](https://img.shields.io/badge/Documentation-Online-blue?style=for-the-badge&logo=read-the-docs)](https://frs.lpdjs.fr)
+[![npm version](https://img.shields.io/npm/v/@lpdjs/firestore-repo-service?style=for-the-badge)](https://www.npmjs.com/package/@lpdjs/firestore-repo-service)
+[![License](https://img.shields.io/npm/l/@lpdjs/firestore-repo-service?style=for-the-badge)](https://github.com/solarpush/firestore-repo-service/blob/master/LICENSE)
+
 Un service de repository type-safe pour Firestore avec génération automatique des méthodes de requête et CRUD.
+
+📚 **Documentation complète disponible sur [frs.lpdjs.fr](https://frs.lpdjs.fr)**
 
 ## ✨ Fonctionnalités
 

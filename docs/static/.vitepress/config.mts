@@ -9,6 +9,7 @@ export default defineConfig({
       { text: "Home", link: "/" },
       { text: "Guide", link: "/guide/getting-started" },
     ],
+    logo: "https://frs.lpdjs.fr/lpdjs/Logo.png",
 
     sidebar: [
       {
