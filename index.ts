@@ -85,7 +85,18 @@ export function createRepositoryConfig<T>() {
     foreignKeys: TForeignKeys;
     queryKeys: TQueryKeys;
     refCb: TRefCb;
-  }): RepositoryConfig<T, TForeignKeys, TQueryKeys, TIsGroup, TRefCb, {}> => {
+    autoFields?: {
+      [K in keyof T]?: (docRef: any) => T[K];
+    };
+  }): RepositoryConfig<
+    T,
+    TForeignKeys,
+    TQueryKeys,
+    TIsGroup,
+    TRefCb,
+    {},
+    any
+  > => {
     return {
       ...config,
       type: null as any as T,
@@ -144,6 +155,7 @@ export function buildRepositoryRelations<
       any,
       any,
       any,
+      any,
       any
     >
       ? {
@@ -151,6 +163,7 @@ export function buildRepositoryRelations<
             [R in keyof TMapping]: TMapping[R] extends RepositoryConfig<
               infer TTargetModel,
               infer TForeignKeys,
+              any,
               any,
               any,
               any,
@@ -177,7 +190,8 @@ export function buildRepositoryRelations<
         infer TQueryKeys,
         infer TIsGroup,
         infer TRefCb,
-        any
+        any,
+        infer TAutoFields
       >
       ? RepositoryConfig<
           T,
@@ -190,7 +204,8 @@ export function buildRepositoryRelations<
               TMapping,
               TRelations[K][RK]
             >;
-          }
+          },
+          TAutoFields
         >
       : TMapping[K]
     : TMapping[K];

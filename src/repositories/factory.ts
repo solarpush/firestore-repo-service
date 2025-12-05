@@ -40,14 +40,20 @@ export function createRepository<
     collectionRef as Query,
     config.foreignKeys,
     actualCollection,
-    documentRef
+    documentRef,
+    config.autoFields
   );
   const queryMethods = createQueryMethods(
     collectionRef as Query,
-    config.queryKeys
+    config.queryKeys,
+    config.autoFields
   );
   const aggregateMethods = createAggregateMethods(collectionRef as Query);
-  const crudMethods = createCrudMethods(actualCollection, documentRef);
+  const crudMethods = createCrudMethods(
+    actualCollection,
+    documentRef,
+    config.autoFields
+  );
   const batchMethods = createBatchMethods(db, documentRef);
   const transactionMethods = createTransactionMethods(db, documentRef);
   const bulkMethods = createBulkMethods(db);

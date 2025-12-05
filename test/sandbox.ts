@@ -55,6 +55,9 @@ const repositoryMapping = {
     foreignKeys: ["docId", "email"] as const,
     queryKeys: ["name", "isActive"] as const,
     refCb: (db: Firestore, docId: string) => db.collection("users").doc(docId),
+    autoFields: {
+      docId: (docRef) => docRef.id,
+    },
   }),
 
   posts: createRepositoryConfig<PostModel>()({

@@ -1,14 +1,40 @@
-import type { CollectionReference } from "firebase-admin/firestore";
+import type {
+  CollectionReference,
+  DocumentReference,
+} from "firebase-admin/firestore";
+
+/**
+ * Injects auto-generated fields into the result
+ */
+function injectAutoFields<T>(
+  data: any,
+  docRef: DocumentReference,
+  autoFields?: { [K in keyof T]?: (docRef: DocumentReference) => T[K] }
+): T {
+  const result = { ...data };
+
+  if (autoFields) {
+    for (const field in autoFields) {
+      const generator = autoFields[field as keyof T];
+      if (generator) {
+        result[field] = generator(docRef);
+      }
+    }
+  }
+
+  return result as T;
+}
 
 /**
  * Creates CRUD methods (create, set, update, delete)
  */
-export function createCrudMethods(
+export function createCrudMethods<T>(
   actualCollection: CollectionReference | null,
-  documentRef: (...args: any[]) => any
+  documentRef: (...args: any[]) => any,
+  autoFields?: { [K in keyof T]?: (docRef: DocumentReference) => T[K] }
 ) {
   // Create - adds a new document with auto-generated ID
-  const create = async (data: any): Promise<any> => {
+  const create = async (data: any): Promise<T> => {
     if (!actualCollection) {
       throw new Error(
         "Cannot use create() on collection groups. Use set() with a specific document ID instead."
@@ -16,11 +42,11 @@ export function createCrudMethods(
     }
     const docRef = await actualCollection.add(data);
     const createdDoc = await docRef.get();
-    return { ...createdDoc.data(), docId: docRef.id };
+    return injectAutoFields<T>(createdDoc.data(), docRef, autoFields);
   };
 
   // Set - creates or replaces a document
-  const set = async (...args: any[]): Promise<any> => {
+  const set = async (...args: any[]): Promise<T> => {
     const lastArg = args[args.length - 1];
     const hasOptions =
       typeof lastArg === "object" && lastArg !== null && "merge" in lastArg;
@@ -33,11 +59,11 @@ export function createCrudMethods(
     await docRef.set(data, mergeOption);
 
     const setDocument = await docRef.get();
-    return { ...setDocument.data(), docId: docRef.id };
+    return injectAutoFields<T>(setDocument.data(), docRef, autoFields);
   };
 
   // Update - updates a document and returns the merged object
-  const update = async (...args: any[]): Promise<any> => {
+  const update = async (...args: any[]): Promise<T> => {
     const data = args.pop();
     const pathArgs = args;
 
@@ -45,7 +71,7 @@ export function createCrudMethods(
     await docRef.update(data);
 
     const updatedDoc = await docRef.get();
-    return { ...updatedDoc.data(), docId: docRef.id };
+    return injectAutoFields<T>(updatedDoc.data(), docRef, autoFields);
   };
 
   // Delete - removes a document

@@ -1,4 +1,8 @@
-import type { Query, QuerySnapshot } from "firebase-admin/firestore";
+import type {
+  DocumentReference,
+  Query,
+  QuerySnapshot,
+} from "firebase-admin/firestore";
 import {
   createPaginationIterator,
   executePaginatedQuery,
@@ -6,6 +10,28 @@ import {
 } from "../pagination";
 import type { QueryOptions } from "../shared/types";
 import { capitalize } from "../shared/utils";
+
+/**
+ * Injects auto-generated fields into the result
+ */
+function injectAutoFields<T>(
+  data: any,
+  docRef: DocumentReference,
+  autoFields?: { [K in keyof T]?: (docRef: DocumentReference) => T[K] }
+): T {
+  const result = { ...data };
+
+  if (autoFields) {
+    for (const field in autoFields) {
+      const generator = autoFields[field as keyof T];
+      if (generator) {
+        result[field] = generator(docRef);
+      }
+    }
+  }
+
+  return result as T;
+}
 
 /**
  * Apply query options to a Firestore query
@@ -62,9 +88,10 @@ export function applyQueryOptions(q: Query, options: QueryOptions): Query {
 /**
  * Creates query.by* methods for query keys
  */
-export function createQueryMethods(
+export function createQueryMethods<T>(
   collectionRef: Query,
-  queryKeys: readonly string[]
+  queryKeys: readonly string[],
+  autoFields?: { [K in keyof T]?: (docRef: DocumentReference) => T[K] }
 ) {
   const queryMethods: any = {};
 
@@ -74,45 +101,50 @@ export function createQueryMethods(
     queryMethods[methodName] = async (
       value: string,
       options: QueryOptions = {}
-    ): Promise<any[]> => {
+    ): Promise<T[]> => {
       let q: Query = collectionRef as any;
       q = q.where(String(queryKey), "==", value);
       q = applyQueryOptions(q, options);
       const snapshot: QuerySnapshot = await q.get();
-      return snapshot.docs.map((doc) => ({ ...doc.data(), docId: doc.id }));
+      return snapshot.docs.map((doc) =>
+        injectAutoFields<T>(doc.data(), doc.ref, autoFields)
+      );
     };
   });
 
   // Generic query.by method
-  queryMethods.by = async (options: QueryOptions): Promise<any[]> => {
+  queryMethods.by = async (options: QueryOptions): Promise<T[]> => {
     let q: Query = collectionRef as any;
     q = applyQueryOptions(q, options);
     const snapshot: QuerySnapshot = await q.get();
-    return snapshot.docs.map((doc) => ({ ...doc.data(), docId: doc.id }));
+    return snapshot.docs.map((doc) =>
+      injectAutoFields<T>(doc.data(), doc.ref, autoFields)
+    );
   };
 
   // getAll - retrieve all documents
-  queryMethods.getAll = async (options: QueryOptions = {}): Promise<any[]> => {
+  queryMethods.getAll = async (options: QueryOptions = {}): Promise<T[]> => {
     let q: Query = collectionRef as any;
     q = applyQueryOptions(q, options);
     const snapshot: QuerySnapshot = await q.get();
-    return snapshot.docs.map((doc) => ({ ...doc.data(), docId: doc.id }));
+    return snapshot.docs.map((doc) =>
+      injectAutoFields<T>(doc.data(), doc.ref, autoFields)
+    );
   };
 
   // onSnapshot - real-time listener
   queryMethods.onSnapshot = (
     options: QueryOptions,
-    onNext: (data: any[]) => void,
+    onNext: (data: T[]) => void,
     onError?: (error: Error) => void
   ): (() => void) => {
     let q: Query = collectionRef as any;
     q = applyQueryOptions(q, options);
 
     return q.onSnapshot((snapshot) => {
-      const data = snapshot.docs.map((doc) => ({
-        ...doc.data(),
-        docId: doc.id,
-      }));
+      const data = snapshot.docs.map((doc) =>
+        injectAutoFields<T>(doc.data(), doc.ref, autoFields)
+      );
       onNext(data);
     }, onError);
   };

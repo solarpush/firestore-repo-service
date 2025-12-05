@@ -7,13 +7,36 @@ import type {
 import { capitalize, chunkArray } from "../shared/utils";
 
 /**
+ * Injects auto-generated fields into the result
+ */
+function injectAutoFields<T>(
+  data: any,
+  docRef: DocumentReference,
+  autoFields?: { [K in keyof T]?: (docRef: DocumentReference) => T[K] }
+): T {
+  const result = { ...data };
+
+  if (autoFields) {
+    for (const field in autoFields) {
+      const generator = autoFields[field as keyof T];
+      if (generator) {
+        result[field] = generator(docRef);
+      }
+    }
+  }
+
+  return result as T;
+}
+
+/**
  * Creates get.by* methods for foreign keys
  */
-export function createGetMethods(
+export function createGetMethods<T>(
   collectionRef: Query,
   foreignKeys: readonly string[],
   actualCollection: CollectionReference | null,
-  documentRef: (...args: any[]) => DocumentReference
+  documentRef: (...args: any[]) => DocumentReference,
+  autoFields?: { [K in keyof T]?: (docRef: DocumentReference) => T[K] }
 ) {
   const getMethods: any = {};
 
@@ -23,10 +46,10 @@ export function createGetMethods(
     values: any[],
     operator: "in" | "array-contains-any" = "in",
     returnDoc = false
-  ): Promise<any[]> => {
+  ): Promise<T[]> => {
     if (values.length === 0) return [];
 
-    const results: any[] = [];
+    const results: T[] = [];
     const chunks = chunkArray(values, 30); // Firestore limits 'in' to 30 elements
 
     for (const chunk of chunks) {
@@ -36,7 +59,11 @@ export function createGetMethods(
 
       snapshot.forEach((doc) => {
         const data = doc.data();
-        results.push(returnDoc ? { data, doc } : { ...data, docId: doc.id });
+        results.push(
+          returnDoc
+            ? { data, doc }
+            : injectAutoFields<T>(data, doc.ref, autoFields)
+        );
       });
     }
 
@@ -49,14 +76,19 @@ export function createGetMethods(
     getMethods[methodName] = async (
       value: string,
       returnDoc = false
-    ): Promise<any | null> => {
-      // Special case: if foreignKey is "docId", use direct document reference
-      if (String(foreignKey) === "docId") {
+    ): Promise<T | null> => {
+      // Special case: if foreignKey is "docId" or "documentId", use direct document reference
+      if (
+        String(foreignKey) === "docId" ||
+        String(foreignKey) === "documentId"
+      ) {
         const docRef = documentRef(value);
         const doc = await docRef.get();
         if (!doc.exists) return null;
         const data = doc.data();
-        return returnDoc ? { data, doc } : { ...data, docId: doc.id };
+        return returnDoc
+          ? { data, doc }
+          : injectAutoFields<T>(data, doc.ref, autoFields);
       }
 
       // For other keys, query by field value
@@ -67,7 +99,9 @@ export function createGetMethods(
       const doc = snapshot.docs[0];
       if (!doc) return null;
       const data = doc.data();
-      return returnDoc ? { data, doc } : { ...data, docId: doc.id };
+      return returnDoc
+        ? { data, doc }
+        : injectAutoFields<T>(data, doc.ref, autoFields);
     };
   });
 

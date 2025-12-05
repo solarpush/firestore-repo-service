@@ -123,6 +123,7 @@ export type RelationalKeys<T = any, TMapping = any> = {
  * @template TIsGroup - Whether this is a collection group query
  * @template TRefCb - Callback function signature for creating document references
  * @template TRelationalKeys - Relational keys mapping to other repositories
+ * @template TAutoFields - Auto-generated fields (like documentId, documentPath)
  */
 export interface RepositoryConfig<
   T,
@@ -130,7 +131,8 @@ export interface RepositoryConfig<
   TQueryKeys extends readonly (keyof T)[],
   TIsGroup extends boolean = boolean,
   TRefCb = any,
-  TRelationalKeys = {}
+  TRelationalKeys = {},
+  TAutoFields = any
 > {
   path: string;
   isGroup: TIsGroup;
@@ -139,6 +141,9 @@ export interface RepositoryConfig<
   type: T;
   refCb?: TRefCb;
   relationalKeys?: TRelationalKeys;
+  autoFields?: {
+    [K in keyof T]?: (docRef: DocumentReference) => T[K];
+  };
   documentRef: TRefCb extends undefined
     ? TIsGroup extends true
       ? (...pathSegments: string[]) => DocumentReference

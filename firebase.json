@@ -1,5 +1,21 @@
 {
+    "functions": {
+        "source": "test/functions",
+        "codebase": "default",
+        "runtime": "nodejs20",
+        "ignore": [
+            "node_modules",
+            ".git",
+            "firebase-debug.log",
+            "firebase-debug.*.log",
+            ".cache"
+        ]
+    },
     "emulators": {
+        "functions": {
+            "host": "127.0.0.1",
+            "port": 5001
+        },
         "firestore": {
             "host": "127.0.0.1",
             "port": 8080
