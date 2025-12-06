@@ -36,11 +36,14 @@ export function createPopulateMethods<
   config: TConfig,
   allRepositories: Record<string, any>
 ): {
-  populate: <K extends keyof NonNullable<TConfig["relationalKeys"]>>(
-    document: TConfig["type"],
+  populate: <
+    K extends keyof NonNullable<TConfig["relationalKeys"]>,
+    TDoc extends Pick<TConfig["type"], K>
+  >(
+    document: TDoc,
     relationKey: K | K[]
   ) => Promise<
-    TConfig["type"] & {
+    TDoc & {
       populated: UnionToIntersection<
         PopulatedData<NonNullable<TConfig["relationalKeys"]>, K>
       >;
