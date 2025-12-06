@@ -92,15 +92,15 @@ const repositoryMapping = {
 
   comments: createRepositoryConfig<CommentModel>()({
     path: "comments",
-    isGroup: false,
+    isGroup: true,
     foreignKeys: ["docId", "postId", "userId"] as const,
     queryKeys: ["postId", "userId"] as const,
     documentKey: "docId",
     pathKey: "documentPath",
     createdKey: "createdAt",
     updatedKey: "updatedAt",
-    refCb: (db: Firestore, docId: string) =>
-      db.collection("comments").doc(docId),
+    refCb: (db: Firestore, postId: string, docId: string) =>
+      db.collection("posts").doc(postId).collection("comments").doc(docId),
   }),
 };
 
@@ -176,7 +176,7 @@ export const server = onRequest(async (req, res) => {
         content: `This is comment number ${i} on the post.`,
         likes: i * 5,
       };
-      commentBatch.set(commentId, commentData);
+      commentBatch.set(firstPost.docId, commentId, commentData);
       commentsData.push({ docId: commentId, ...commentData });
     }
     await commentBatch.commit();
@@ -191,7 +191,13 @@ export const server = onRequest(async (req, res) => {
     console.log("Post Comments:", postComments);
 
     // 7. Récupération du user avec populate pour obtenir ses posts associés
-    const userWithPosts = await repos.users.populate(user, "docId");
+    const userWithPosts = await repos.users.populate(
+      { docId: user.docId },
+      {
+        relation: "docId",
+        select: ["docId", "title", "status"],
+      }
+    );
     console.log("User with populated posts:", userWithPosts);
     console.log("Populated posts data:", userWithPosts.populated.posts);
 
@@ -203,7 +209,7 @@ export const server = onRequest(async (req, res) => {
     // 9. Pagination des posts avec include pour récupérer les comments de chaque post
     const paginatedPostsWithComments = await repos.posts.query.paginate({
       pageSize: 10,
-      include: ["docId", "userId"], // Inclure comments ET user
+      include: ["docId", { relation: "userId", select: ["docId"] }], // Inclure comments ET user
     });
     console.log(
       "Paginated posts with comments and user:",

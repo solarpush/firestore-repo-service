@@ -8,6 +8,16 @@ import type {
 import { capitalize, chunkArray } from "../shared/utils";
 
 /**
+ * Options for get methods
+ */
+export interface GetOptions {
+  /** Fields to select (Firestore select) - reduces network transfer */
+  select?: string[];
+  /** Return the document snapshot along with data */
+  returnDoc?: boolean;
+}
+
+/**
  * Creates get.by* methods for foreign keys
  */
 export function createGetMethods<T>(
@@ -24,7 +34,7 @@ export function createGetMethods<T>(
     key: string,
     values: any[],
     operator: "in" | "array-contains-any" = "in",
-    returnDoc = false
+    options: GetOptions = {}
   ): Promise<T[] | { data: T; doc: DocumentSnapshot }[]> => {
     if (values.length === 0) return [];
 
@@ -34,11 +44,17 @@ export function createGetMethods<T>(
     for (const chunk of chunks) {
       let q: Query = collectionRef as any;
       q = q.where(key, operator, chunk);
+      
+      // Apply select if specified
+      if (options.select && options.select.length > 0) {
+        q = q.select(...options.select);
+      }
+      
       const snapshot: QuerySnapshot = await q.get();
 
       snapshot.forEach((doc) => {
         const data = doc.data() as T;
-        results.push(returnDoc ? { data, doc } : data);
+        results.push(options.returnDoc ? { data, doc } : data);
       });
     }
 
@@ -50,26 +66,36 @@ export function createGetMethods<T>(
     const methodName = `by${capitalize(String(foreignKey))}`;
     getMethods[methodName] = async (
       value: string,
-      returnDoc = false
+      options: GetOptions | boolean = {}
     ): Promise<T | { data: T; doc: DocumentSnapshot } | null> => {
+      // Handle legacy boolean returnDoc parameter
+      const opts: GetOptions =
+        typeof options === "boolean" ? { returnDoc: options } : options;
+
       // Special case: if foreignKey is the documentKey, use direct document reference
       if (String(foreignKey) === documentKey) {
         const docRef = documentRef(value);
         const doc = await docRef.get();
         if (!doc.exists) return null;
         const data = doc.data() as T;
-        return returnDoc ? { data, doc } : data;
+        return opts.returnDoc ? { data, doc } : data;
       }
 
       // For other keys, query by field value
       let q: Query = collectionRef as any;
       q = q.where(String(foreignKey), "==", value).limit(1);
+      
+      // Apply select if specified
+      if (opts.select && opts.select.length > 0) {
+        q = q.select(...opts.select);
+      }
+      
       const snapshot: QuerySnapshot = await q.get();
       if (snapshot.empty) return null;
       const doc = snapshot.docs[0];
       if (!doc) return null;
       const data = doc.data() as T;
-      return returnDoc ? { data, doc } : data;
+      return opts.returnDoc ? { data, doc } : data;
     };
   });
 

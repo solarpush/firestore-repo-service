@@ -123,6 +123,8 @@ export interface QueryOptions<T = any> {
   startAfter?: DocumentSnapshot | any[];
   endAt?: DocumentSnapshot | any[];
   endBefore?: DocumentSnapshot | any[];
+  /** Fields to select (Firestore select) - reduces network transfer */
+  select?: (keyof T | FieldPath<T>)[];
 }
 
 /**

@@ -9,12 +9,22 @@ import type { QueryOptions, RelationConfig } from "../shared/types";
 import { capitalize } from "../shared/utils";
 
 /**
+ * Include configuration for a relation with optional select
+ */
+export interface IncludeConfig {
+  /** The relation key to include */
+  relation: string;
+  /** Fields to select from the related documents (Firestore select) */
+  select?: string[];
+}
+
+/**
  * Options for pagination with include support
  */
 export interface PaginationWithIncludeOptions<T, TRelationKeys = string>
   extends PaginationOptions<T> {
-  /** Relations to include in results */
-  include?: TRelationKeys[];
+  /** Relations to include in results - can be relation keys or IncludeConfig objects */
+  include?: (TRelationKeys | IncludeConfig)[];
 }
 
 /**
@@ -39,6 +49,11 @@ export function applyQueryOptions(q: Query, options: QueryOptions): Query {
 
   if (options.offset) {
     q = q.offset(options.offset);
+  }
+
+  // Apply select if specified
+  if (options.select && options.select.length > 0) {
+    q = q.select(...options.select.map((f) => String(f)));
   }
 
   // Cursor-based pagination
@@ -85,18 +100,26 @@ export function createQueryMethods<T>(
    */
   const populateDocuments = async (
     documents: T[],
-    includeKeys: string[]
+    includeConfigs: (string | IncludeConfig)[]
   ): Promise<(T & { populated: Record<string, any> })[]> => {
-    if (!relationalKeys || !allRepositories || includeKeys.length === 0) {
+    if (!relationalKeys || !allRepositories || includeConfigs.length === 0) {
       return documents as any;
     }
+
+    // Normalize include configs
+    const normalizedConfigs: { key: string; select?: string[] }[] =
+      includeConfigs.map((config) =>
+        typeof config === "string"
+          ? { key: config }
+          : { key: config.relation, select: config.select }
+      );
 
     const results: (T & { populated: Record<string, any> })[] = [];
 
     for (const doc of documents) {
       const populated: Record<string, any> = {};
 
-      for (const key of includeKeys) {
+      for (const { key, select } of normalizedConfigs) {
         const relation = relationalKeys[key];
         if (!relation) continue;
 
@@ -109,12 +132,16 @@ export function createQueryMethods<T>(
           continue;
         }
 
+        // Build options with select if specified
+        const options = select ? { select } : {};
+
         try {
           if (relation.type === "one") {
             const getMethod = `by${capitalize(relation.key)}`;
             if (typeof targetRepo.get?.[getMethod] === "function") {
               populated[relation.repo] = await targetRepo.get[getMethod](
-                fieldValue
+                fieldValue,
+                options
               );
             } else {
               populated[relation.repo] = null;
@@ -123,7 +150,8 @@ export function createQueryMethods<T>(
             const queryMethod = `by${capitalize(relation.key)}`;
             if (typeof targetRepo.query?.[queryMethod] === "function") {
               populated[relation.repo] = await targetRepo.query[queryMethod](
-                fieldValue
+                fieldValue,
+                options
               );
             } else {
               populated[relation.repo] = [];

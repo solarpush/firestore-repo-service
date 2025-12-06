@@ -16,6 +16,41 @@ import type {
 } from "../shared/types";
 
 /**
+ * Extract the target model type from a relation config
+ * @internal
+ */
+type ExtractTargetModel<TRelation> = TRelation extends RelationConfig<
+  any,
+  any,
+  any,
+  infer TTargetModel
+>
+  ? TTargetModel
+  : never;
+
+/**
+ * Typed populate options with select based on target model keys
+ */
+export type PopulateOptionsTyped<
+  TRelationalKeys,
+  K extends keyof TRelationalKeys
+> =
+  | {
+      /** Single relation key to populate */
+      relation: K;
+      /** Fields to select for this relation (typed to target model) */
+      select?: (keyof ExtractTargetModel<TRelationalKeys[K]>)[];
+    }
+  | {
+      /** Multiple relation keys to populate */
+      relations: K | K[];
+      /** Fields to select per relation (keyed by relation key) */
+      select?: {
+        [P in K]?: (keyof ExtractTargetModel<TRelationalKeys[P]>)[];
+      };
+    };
+
+/**
  * Helper type to get the system keys (documentKey + pathKey + updatedKey) that should be excluded from updates
  * @internal
  */
@@ -258,11 +293,14 @@ export type ConfiguredRepository<
     delete: (docRefs: DocumentReference[]) => Promise<void>;
   };
 
-  populate: <K extends keyof NonNullable<T["relationalKeys"]>>(
-    document: T["type"],
-    relationKey: K | K[]
+  populate: <
+    K extends keyof NonNullable<T["relationalKeys"]>,
+    TDoc extends Pick<T["type"], K & keyof T["type"]>
+  >(
+    document: TDoc,
+    relationKeyOrOptions: K | K[] | PopulateOptions<K>
   ) => Promise<
-    T["type"] & {
+    TDoc & {
       populated: UnionToIntersection<
         K extends keyof NonNullable<T["relationalKeys"]>
           ? ExtractPopulatedFromRelation<NonNullable<T["relationalKeys"]>[K]>

@@ -28,7 +28,13 @@ export {
 export type { PaginationOptions, PaginationResult } from "./src/pagination";
 
 // Query with include
-export type { PaginationWithIncludeOptions } from "./src/methods/query";
+export type {
+  PaginationWithIncludeOptions,
+  IncludeConfig,
+} from "./src/methods/query";
+
+// Populate options
+export type { PopulateOptions } from "./src/methods/relations";
 
 // Query builder
 export { buildAndExecuteQuery } from "./src/query-builder";
