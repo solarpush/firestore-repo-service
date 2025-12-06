@@ -1,0 +1,59 @@
+{
+  "reports": [
+    {
+      "index": {
+        "name": "projects/demo-no-project/databases/(default)/collectionGroups/comments/indexes/_",
+        "queryScope": "COLLECTION_GROUP",
+        "fields": [
+          {
+            "fieldPath": "userId",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "__name__",
+            "order": "ASCENDING"
+          }
+        ]
+      },
+      "numQueries": "1"
+    },
+    {
+      "index": {
+        "name": "projects/demo-no-project/databases/(default)/collectionGroups/users/indexes/_",
+        "queryScope": "COLLECTION",
+        "fields": [
+          {
+            "fieldPath": "isActive",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "age",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "__name__",
+            "order": "ASCENDING"
+          }
+        ]
+      },
+      "numQueries": "1"
+    },
+    {
+      "index": {
+        "name": "projects/demo-no-project/databases/(default)/collectionGroups/comments/indexes/_",
+        "queryScope": "COLLECTION_GROUP",
+        "fields": [
+          {
+            "fieldPath": "postId",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "__name__",
+            "order": "ASCENDING"
+          }
+        ]
+      },
+      "numQueries": "2"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "name": "@lpdjs/firestore-repo-service",
-  "version": "1.0.0",
-  "description": "⚡ Type-safe Firestore ORM with auto-generated repositories, advanced queries, and zero boilerplate, includes pagination, transaction and relations support.",
+  "version": "2.0.1",
+  "description": "⚡ Type-safe Firestore ORM with auto-generated repositories, advanced queries, relations with typed select, pagination with include, batch/bulk operations, aggregations and transactions.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -35,28 +35,43 @@
   },
   "scripts": {
     "build": "tsup",
+    "build:docs": "bun run --cwd docs/static docs:build",
     "prepublishOnly": "bun run build",
-    "test": "bun test",
+    "test": "bun test test/repo.test.ts",
+    "test:watch": "concurrently --kill-others -n emu,test -c cyan,yellow \"bun run emulator\" \"wait-on tcp:8080 && bun test test/repo.test.ts --watch\"",
+    "test:run": "bun run test/run-tests.ts",
+    "test:start": "bun run test/run-tests.ts --start",
     "test:emulator": "bun run test/emulator-test.ts",
-    "emulator": "firebase emulators:start --only firestore",
-    "emulatorf": "firebase emulators:start --only firestore,functions",
+    "emulator": "firebase emulators:start --only firestore --project demo-no-project",
+    "emulatorf": "firebase emulators:start --only firestore,functions --project demo-no-project",
     "lint": "tsc --noEmit"
   },
   "keywords": [
     "firestore",
     "firebase",
+    "firebase-admin",
     "repository",
     "orm",
     "typescript",
     "type-safe",
     "crud",
-    "database"
+    "database",
+    "query-builder",
+    "pagination",
+    "relations",
+    "populate",
+    "batch",
+    "bulk",
+    "transactions",
+    "aggregations",
+    "subcollections",
+    "collection-group"
   ],
   "author": "LPDJS",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/solarpush/firestore-repo-service.git"
+    "url": "git+https://github.com/solarpush/firestore-repo-service.git"
   },
   "bugs": {
     "url": "https://github.com/solarpush/firestore-repo-service/issues"
@@ -68,10 +83,12 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "concurrently": "^9.2.1",
     "firebase-admin": "^13.6.0",
     "firebase-functions": "^7.0.0",
     "tsup": "^8.5.1",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "wait-on": "^9.0.3"
   },
   "dependencies": {}
 }

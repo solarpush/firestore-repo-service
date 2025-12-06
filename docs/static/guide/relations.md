@@ -76,6 +76,34 @@ console.log(postWithRelations.populated.users?.name);
 console.log(postWithRelations.populated.categories?.name);
 ```
 
+### Populate with Select (Field Projection)
+
+You can limit which fields are returned from the related documents using `select`. This is useful for reducing payload size.
+
+```typescript
+// Single relation with select
+const userWithPosts = await repos.users.populate(
+  { docId: user.docId },
+  {
+    relation: "docId",
+    select: ["docId", "title", "status"], // Type-safe: keyof PostModel
+  }
+);
+
+// Multiple relations with select per relation
+const postWithRelations = await repos.posts.populate(post, {
+  relations: ["userId", "categoryId"],
+  select: {
+    userId: ["docId", "name", "email"],
+    categoryId: ["docId", "name"],
+  },
+});
+```
+
+::: tip Type Safety
+The `select` array is typed to `keyof TargetModel`, so you get autocomplete and compile-time validation for the fields you can select.
+:::
+
 ### Populating Lists
 
 You can also populate documents from a list query.
@@ -89,6 +117,36 @@ for (const post of posts) {
 }
 ```
 
+### Pagination with Include
+
+For paginated queries, use `include` instead of `populate` to automatically populate relations for all results.
+
+```typescript
+// Basic include
+const page = await repos.posts.query.paginate({
+  pageSize: 10,
+  orderBy: [{ field: "createdAt", direction: "desc" }],
+  include: ["userId"], // Include author for each post
+});
+
+// Access populated data
+for (const post of page.data) {
+  console.log(post.title);
+  console.log(post.populated.users?.name); // Type-safe!
+}
+
+// Include with select (field projection)
+const pageWithSelect = await repos.posts.query.paginate({
+  pageSize: 10,
+  include: [
+    { relation: "userId", select: ["docId", "name", "email"] },
+    { relation: "docId", select: ["content"] }, // Comments
+  ],
+});
+```
+
+````
+
 ## Type Inference
 
 The `populate` method returns a new object type that includes a `populated` property. This property contains the resolved documents, keyed by the target repository name.
@@ -101,7 +159,7 @@ The `populate` method returns a new object type that includes a `populated` prop
 //     users: UserModel | null
 //   }
 // }
-```
+````
 
 If the relation type is `"many"`, the inferred type will be an array:
 
@@ -110,4 +168,52 @@ If the relation type is `"many"`, the inferred type will be an array:
 // populated: {
 //   comments: CommentModel[]
 // }
+```
+
+## Exported Types
+
+```typescript
+import type {
+  // Basic populate options (untyped select)
+  PopulateOptions,
+
+  // Typed populate options with keyof select
+  PopulateOptionsTyped,
+
+  // Basic include config for pagination
+  IncludeConfig,
+
+  // Typed include config with keyof select
+  IncludeConfigTyped,
+
+  // Pagination options with typed include
+  PaginationWithIncludeOptionsTyped,
+} from "@lpdjs/firestore-repo-service";
+```
+
+### PopulateOptionsTyped
+
+```typescript
+// Typed populate with select based on target model
+type PopulateOptionsTyped<TRelationalKeys, K extends keyof TRelationalKeys> =
+  | {
+      relation: K;
+      select?: (keyof ExtractTargetModel<TRelationalKeys[K]>)[];
+    }
+  | {
+      relations: K | K[];
+      select?: {
+        [P in K]?: (keyof ExtractTargetModel<TRelationalKeys[P]>)[];
+      };
+    };
+```
+
+### IncludeConfigTyped
+
+```typescript
+// Typed include for pagination with select
+type IncludeConfigTyped<TRelationalKeys, K extends keyof TRelationalKeys> = {
+  relation: K;
+  select?: (keyof ExtractTargetModel<TRelationalKeys[K]>)[];
+};
 ```

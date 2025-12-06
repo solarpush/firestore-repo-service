@@ -89,11 +89,26 @@ if (post) {
   console.log(postWithUser.populated.users?.name); // Type-safe!
 }
 
-// Query with options
+// Populate with select (field projection)
+const userWithPosts = await repos.users.populate(
+  { docId: user.docId },
+  {
+    relation: "docId",
+    select: ["docId", "title", "status"], // Type-safe: keyof PostModel
+  }
+);
+
+// Query with options (tuple syntax for where)
 const filteredUsers = await repos.users.query.byName("John", {
-  where: [{ field: "age", operator: ">=", value: 18 }],
+  where: [["age", ">=", 18]], // Tuple: [field, operator, value]
   orderBy: [{ field: "createdAt", direction: "desc" }],
   limit: 10,
+});
+
+// Query with select (projection)
+const userNames = await repos.users.query.by({
+  where: [["isActive", "==", true]],
+  select: ["docId", "name", "email"],
 });
 
 // Update a document

@@ -35,8 +35,10 @@ export function createBatchMethods(
 
           // Auto-populate documentKey, pathKey, createdKey and updatedKey
           const enrichedData = { ...data };
-          if (documentKey && pathArgs[0]) {
-            enrichedData[documentKey] = pathArgs[0];
+          // Use the last pathArg as documentKey (for subcollections, first args are parent IDs)
+          const docIdValue = pathArgs[pathArgs.length - 1];
+          if (documentKey && docIdValue) {
+            enrichedData[documentKey] = docIdValue;
           }
           if (pathKey) {
             enrichedData[pathKey] = docRef.path;
