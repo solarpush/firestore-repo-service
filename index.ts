@@ -27,10 +27,10 @@ export {
 } from "./src/pagination";
 export type { PaginationOptions, PaginationResult } from "./src/pagination";
 
-// Query with include
+// Query with include (legacy untyped versions)
 export type {
-  PaginationWithIncludeOptions,
   IncludeConfig,
+  PaginationWithIncludeOptions,
 } from "./src/methods/query";
 
 // Populate options
@@ -44,6 +44,9 @@ export type {
   ConfiguredRepository,
   GenerateGetMethods,
   GenerateQueryMethods,
+  IncludeConfigTyped,
+  PaginationWithIncludeOptionsTyped,
+  PopulateOptionsTyped,
 } from "./src/repositories/types";
 
 // ============================================

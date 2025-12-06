@@ -6,7 +6,6 @@ import type {
   Transaction,
   WriteBatch,
 } from "firebase-admin/firestore";
-import type { PaginationWithIncludeOptions } from "../methods/query";
 import type { createPaginationIterator, PaginationResult } from "../pagination";
 import type {
   GetResult,
@@ -49,6 +48,38 @@ export type PopulateOptionsTyped<
         [P in K]?: (keyof ExtractTargetModel<TRelationalKeys[P]>)[];
       };
     };
+
+/**
+ * Typed include config with select based on target model keys
+ */
+export type IncludeConfigTyped<
+  TRelationalKeys,
+  K extends keyof TRelationalKeys = keyof TRelationalKeys
+> = K extends keyof TRelationalKeys
+  ? {
+      /** The relation key to include */
+      relation: K;
+      /** Fields to select from the related documents (typed to target model) */
+      select?: (keyof ExtractTargetModel<TRelationalKeys[K]>)[];
+    }
+  : never;
+
+/**
+ * Typed pagination options with include support
+ */
+export interface PaginationWithIncludeOptionsTyped<
+  T,
+  TRelationalKeys,
+  K extends keyof TRelationalKeys = keyof TRelationalKeys
+> {
+  pageSize?: number;
+  cursor?: any;
+  orderBy?: { field: keyof T; direction?: "asc" | "desc" }[];
+  where?: [keyof T, any, any][];
+  select?: (keyof T)[];
+  /** Relations to include - can be relation keys or typed IncludeConfig */
+  include?: (K | IncludeConfigTyped<TRelationalKeys>)[];
+}
 
 /**
  * Helper type to get the system keys (documentKey + pathKey + updatedKey) that should be excluded from updates
@@ -192,7 +223,11 @@ export type ConfiguredRepository<
     paginate: <
       TIncludeKeys extends keyof NonNullable<T["relationalKeys"]> = never
     >(
-      options: PaginationWithIncludeOptions<T["type"], TIncludeKeys>
+      options: PaginationWithIncludeOptionsTyped<
+        T["type"],
+        NonNullable<T["relationalKeys"]>,
+        TIncludeKeys
+      >
     ) => Promise<
       [TIncludeKeys] extends [never]
         ? PaginationResult<T["type"]>
@@ -200,8 +235,9 @@ export type ConfiguredRepository<
     >;
     paginateAll: (
       options: Omit<
-        PaginationWithIncludeOptions<
+        PaginationWithIncludeOptionsTyped<
           T["type"],
+          NonNullable<T["relationalKeys"]>,
           keyof NonNullable<T["relationalKeys"]>
         >,
         "cursor" | "direction"
@@ -298,7 +334,10 @@ export type ConfiguredRepository<
     TDoc extends Pick<T["type"], K & keyof T["type"]>
   >(
     document: TDoc,
-    relationKeyOrOptions: K | K[] | PopulateOptions<K>
+    relationKeyOrOptions:
+      | K
+      | K[]
+      | PopulateOptionsTyped<NonNullable<T["relationalKeys"]>, K>
   ) => Promise<
     TDoc & {
       populated: UnionToIntersection<

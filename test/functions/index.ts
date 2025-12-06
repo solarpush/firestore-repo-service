@@ -219,7 +219,7 @@ export const server = onRequest(async (req, res) => {
     // 10. Pagination des comments avec include pour récupérer le post et l'user
     const paginatedCommentsWithRelations = await repos.comments.query.paginate({
       pageSize: 10,
-      include: ["postId", "userId"], // Inclure le post ET l'user
+      include: ["postId", { relation: "userId", select: ["email"] }], // Inclure le post ET l'user
     });
     console.log(
       "Paginated comments with post and user:",

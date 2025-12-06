@@ -44,12 +44,12 @@ export function createGetMethods<T>(
     for (const chunk of chunks) {
       let q: Query = collectionRef as any;
       q = q.where(key, operator, chunk);
-      
+
       // Apply select if specified
       if (options.select && options.select.length > 0) {
         q = q.select(...options.select);
       }
-      
+
       const snapshot: QuerySnapshot = await q.get();
 
       snapshot.forEach((doc) => {
@@ -84,12 +84,12 @@ export function createGetMethods<T>(
       // For other keys, query by field value
       let q: Query = collectionRef as any;
       q = q.where(String(foreignKey), "==", value).limit(1);
-      
+
       // Apply select if specified
       if (opts.select && opts.select.length > 0) {
         q = q.select(...opts.select);
       }
-      
+
       const snapshot: QuerySnapshot = await q.get();
       if (snapshot.empty) return null;
       const doc = snapshot.docs[0];
