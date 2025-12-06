@@ -144,12 +144,28 @@ export const server = onRequest(async (req, res) => {
     const userWithPosts = await repos.users.populate(user, "docId");
     console.log("User with populated posts:", userWithPosts);
     console.log("Populated posts data:", userWithPosts.populated.posts);
-    const paginated = await repos.users.query.paginate({ pageSize: 2 });
+
+    // 6. Pagination avec include pour récupérer les users avec leurs posts
+    const paginatedUsersWithPosts = await repos.users.query.paginate({
+      pageSize: 10,
+      include: ["docId"], // Inclure la relation docId -> posts
+    });
+    console.log("Paginated users with posts:", paginatedUsersWithPosts.data);
+
+    // 7. Pagination des posts avec include pour récupérer l'user de chaque post
+    const paginatedPostsWithUsers = await repos.posts.query.paginate({
+      pageSize: 10,
+      include: ["userId"], // Inclure la relation userId -> users
+    });
+    console.log("Paginated posts with users:", paginatedPostsWithUsers.data);
+
     res.json({
       message: "Success!",
       user: fetchedUser,
       posts: userPosts,
       userWithPopulatedPosts: userWithPosts,
+      paginatedUsersWithPosts: paginatedUsersWithPosts.data,
+      paginatedPostsWithUsers: paginatedPostsWithUsers.data,
     });
   } catch (error) {
     console.error("Error:", error);

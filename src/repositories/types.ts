@@ -6,11 +6,8 @@ import type {
   Transaction,
   WriteBatch,
 } from "firebase-admin/firestore";
-import type {
-  createPaginationIterator,
-  executePaginatedQuery,
-  PaginationOptions,
-} from "../pagination";
+import type { PaginationWithIncludeOptions } from "../methods/query";
+import type { createPaginationIterator, PaginationResult } from "../pagination";
 import type {
   GetResult,
   QueryOptions,
@@ -157,11 +154,23 @@ export type ConfiguredRepository<
       onNext: (data: T["type"][]) => void,
       onError?: (error: Error) => void
     ) => () => void;
-    paginate: (
-      options: PaginationOptions<T["type"]>
-    ) => ReturnType<typeof executePaginatedQuery<T["type"]>>;
+    paginate: <
+      TIncludeKeys extends keyof NonNullable<T["relationalKeys"]> = never
+    >(
+      options: PaginationWithIncludeOptions<T["type"], TIncludeKeys>
+    ) => Promise<
+      [TIncludeKeys] extends [never]
+        ? PaginationResult<T["type"]>
+        : PaginationResult<T["type"] & { populated: Record<string, any> }>
+    >;
     paginateAll: (
-      options: Omit<PaginationOptions<T["type"]>, "cursor" | "direction">
+      options: Omit<
+        PaginationWithIncludeOptions<
+          T["type"],
+          keyof NonNullable<T["relationalKeys"]>
+        >,
+        "cursor" | "direction"
+      >
     ) => ReturnType<typeof createPaginationIterator<T["type"]>>;
   };
 

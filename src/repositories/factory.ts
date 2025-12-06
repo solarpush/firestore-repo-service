@@ -45,7 +45,9 @@ export function createRepository<
   );
   const queryMethods = createQueryMethods(
     collectionRef as Query,
-    config.queryKeys
+    config.queryKeys,
+    config.relationalKeys as Record<string, any> | undefined,
+    allRepositories
   );
   const aggregateMethods = createAggregateMethods(collectionRef as Query);
   const crudMethods = createCrudMethods(
