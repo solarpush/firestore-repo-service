@@ -49,6 +49,17 @@ interface PostModel {
   updatedAt: Date;
 }
 
+interface CommentModel {
+  docId: string;
+  documentPath: string;
+  postId: string;
+  userId: string;
+  content: string;
+  likes: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // ============================================
 // Repository Configuration
 // ============================================
@@ -78,6 +89,19 @@ const repositoryMapping = {
     updatedKey: "updatedAt",
     refCb: (db: Firestore, docId: string) => db.collection("posts").doc(docId),
   }),
+
+  comments: createRepositoryConfig<CommentModel>()({
+    path: "comments",
+    isGroup: false,
+    foreignKeys: ["docId", "postId", "userId"] as const,
+    queryKeys: ["postId", "userId"] as const,
+    documentKey: "docId",
+    pathKey: "documentPath",
+    createdKey: "createdAt",
+    updatedKey: "updatedAt",
+    refCb: (db: Firestore, docId: string) =>
+      db.collection("comments").doc(docId),
+  }),
 };
 
 // Step 2: Build relations with full type validation
@@ -88,8 +112,14 @@ const repositoryMappingWithRelations = buildRepositoryRelations(
     users: {
       docId: { repo: "posts", key: "userId", type: "many" as const },
     },
-    // Un post appartient à un user (via userId → docId)
+    // Un post appartient à un user et a plusieurs comments
     posts: {
+      userId: { repo: "users", key: "docId", type: "one" as const },
+      docId: { repo: "comments", key: "postId", type: "many" as const },
+    },
+    // Un comment appartient à un post et à un user
+    comments: {
+      postId: { repo: "posts", key: "docId", type: "one" as const },
       userId: { repo: "users", key: "docId", type: "one" as const },
     },
   }
@@ -118,54 +148,87 @@ export const server = onRequest(async (req, res) => {
 
     // 3. Création de 5 posts associés à ce user via batch
     const postBatch = repos.posts.batch.create();
-    const postsData = [];
     for (let i = 1; i <= 5; i++) {
       const postId = `post-${i}-${Date.now()}`;
       const postData = {
         address: { street: `${i * 100} Main St`, city: "Anytown" },
         content: `This is post number ${i} by ${user.name}.`,
-        createdAt: new Date(),
         status: (i % 2 === 0 ? "published" : "draft") as "draft" | "published",
         title: `Post ${i}`,
         userId: user.docId,
         views: i * 10,
       };
       postBatch.set(postId, postData);
-      postsData.push({ docId: postId, ...postData });
     }
     await postBatch.commit();
-    console.log("Created Posts via batch:", postsData);
+    const firstPost = await repos.posts.get.byUserId(user.docId);
 
-    // 4. Récupération des posts par userId
+    if (!firstPost) {
+      throw new Error("No posts were created.");
+    }
+    const commentBatch = repos.comments.batch.create();
+    const commentsData = [];
+    for (let i = 1; i <= 3; i++) {
+      const commentId = `comment-${i}-${Date.now()}`;
+      const commentData = {
+        postId: firstPost?.docId,
+        userId: user.docId,
+        content: `This is comment number ${i} on the post.`,
+        likes: i * 5,
+      };
+      commentBatch.set(commentId, commentData);
+      commentsData.push({ docId: commentId, ...commentData });
+    }
+    await commentBatch.commit();
+    console.log("Created Comments via batch:", commentsData);
+
+    // 5. Récupération des posts par userId
     const userPosts = await repos.posts.get.byUserId(user.docId);
     console.log("User Posts:", userPosts);
 
-    // 5. Récupération du user avec populate pour obtenir ses posts associés
+    // 6. Récupération des comments par postId
+    const postComments = await repos.comments.get.byPostId(firstPost.docId);
+    console.log("Post Comments:", postComments);
+
+    // 7. Récupération du user avec populate pour obtenir ses posts associés
     const userWithPosts = await repos.users.populate(user, "docId");
     console.log("User with populated posts:", userWithPosts);
     console.log("Populated posts data:", userWithPosts.populated.posts);
 
-    // 6. Pagination avec include pour récupérer les users avec leurs posts
-    const paginatedUsersWithPosts = await repos.users.query.paginate({
-      pageSize: 10,
-      include: ["docId"], // Inclure la relation docId -> posts
-    });
-    console.log("Paginated users with posts:", paginatedUsersWithPosts.data);
+    // 8. Récupération d'un post avec ses comments via populate
+    const postWithComments = await repos.posts.populate(firstPost, "docId");
+    console.log("Post with populated comments:", postWithComments);
+    console.log("Populated comments:", postWithComments.populated.comments);
 
-    // 7. Pagination des posts avec include pour récupérer l'user de chaque post
-    const paginatedPostsWithUsers = await repos.posts.query.paginate({
+    // 9. Pagination des posts avec include pour récupérer les comments de chaque post
+    const paginatedPostsWithComments = await repos.posts.query.paginate({
       pageSize: 10,
-      include: ["userId"], // Inclure la relation userId -> users
+      include: ["docId", "userId"], // Inclure comments ET user
     });
-    console.log("Paginated posts with users:", paginatedPostsWithUsers.data);
+    console.log(
+      "Paginated posts with comments and user:",
+      paginatedPostsWithComments.data
+    );
+
+    // 10. Pagination des comments avec include pour récupérer le post et l'user
+    const paginatedCommentsWithRelations = await repos.comments.query.paginate({
+      pageSize: 10,
+      include: ["postId", "userId"], // Inclure le post ET l'user
+    });
+    console.log(
+      "Paginated comments with post and user:",
+      paginatedCommentsWithRelations.data
+    );
 
     res.json({
       message: "Success!",
       user: fetchedUser,
       posts: userPosts,
+      comments: postComments,
       userWithPopulatedPosts: userWithPosts,
-      paginatedUsersWithPosts: paginatedUsersWithPosts.data,
-      paginatedPostsWithUsers: paginatedPostsWithUsers.data,
+      postWithPopulatedComments: postWithComments,
+      paginatedPostsWithComments: paginatedPostsWithComments.data,
+      paginatedCommentsWithRelations: paginatedCommentsWithRelations.data,
     });
   } catch (error) {
     console.error("Error:", error);
