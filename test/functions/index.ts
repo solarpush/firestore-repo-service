@@ -46,6 +46,7 @@ interface PostModel {
   status: "draft" | "published";
   views: number;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 // ============================================
@@ -61,6 +62,8 @@ const repositoryMapping = {
     queryKeys: ["name", "isActive"] as const,
     documentKey: "docId",
     pathKey: "documentPath",
+    createdKey: "createdAt",
+    updatedKey: "updatedAt",
     refCb: (db: Firestore, docId: string) => db.collection("users").doc(docId),
   }),
 
@@ -71,6 +74,8 @@ const repositoryMapping = {
     queryKeys: ["status", "userId"] as const,
     documentKey: "docId",
     pathKey: "documentPath",
+    createdKey: "createdAt",
+    updatedKey: "updatedAt",
     refCb: (db: Firestore, docId: string) => db.collection("posts").doc(docId),
   }),
 };
@@ -98,11 +103,9 @@ export const server = onRequest(async (req, res) => {
     // 1. Création d'un user
     const user = await repos.users.create({
       age: 28,
-      createdAt: new Date(),
       email: "john.doe@example.com",
       isActive: true,
       name: "John Doe",
-      updatedAt: new Date(),
     });
 
     console.log("Created User:", user);
@@ -117,9 +120,8 @@ export const server = onRequest(async (req, res) => {
     const postBatch = repos.posts.batch.create();
     const postsData = [];
     for (let i = 1; i <= 5; i++) {
+      const postId = `post-${i}-${Date.now()}`;
       const postData = {
-        docId: `post-${i}-${Date.now()}`,
-        documentPath: "",
         address: { street: `${i * 100} Main St`, city: "Anytown" },
         content: `This is post number ${i} by ${user.name}.`,
         createdAt: new Date(),
@@ -128,8 +130,8 @@ export const server = onRequest(async (req, res) => {
         userId: user.docId,
         views: i * 10,
       };
-      postBatch.set(postData.docId, postData);
-      postsData.push(postData);
+      postBatch.set(postId, postData);
+      postsData.push({ docId: postId, ...postData });
     }
     await postBatch.commit();
     console.log("Created Posts via batch:", postsData);
@@ -142,7 +144,7 @@ export const server = onRequest(async (req, res) => {
     const userWithPosts = await repos.users.populate(user, "docId");
     console.log("User with populated posts:", userWithPosts);
     console.log("Populated posts data:", userWithPosts.populated.posts);
-
+    const paginated = await repos.users.query.paginate({ pageSize: 2 });
     res.json({
       message: "Success!",
       user: fetchedUser,

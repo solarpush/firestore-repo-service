@@ -19,36 +19,36 @@ import type {
 } from "../shared/types";
 
 /**
- * Helper type to get the system keys (documentKey + pathKey) that should be excluded from updates
+ * Helper type to get the system keys (documentKey + pathKey + updatedKey) that should be excluded from updates
  * @internal
  */
 type SystemKeys<
-  T extends RepositoryConfig<any, any, any, any, any, any, any, any>
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
 > =
   | T["documentKey"]
-  | (T["pathKey"] extends undefined
-      ? never
-      : T["pathKey"] extends keyof T["type"]
-      ? T["pathKey"]
-      : never);
+  | Extract<T["pathKey"], keyof T["type"]>
+  | Extract<T["updatedKey"], keyof T["type"]>;
 
 /**
- * Type for updatable data - excludes documentKey and pathKey
+ * Type for updatable data - excludes documentKey, pathKey and updatedKey (all auto-managed)
  * @internal
  */
 type UpdatableData<
-  T extends RepositoryConfig<any, any, any, any, any, any, any, any>
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
 > = Omit<Partial<T["type"]>, SystemKeys<T>>;
 
 /**
- * Type for create data - all fields required except documentKey (optional) and pathKey (excluded)
+ * Type for create data - excludes pathKey, createdKey and updatedKey (auto-managed), documentKey is optional
  * @internal
  */
 type CreateData<
-  T extends RepositoryConfig<any, any, any, any, any, any, any, any>
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
 > = Omit<
   T["type"],
-  T["documentKey"] | Extract<T["pathKey"], keyof T["type"]>
+  | T["documentKey"]
+  | Extract<T["pathKey"], keyof T["type"]>
+  | Extract<T["createdKey"], keyof T["type"]>
+  | Extract<T["updatedKey"], keyof T["type"]>
 > & {
   [K in T["documentKey"]]?: T["type"][K];
 };
@@ -81,7 +81,18 @@ type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (
  * @internal
  */
 export type GenerateGetMethods<
-  TConfig extends RepositoryConfig<any, any, any, any, any, any>
+  TConfig extends RepositoryConfig<
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any
+  >
 > = {
   [K in TConfig["foreignKeys"][number] as K extends string
     ? `by${Capitalize<K>}`
@@ -96,7 +107,18 @@ export type GenerateGetMethods<
  * @internal
  */
 export type GenerateQueryMethods<
-  TConfig extends RepositoryConfig<any, any, any, any, any, any>
+  TConfig extends RepositoryConfig<
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any
+  >
 > = {
   [K in TConfig["queryKeys"][number] as K extends string
     ? `by${Capitalize<K>}`
@@ -110,7 +132,7 @@ export type GenerateQueryMethods<
  * Configured repository with organized methods
  */
 export type ConfiguredRepository<
-  T extends RepositoryConfig<any, any, any, any, any, any>
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
 > = {
   ref: CollectionReference | Query;
 

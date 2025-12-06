@@ -7,8 +7,12 @@ export function createCrudMethods<T>(
   actualCollection: CollectionReference | null,
   documentRef: (...args: any[]) => any,
   documentKey: string,
-  pathKey?: string
+  pathKey?: string,
+  createdKey?: string,
+  updatedKey?: string
 ) {
+  const now = () => new Date();
+
   // Create - adds a new document, optionally with a provided document key
   const create = async (data: any): Promise<T> => {
     if (!actualCollection) {
@@ -20,16 +24,27 @@ export function createCrudMethods<T>(
     let docRef;
     let docId: string;
 
+    // Auto-set createdKey and updatedKey
+    const enrichedData = { ...data };
+    if (createdKey) {
+      enrichedData[createdKey] = now();
+    }
+    if (updatedKey) {
+      enrichedData[updatedKey] = now();
+    }
+
     // If documentKey is provided in data, use set() with that ID
     if (data[documentKey]) {
       docId = data[documentKey];
       docRef = actualCollection.doc(docId);
       // Also set pathKey if defined
-      const dataWithPath = pathKey ? { ...data, [pathKey]: docRef.path } : data;
+      const dataWithPath = pathKey
+        ? { ...enrichedData, [pathKey]: docRef.path }
+        : enrichedData;
       await docRef.set(dataWithPath);
     } else {
       // Otherwise, use add() to auto-generate ID
-      docRef = await actualCollection.add(data);
+      docRef = await actualCollection.add(enrichedData);
       docId = docRef.id;
       // Update the document to include the documentKey and optionally pathKey
       const updates: Record<string, string> = { [documentKey]: docId };
@@ -53,8 +68,14 @@ export function createCrudMethods<T>(
     const pathArgs = hasOptions ? args.slice(0, -2) : args.slice(0, -1);
     const mergeOption = hasOptions ? lastArg : { merge: true };
 
+    // Auto-set updatedKey
+    const enrichedData = { ...data };
+    if (updatedKey) {
+      enrichedData[updatedKey] = now();
+    }
+
     const docRef = documentRef(...pathArgs);
-    await docRef.set(data, mergeOption);
+    await docRef.set(enrichedData, mergeOption);
 
     const setDocument = await docRef.get();
     return setDocument.data() as T;
@@ -65,8 +86,14 @@ export function createCrudMethods<T>(
     const data = args.pop();
     const pathArgs = args;
 
+    // Auto-set updatedKey
+    const enrichedData = { ...data };
+    if (updatedKey) {
+      enrichedData[updatedKey] = now();
+    }
+
     const docRef = documentRef(...pathArgs);
-    await docRef.update(data);
+    await docRef.update(enrichedData);
 
     const updatedDoc = await docRef.get();
     return updatedDoc.data() as T;

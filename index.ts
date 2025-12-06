@@ -81,6 +81,8 @@ export function createRepositoryConfig<T>() {
     const TIsGroup extends boolean,
     const TDocumentKey extends keyof T,
     const TPathKey extends keyof T | undefined = undefined,
+    const TCreatedKey extends keyof T | undefined = undefined,
+    const TUpdatedKey extends keyof T | undefined = undefined,
     TRefCb = undefined
   >(config: {
     path: string;
@@ -89,6 +91,8 @@ export function createRepositoryConfig<T>() {
     queryKeys: TQueryKeys;
     documentKey: TDocumentKey;
     pathKey?: TPathKey;
+    createdKey?: TCreatedKey;
+    updatedKey?: TUpdatedKey;
     refCb: TRefCb;
   }): RepositoryConfig<
     T,
@@ -98,7 +102,9 @@ export function createRepositoryConfig<T>() {
     TRefCb,
     {},
     TDocumentKey,
-    TPathKey
+    TPathKey,
+    TCreatedKey,
+    TUpdatedKey
   > => {
     return {
       ...config,
@@ -160,6 +166,8 @@ export function buildRepositoryRelations<
       any,
       any,
       any,
+      any,
+      any,
       any
     >
       ? {
@@ -167,6 +175,8 @@ export function buildRepositoryRelations<
             [R in keyof TMapping]: TMapping[R] extends RepositoryConfig<
               infer TTargetModel,
               infer TForeignKeys,
+              any,
+              any,
               any,
               any,
               any,
@@ -197,7 +207,9 @@ export function buildRepositoryRelations<
         infer TRefCb,
         any,
         infer TDocumentKey,
-        infer TPathKey
+        infer TPathKey,
+        infer TCreatedKey,
+        infer TUpdatedKey
       >
       ? RepositoryConfig<
           T,
@@ -212,7 +224,9 @@ export function buildRepositoryRelations<
             >;
           },
           TDocumentKey,
-          TPathKey
+          TPathKey,
+          TCreatedKey,
+          TUpdatedKey
         >
       : TMapping[K]
     : TMapping[K];

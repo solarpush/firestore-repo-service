@@ -20,7 +20,18 @@ type PopulatedData<
  * @internal
  */
 export function createPopulateMethods<
-  TConfig extends RepositoryConfig<any, any, any, any, any, any, any, any>
+  TConfig extends RepositoryConfig<
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any
+  >
 >(
   config: TConfig,
   allRepositories: Record<string, any>

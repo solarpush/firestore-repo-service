@@ -3,7 +3,13 @@ import type { DocumentReference, Firestore } from "firebase-admin/firestore";
 /**
  * Creates bulk operation methods using BulkWriter
  */
-export function createBulkMethods(db: Firestore) {
+export function createBulkMethods(
+  db: Firestore,
+  createdKey?: string,
+  updatedKey?: string
+) {
+  const now = () => new Date();
+
   return {
     // Set multiple documents with automatic batching (500 ops per flush)
     set: async (
@@ -19,7 +25,17 @@ export function createBulkMethods(db: Firestore) {
       for (const item of items) {
         if (!item) continue;
         const { docRef, data, merge = true } = item;
-        bulkWriter.set(docRef, data, { merge });
+
+        // Auto-set createdKey and updatedKey
+        const enrichedData = { ...data };
+        if (createdKey) {
+          enrichedData[createdKey] = now();
+        }
+        if (updatedKey) {
+          enrichedData[updatedKey] = now();
+        }
+
+        bulkWriter.set(docRef, enrichedData, { merge });
         pendingOps++;
 
         if (pendingOps >= 500) {
@@ -39,7 +55,14 @@ export function createBulkMethods(db: Firestore) {
       for (const item of items) {
         if (!item) continue;
         const { docRef, data } = item;
-        bulkWriter.update(docRef, data);
+
+        // Auto-set updatedKey
+        const enrichedData = { ...data };
+        if (updatedKey) {
+          enrichedData[updatedKey] = now();
+        }
+
+        bulkWriter.update(docRef, enrichedData);
         pendingOps++;
 
         if (pendingOps >= 500) {

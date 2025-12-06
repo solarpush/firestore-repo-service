@@ -195,6 +195,8 @@ export type RelationalKeys<T = any, TMapping = any> = {
  * @template TRelationalKeys - Relational keys mapping to other repositories
  * @template TDocumentKey - The field name to store the document ID
  * @template TPathKey - The field name to store the document path (optional)
+ * @template TCreatedKey - The field name to store the creation timestamp (optional)
+ * @template TUpdatedKey - The field name to store the update timestamp (optional)
  */
 export interface RepositoryConfig<
   T,
@@ -204,7 +206,9 @@ export interface RepositoryConfig<
   TRefCb = any,
   TRelationalKeys = {},
   TDocumentKey extends keyof T = keyof T,
-  TPathKey extends keyof T | undefined = undefined
+  TPathKey extends keyof T | undefined = undefined,
+  TCreatedKey extends keyof T | undefined = undefined,
+  TUpdatedKey extends keyof T | undefined = undefined
 > {
   path: string;
   isGroup: TIsGroup;
@@ -212,6 +216,8 @@ export interface RepositoryConfig<
   queryKeys: TQueryKeys;
   documentKey: TDocumentKey;
   pathKey?: TPathKey;
+  createdKey?: TCreatedKey;
+  updatedKey?: TUpdatedKey;
   type: T;
   refCb?: TRefCb;
   relationalKeys?: TRelationalKeys;
