@@ -42,8 +42,8 @@ export function applyQueryOptions<T>(
   options: QueryOptions<T>
 ): Query {
   if (options.where) {
-    options.where.forEach((w) => {
-      q = q.where(String(w.field), w.operator, w.value);
+    options.where.forEach(([field, operator, value]) => {
+      q = q.where(String(field), operator, value);
     });
   }
 

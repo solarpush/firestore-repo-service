@@ -19,6 +19,41 @@ import type {
 } from "../shared/types";
 
 /**
+ * Helper type to get the system keys (documentKey + pathKey) that should be excluded from updates
+ * @internal
+ */
+type SystemKeys<
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any>
+> =
+  | T["documentKey"]
+  | (T["pathKey"] extends undefined
+      ? never
+      : T["pathKey"] extends keyof T["type"]
+      ? T["pathKey"]
+      : never);
+
+/**
+ * Type for updatable data - excludes documentKey and pathKey
+ * @internal
+ */
+type UpdatableData<
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any>
+> = Omit<Partial<T["type"]>, SystemKeys<T>>;
+
+/**
+ * Type for create data - all fields required except documentKey (optional) and pathKey (excluded)
+ * @internal
+ */
+type CreateData<
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any>
+> = Omit<
+  T["type"],
+  T["documentKey"] | Extract<T["pathKey"], keyof T["type"]>
+> & {
+  [K in T["documentKey"]]?: T["type"][K];
+};
+
+/**
  * Helper type to extract populated data structure from a single relation
  * @internal
  */
@@ -122,17 +157,19 @@ export type ConfiguredRepository<
 
   documentRef: T["documentRef"];
 
-  create: (data: Partial<T["type"]>) => Promise<T["type"] & { docId: string }>;
+  create: (data: CreateData<T>) => Promise<T["type"]>;
 
   set: (
     ...args: [
       ...Parameters<T["documentRef"]>,
-      Partial<T["type"]>,
+      UpdatableData<T>,
       { merge?: boolean }?
     ]
   ) => Promise<T["type"]>;
 
-  update: T["update"];
+  update: (
+    ...args: [...Parameters<T["documentRef"]>, UpdatableData<T>]
+  ) => Promise<T["type"]>;
 
   delete: (...args: Parameters<T["documentRef"]>) => Promise<void>;
 
@@ -142,12 +179,12 @@ export type ConfiguredRepository<
       set: (
         ...args: [
           ...Parameters<T["documentRef"]>,
-          Partial<T["type"]>,
+          UpdatableData<T>,
           { merge?: boolean }?
         ]
       ) => void;
       update: (
-        ...args: [...Parameters<T["documentRef"]>, Partial<T["type"]>]
+        ...args: [...Parameters<T["documentRef"]>, UpdatableData<T>]
       ) => void;
       delete: (...args: Parameters<T["documentRef"]>) => void;
       commit: () => Promise<void>;
@@ -163,12 +200,12 @@ export type ConfiguredRepository<
         set: (
           ...args: [
             ...Parameters<T["documentRef"]>,
-            Partial<T["type"]>,
+            UpdatableData<T>,
             { merge?: boolean }?
           ]
         ) => void;
         update: (
-          ...args: [...Parameters<T["documentRef"]>, Partial<T["type"]>]
+          ...args: [...Parameters<T["documentRef"]>, UpdatableData<T>]
         ) => void;
         delete: (...args: Parameters<T["documentRef"]>) => void;
         raw: Transaction;
@@ -180,12 +217,12 @@ export type ConfiguredRepository<
     set: (
       items: Array<{
         docRef: DocumentReference;
-        data: Partial<T["type"]>;
+        data: UpdatableData<T>;
         merge?: boolean;
       }>
     ) => Promise<void>;
     update: (
-      items: Array<{ docRef: DocumentReference; data: Partial<T["type"]> }>
+      items: Array<{ docRef: DocumentReference; data: UpdatableData<T> }>
     ) => Promise<void>;
     delete: (docRefs: DocumentReference[]) => Promise<void>;
   };

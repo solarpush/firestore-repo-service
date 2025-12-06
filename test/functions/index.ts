@@ -40,6 +40,7 @@ interface PostModel {
   docId: string;
   documentPath: string;
   userId: string;
+  address: { street: string; city: string };
   title: string;
   content: string;
   status: "draft" | "published";
@@ -58,11 +59,9 @@ const repositoryMapping = {
     isGroup: false,
     foreignKeys: ["docId", "email"] as const,
     queryKeys: ["name", "isActive"] as const,
+    documentKey: "docId",
+    pathKey: "documentPath",
     refCb: (db: Firestore, docId: string) => db.collection("users").doc(docId),
-    autoFields: {
-      docId: (docRef) => docRef.id,
-      documentPath: (docRef) => docRef.path,
-    },
   }),
 
   posts: createRepositoryConfig<PostModel>()({
@@ -70,6 +69,8 @@ const repositoryMapping = {
     isGroup: false,
     foreignKeys: ["docId", "userId"] as const,
     queryKeys: ["status", "userId"] as const,
+    documentKey: "docId",
+    pathKey: "documentPath",
     refCb: (db: Firestore, docId: string) => db.collection("posts").doc(docId),
   }),
 };
@@ -78,6 +79,11 @@ const repositoryMapping = {
 const repositoryMappingWithRelations = buildRepositoryRelations(
   repositoryMapping,
   {
+    // Un user a plusieurs posts (via docId → userId)
+    users: {
+      docId: { repo: "posts", key: "userId", type: "many" as const },
+    },
+    // Un post appartient à un user (via userId → docId)
     posts: {
       userId: { repo: "users", key: "docId", type: "one" as const },
     },
@@ -86,16 +92,65 @@ const repositoryMappingWithRelations = buildRepositoryRelations(
 
 // Step 3: Create the repository mapping
 const repos = createRepositoryMapping(db, repositoryMappingWithRelations);
+
 export const server = onRequest(async (req, res) => {
-  const users = await repos.users.create({
-    age: 30,
-    createdAt: new Date(),
-    docId: "user1",
-    email: "user1@example.com",
-    isActive: true,
-    name: "User One",
-    updatedAt: new Date(),
-  });
-  console.log("Created User:", users);
-  res.json({ message: "Hello from Firebase Functions!", users });
+  try {
+    // 1. Création d'un user
+    const user = await repos.users.create({
+      age: 28,
+      createdAt: new Date(),
+      email: "john.doe@example.com",
+      isActive: true,
+      name: "John Doe",
+      updatedAt: new Date(),
+    });
+
+    console.log("Created User:", user);
+    console.log("User docId:", user.docId);
+    console.log("User documentPath:", user.documentPath);
+
+    // 2. Récupération de ce user par docId
+    const fetchedUser = await repos.users.get.byDocId(user.docId);
+    console.log("Fetched User:", fetchedUser);
+
+    // 3. Création de 5 posts associés à ce user via batch
+    const postBatch = repos.posts.batch.create();
+    const postsData = [];
+    for (let i = 1; i <= 5; i++) {
+      const postData = {
+        docId: `post-${i}-${Date.now()}`,
+        documentPath: "",
+        address: { street: `${i * 100} Main St`, city: "Anytown" },
+        content: `This is post number ${i} by ${user.name}.`,
+        createdAt: new Date(),
+        status: (i % 2 === 0 ? "published" : "draft") as "draft" | "published",
+        title: `Post ${i}`,
+        userId: user.docId,
+        views: i * 10,
+      };
+      postBatch.set(postData.docId, postData);
+      postsData.push(postData);
+    }
+    await postBatch.commit();
+    console.log("Created Posts via batch:", postsData);
+
+    // 4. Récupération des posts par userId
+    const userPosts = await repos.posts.get.byUserId(user.docId);
+    console.log("User Posts:", userPosts);
+
+    // 5. Récupération du user avec populate pour obtenir ses posts associés
+    const userWithPosts = await repos.users.populate(user, "docId");
+    console.log("User with populated posts:", userWithPosts);
+    console.log("Populated posts data:", userWithPosts.populated.posts);
+
+    res.json({
+      message: "Success!",
+      user: fetchedUser,
+      posts: userPosts,
+      userWithPopulatedPosts: userWithPosts,
+    });
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).json({ error: String(error) });
+  }
 });

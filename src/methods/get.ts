@@ -1,32 +1,11 @@
 import type {
   CollectionReference,
   DocumentReference,
+  DocumentSnapshot,
   Query,
   QuerySnapshot,
 } from "firebase-admin/firestore";
 import { capitalize, chunkArray } from "../shared/utils";
-
-/**
- * Injects auto-generated fields into the result
- */
-function injectAutoFields<T>(
-  data: any,
-  docRef: DocumentReference,
-  autoFields?: { [K in keyof T]?: (docRef: DocumentReference) => T[K] }
-): T {
-  const result = { ...data };
-
-  if (autoFields) {
-    for (const field in autoFields) {
-      const generator = autoFields[field as keyof T];
-      if (generator) {
-        result[field] = generator(docRef);
-      }
-    }
-  }
-
-  return result as T;
-}
 
 /**
  * Creates get.by* methods for foreign keys
@@ -36,7 +15,7 @@ export function createGetMethods<T>(
   foreignKeys: readonly string[],
   actualCollection: CollectionReference | null,
   documentRef: (...args: any[]) => DocumentReference,
-  autoFields?: { [K in keyof T]?: (docRef: DocumentReference) => T[K] }
+  documentKey: string
 ) {
   const getMethods: any = {};
 
@@ -46,10 +25,10 @@ export function createGetMethods<T>(
     values: any[],
     operator: "in" | "array-contains-any" = "in",
     returnDoc = false
-  ): Promise<T[]> => {
+  ): Promise<T[] | { data: T; doc: DocumentSnapshot }[]> => {
     if (values.length === 0) return [];
 
-    const results: T[] = [];
+    const results: (T | { data: T; doc: DocumentSnapshot })[] = [];
     const chunks = chunkArray(values, 30); // Firestore limits 'in' to 30 elements
 
     for (const chunk of chunks) {
@@ -58,16 +37,12 @@ export function createGetMethods<T>(
       const snapshot: QuerySnapshot = await q.get();
 
       snapshot.forEach((doc) => {
-        const data = doc.data();
-        results.push(
-          returnDoc
-            ? { data, doc }
-            : injectAutoFields<T>(data, doc.ref, autoFields)
-        );
+        const data = doc.data() as T;
+        results.push(returnDoc ? { data, doc } : data);
       });
     }
 
-    return results;
+    return results as T[] | { data: T; doc: DocumentSnapshot }[];
   };
 
   // Generate get.by* methods for each foreign key
@@ -76,19 +51,14 @@ export function createGetMethods<T>(
     getMethods[methodName] = async (
       value: string,
       returnDoc = false
-    ): Promise<T | null> => {
-      // Special case: if foreignKey is "docId" or "documentId", use direct document reference
-      if (
-        String(foreignKey) === "docId" ||
-        String(foreignKey) === "documentId"
-      ) {
+    ): Promise<T | { data: T; doc: DocumentSnapshot } | null> => {
+      // Special case: if foreignKey is the documentKey, use direct document reference
+      if (String(foreignKey) === documentKey) {
         const docRef = documentRef(value);
         const doc = await docRef.get();
         if (!doc.exists) return null;
-        const data = doc.data();
-        return returnDoc
-          ? { data, doc }
-          : injectAutoFields<T>(data, doc.ref, autoFields);
+        const data = doc.data() as T;
+        return returnDoc ? { data, doc } : data;
       }
 
       // For other keys, query by field value
@@ -98,10 +68,8 @@ export function createGetMethods<T>(
       if (snapshot.empty) return null;
       const doc = snapshot.docs[0];
       if (!doc) return null;
-      const data = doc.data();
-      return returnDoc
-        ? { data, doc }
-        : injectAutoFields<T>(data, doc.ref, autoFields);
+      const data = doc.data() as T;
+      return returnDoc ? { data, doc } : data;
     };
   });
 

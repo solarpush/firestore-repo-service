@@ -20,29 +20,16 @@ type PopulatedData<
  * @internal
  */
 export function createPopulateMethods<
-  T,
-  TForeignKeys extends readonly (keyof T)[],
-  TQueryKeys extends readonly (keyof T)[],
-  TIsGroup extends boolean,
-  TRefCb,
-  TRelationalKeys extends Record<string, any>,
-  TConfig extends RepositoryConfig<
-    T,
-    TForeignKeys,
-    TQueryKeys,
-    TIsGroup,
-    TRefCb,
-    TRelationalKeys
-  >
+  TConfig extends RepositoryConfig<any, any, any, any, any, any, any, any>
 >(
   config: TConfig,
   allRepositories: Record<string, any>
 ): {
   populate: <K extends keyof NonNullable<TConfig["relationalKeys"]>>(
-    document: T,
+    document: TConfig["type"],
     relationKey: K | K[]
   ) => Promise<
-    T & {
+    TConfig["type"] & {
       populated: UnionToIntersection<
         PopulatedData<NonNullable<TConfig["relationalKeys"]>, K>
       >;

@@ -62,7 +62,7 @@ function applyBasicQueryOptions<T>(q: Query, options: QueryOptions<T>): Query {
  * Check if a where clause needs splitting (in or array-contains-any with > 30 values)
  */
 function needsSplitting<T>(clause: WhereClause<T>): boolean {
-  const { operator, value } = clause;
+  const [, operator, value] = clause;
   return (
     (operator === "in" || operator === "array-contains-any") &&
     Array.isArray(value) &&
@@ -74,7 +74,7 @@ function needsSplitting<T>(clause: WhereClause<T>): boolean {
  * Split a where clause into multiple clauses (for in/array-contains-any)
  */
 function splitWhereClause<T>(clause: WhereClause<T>): WhereClause<T>[] {
-  const { field, operator, value } = clause;
+  const [field, operator, value] = clause;
 
   if (!needsSplitting(clause)) {
     return [clause];
@@ -82,11 +82,7 @@ function splitWhereClause<T>(clause: WhereClause<T>): WhereClause<T>[] {
 
   // Split array into chunks of 30
   const chunks = chunkArray(value as any[], 30);
-  return chunks.map((chunk) => ({
-    field,
-    operator,
-    value: chunk,
-  }));
+  return chunks.map((chunk) => [field, operator, chunk] as WhereClause<T>);
 }
 
 /**
@@ -98,8 +94,8 @@ function applyWhereClausesToQuery<T>(
 ): Query {
   let q = baseQuery;
 
-  for (const clause of whereClauses) {
-    q = q.where(String(clause.field), clause.operator, clause.value);
+  for (const [field, operator, value] of whereClauses) {
+    q = q.where(String(field), operator, value);
   }
 
   return q;

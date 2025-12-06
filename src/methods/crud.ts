@@ -1,29 +1,4 @@
-import type {
-  CollectionReference,
-  DocumentReference,
-} from "firebase-admin/firestore";
-
-/**
- * Injects auto-generated fields into the result
- */
-function injectAutoFields<T>(
-  data: any,
-  docRef: DocumentReference,
-  autoFields?: { [K in keyof T]?: (docRef: DocumentReference) => T[K] }
-): T {
-  const result = { ...data };
-
-  if (autoFields) {
-    for (const field in autoFields) {
-      const generator = autoFields[field as keyof T];
-      if (generator) {
-        result[field] = generator(docRef);
-      }
-    }
-  }
-
-  return result as T;
-}
+import type { CollectionReference } from "firebase-admin/firestore";
 
 /**
  * Creates CRUD methods (create, set, update, delete)
@@ -31,18 +6,41 @@ function injectAutoFields<T>(
 export function createCrudMethods<T>(
   actualCollection: CollectionReference | null,
   documentRef: (...args: any[]) => any,
-  autoFields?: { [K in keyof T]?: (docRef: DocumentReference) => T[K] }
+  documentKey: string,
+  pathKey?: string
 ) {
-  // Create - adds a new document with auto-generated ID
+  // Create - adds a new document, optionally with a provided document key
   const create = async (data: any): Promise<T> => {
     if (!actualCollection) {
       throw new Error(
         "Cannot use create() on collection groups. Use set() with a specific document ID instead."
       );
     }
-    const docRef = await actualCollection.add(data);
+
+    let docRef;
+    let docId: string;
+
+    // If documentKey is provided in data, use set() with that ID
+    if (data[documentKey]) {
+      docId = data[documentKey];
+      docRef = actualCollection.doc(docId);
+      // Also set pathKey if defined
+      const dataWithPath = pathKey ? { ...data, [pathKey]: docRef.path } : data;
+      await docRef.set(dataWithPath);
+    } else {
+      // Otherwise, use add() to auto-generate ID
+      docRef = await actualCollection.add(data);
+      docId = docRef.id;
+      // Update the document to include the documentKey and optionally pathKey
+      const updates: Record<string, string> = { [documentKey]: docId };
+      if (pathKey) {
+        updates[pathKey] = docRef.path;
+      }
+      await docRef.update(updates);
+    }
+
     const createdDoc = await docRef.get();
-    return injectAutoFields<T>(createdDoc.data(), docRef, autoFields);
+    return createdDoc.data() as T;
   };
 
   // Set - creates or replaces a document
@@ -59,7 +57,7 @@ export function createCrudMethods<T>(
     await docRef.set(data, mergeOption);
 
     const setDocument = await docRef.get();
-    return injectAutoFields<T>(setDocument.data(), docRef, autoFields);
+    return setDocument.data() as T;
   };
 
   // Update - updates a document and returns the merged object
@@ -71,7 +69,7 @@ export function createCrudMethods<T>(
     await docRef.update(data);
 
     const updatedDoc = await docRef.get();
-    return injectAutoFields<T>(updatedDoc.data(), docRef, autoFields);
+    return updatedDoc.data() as T;
   };
 
   // Delete - removes a document

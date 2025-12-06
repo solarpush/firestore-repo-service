@@ -10,6 +10,7 @@ import type { Firestore } from "firebase-admin/firestore";
 export type {
   ExtractDocumentRefSignature,
   ExtractUpdateSignature,
+  FieldPath,
   GetResult,
   QueryOptions,
   RelationalKeys,
@@ -78,16 +79,17 @@ export function createRepositoryConfig<T>() {
     const TForeignKeys extends readonly (keyof T)[],
     const TQueryKeys extends readonly (keyof T)[],
     const TIsGroup extends boolean,
+    const TDocumentKey extends keyof T,
+    const TPathKey extends keyof T | undefined = undefined,
     TRefCb = undefined
   >(config: {
     path: string;
     isGroup: TIsGroup;
     foreignKeys: TForeignKeys;
     queryKeys: TQueryKeys;
+    documentKey: TDocumentKey;
+    pathKey?: TPathKey;
     refCb: TRefCb;
-    autoFields?: {
-      [K in keyof T]?: (docRef: any) => T[K];
-    };
   }): RepositoryConfig<
     T,
     TForeignKeys,
@@ -95,7 +97,8 @@ export function createRepositoryConfig<T>() {
     TIsGroup,
     TRefCb,
     {},
-    any
+    TDocumentKey,
+    TPathKey
   > => {
     return {
       ...config,
@@ -156,6 +159,7 @@ export function buildRepositoryRelations<
       any,
       any,
       any,
+      any,
       any
     >
       ? {
@@ -163,6 +167,7 @@ export function buildRepositoryRelations<
             [R in keyof TMapping]: TMapping[R] extends RepositoryConfig<
               infer TTargetModel,
               infer TForeignKeys,
+              any,
               any,
               any,
               any,
@@ -191,7 +196,8 @@ export function buildRepositoryRelations<
         infer TIsGroup,
         infer TRefCb,
         any,
-        infer TAutoFields
+        infer TDocumentKey,
+        infer TPathKey
       >
       ? RepositoryConfig<
           T,
@@ -205,7 +211,8 @@ export function buildRepositoryRelations<
               TRelations[K][RK]
             >;
           },
-          TAutoFields
+          TDocumentKey,
+          TPathKey
         >
       : TMapping[K]
     : TMapping[K];

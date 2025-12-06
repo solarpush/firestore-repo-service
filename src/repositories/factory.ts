@@ -18,7 +18,7 @@ import type { ConfiguredRepository } from "./types";
  * Creates a configured repository instance with all methods
  */
 export function createRepository<
-  T extends RepositoryConfig<any, any, any, any>
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any>
 >(
   db: Firestore,
   config: T,
@@ -41,18 +41,18 @@ export function createRepository<
     config.foreignKeys,
     actualCollection,
     documentRef,
-    config.autoFields
+    config.documentKey as string
   );
   const queryMethods = createQueryMethods(
     collectionRef as Query,
-    config.queryKeys,
-    config.autoFields
+    config.queryKeys
   );
   const aggregateMethods = createAggregateMethods(collectionRef as Query);
   const crudMethods = createCrudMethods(
     actualCollection,
     documentRef,
-    config.autoFields
+    config.documentKey as string,
+    config.pathKey as string | undefined
   );
   const batchMethods = createBatchMethods(db, documentRef);
   const transactionMethods = createTransactionMethods(db, documentRef);

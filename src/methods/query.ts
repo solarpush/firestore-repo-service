@@ -1,8 +1,4 @@
-import type {
-  DocumentReference,
-  Query,
-  QuerySnapshot,
-} from "firebase-admin/firestore";
+import type { Query, QuerySnapshot } from "firebase-admin/firestore";
 import {
   createPaginationIterator,
   executePaginatedQuery,
@@ -12,34 +8,12 @@ import type { QueryOptions } from "../shared/types";
 import { capitalize } from "../shared/utils";
 
 /**
- * Injects auto-generated fields into the result
- */
-function injectAutoFields<T>(
-  data: any,
-  docRef: DocumentReference,
-  autoFields?: { [K in keyof T]?: (docRef: DocumentReference) => T[K] }
-): T {
-  const result = { ...data };
-
-  if (autoFields) {
-    for (const field in autoFields) {
-      const generator = autoFields[field as keyof T];
-      if (generator) {
-        result[field] = generator(docRef);
-      }
-    }
-  }
-
-  return result as T;
-}
-
-/**
  * Apply query options to a Firestore query
  */
 export function applyQueryOptions(q: Query, options: QueryOptions): Query {
   if (options.where) {
-    options.where.forEach((w) => {
-      q = q.where(String(w.field), w.operator, w.value);
+    options.where.forEach(([field, operator, value]) => {
+      q = q.where(String(field), operator, value);
     });
   }
 
@@ -90,8 +64,7 @@ export function applyQueryOptions(q: Query, options: QueryOptions): Query {
  */
 export function createQueryMethods<T>(
   collectionRef: Query,
-  queryKeys: readonly string[],
-  autoFields?: { [K in keyof T]?: (docRef: DocumentReference) => T[K] }
+  queryKeys: readonly string[]
 ) {
   const queryMethods: any = {};
 
@@ -106,9 +79,7 @@ export function createQueryMethods<T>(
       q = q.where(String(queryKey), "==", value);
       q = applyQueryOptions(q, options);
       const snapshot: QuerySnapshot = await q.get();
-      return snapshot.docs.map((doc) =>
-        injectAutoFields<T>(doc.data(), doc.ref, autoFields)
-      );
+      return snapshot.docs.map((doc) => doc.data() as T);
     };
   });
 
@@ -117,9 +88,7 @@ export function createQueryMethods<T>(
     let q: Query = collectionRef as any;
     q = applyQueryOptions(q, options);
     const snapshot: QuerySnapshot = await q.get();
-    return snapshot.docs.map((doc) =>
-      injectAutoFields<T>(doc.data(), doc.ref, autoFields)
-    );
+    return snapshot.docs.map((doc) => doc.data() as T);
   };
 
   // getAll - retrieve all documents
@@ -127,9 +96,7 @@ export function createQueryMethods<T>(
     let q: Query = collectionRef as any;
     q = applyQueryOptions(q, options);
     const snapshot: QuerySnapshot = await q.get();
-    return snapshot.docs.map((doc) =>
-      injectAutoFields<T>(doc.data(), doc.ref, autoFields)
-    );
+    return snapshot.docs.map((doc) => doc.data() as T);
   };
 
   // onSnapshot - real-time listener
@@ -142,9 +109,7 @@ export function createQueryMethods<T>(
     q = applyQueryOptions(q, options);
 
     return q.onSnapshot((snapshot) => {
-      const data = snapshot.docs.map((doc) =>
-        injectAutoFields<T>(doc.data(), doc.ref, autoFields)
-      );
+      const data = snapshot.docs.map((doc) => doc.data() as T);
       onNext(data);
     }, onError);
   };
