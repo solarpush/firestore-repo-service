@@ -1,6 +1,6 @@
 import type { Query } from "firebase-admin/firestore";
 import type { QueryOptions } from "../shared/types";
-import { applyQueryOptions } from "./query";
+import { applyQueryOptions } from "../shared/utils";
 
 /**
  * Creates aggregate methods for server-side computations
@@ -35,7 +35,7 @@ export function createAggregateMethods(collectionRef: Query) {
     // Average of a numeric field
     average: async (
       field: string,
-      options: QueryOptions = {}
+      options: QueryOptions = {},
     ): Promise<number | null> => {
       let q: Query = collectionRef as any;
       q = applyQueryOptions(q, options);

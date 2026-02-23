@@ -5,17 +5,8 @@ import type {
   Query,
   QuerySnapshot,
 } from "firebase-admin/firestore";
+import type { GetOptions } from "../shared/types";
 import { capitalize, chunkArray } from "../shared/utils";
-
-/**
- * Options for get methods
- */
-export interface GetOptions {
-  /** Fields to select (Firestore select) - reduces network transfer */
-  select?: string[];
-  /** Return the document snapshot along with data */
-  returnDoc?: boolean;
-}
 
 /**
  * Creates get.by* methods for foreign keys
@@ -25,7 +16,7 @@ export function createGetMethods<T>(
   foreignKeys: readonly string[],
   actualCollection: CollectionReference | null,
   documentRef: (...args: any[]) => DocumentReference,
-  documentKey: string
+  documentKey: string,
 ) {
   const getMethods: any = {};
 
@@ -34,7 +25,7 @@ export function createGetMethods<T>(
     key: string,
     values: any[],
     operator: "in" | "array-contains-any" = "in",
-    options: GetOptions = {}
+    options: GetOptions = {},
   ): Promise<T[] | { data: T; doc: DocumentSnapshot }[]> => {
     if (values.length === 0) return [];
 
@@ -47,7 +38,7 @@ export function createGetMethods<T>(
 
       // Apply select if specified
       if (options.select && options.select.length > 0) {
-        q = q.select(...options.select);
+        q = q.select(...options.select.map((f) => String(f)));
       }
 
       const snapshot: QuerySnapshot = await q.get();
@@ -66,7 +57,7 @@ export function createGetMethods<T>(
     const methodName = `by${capitalize(String(foreignKey))}`;
     getMethods[methodName] = async (
       value: string,
-      options: GetOptions | boolean = {}
+      options: GetOptions | boolean = {},
     ): Promise<T | { data: T; doc: DocumentSnapshot } | null> => {
       // Handle legacy boolean returnDoc parameter
       const opts: GetOptions =
@@ -87,7 +78,7 @@ export function createGetMethods<T>(
 
       // Apply select if specified
       if (opts.select && opts.select.length > 0) {
-        q = q.select(...opts.select);
+        q = q.select(...opts.select.map((f) => String(f)));
       }
 
       const snapshot: QuerySnapshot = await q.get();

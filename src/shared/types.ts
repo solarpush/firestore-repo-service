@@ -36,12 +36,12 @@ export type ExtractUpdateSignature<T, TType> = T extends (
 type IsPlainObject<T> = T extends Date
   ? false
   : T extends Array<any>
-  ? false
-  : T extends Function
-  ? false
-  : T extends object
-  ? true
-  : false;
+    ? false
+    : T extends Function
+      ? false
+      : T extends object
+        ? true
+        : false;
 
 /**
  * Recursively generates dot-notation paths for nested plain objects only
@@ -56,7 +56,7 @@ type IsPlainObject<T> = T extends Date
 type NestedPaths<
   T,
   Prefix extends string = "",
-  Depth extends number[] = []
+  Depth extends number[] = [],
 > = Depth["length"] extends 5
   ? Prefix
   : {
@@ -67,8 +67,8 @@ type NestedPaths<
               | `${Prefix}.${K}`
               | NestedPaths<T[K], `${Prefix}.${K}`, [...Depth, 1]>
         : Prefix extends ""
-        ? K
-        : `${Prefix}.${K}`;
+          ? K
+          : `${Prefix}.${K}`;
     }[keyof T & string];
 
 /**
@@ -81,14 +81,14 @@ type NestedPaths<
  */
 type PathValue<
   T,
-  Path extends string
+  Path extends string,
 > = Path extends `${infer Key}.${infer Rest}`
   ? Key extends keyof T
     ? PathValue<T[Key], Rest>
     : never
   : Path extends keyof T
-  ? T[Path]
-  : never;
+    ? T[Path]
+    : never;
 
 /**
  * All possible field paths including nested paths
@@ -128,6 +128,17 @@ export interface QueryOptions<T = any> {
 }
 
 /**
+ * Options for get.by* methods
+ * @template T - Data model type
+ */
+export interface GetOptions<T = any> {
+  /** Fields to select (Firestore .select) — reduces network transfer */
+  select?: (keyof T | string)[];
+  /** Return the raw DocumentSnapshot alongside data */
+  returnDoc?: boolean;
+}
+
+/**
  * Result type for get operations with optional document snapshot
  * @internal
  */
@@ -146,7 +157,7 @@ export interface RelationConfig<
   TRepoKey extends string = string,
   TForeignKey extends string = string,
   TType extends "one" | "many" = "one" | "many",
-  TTargetModel = any
+  TTargetModel = any,
 > {
   repo: TRepoKey;
   key: TForeignKey;
@@ -210,7 +221,7 @@ export interface RepositoryConfig<
   TDocumentKey extends keyof T = keyof T,
   TPathKey extends keyof T | undefined = undefined,
   TCreatedKey extends keyof T | undefined = undefined,
-  TUpdatedKey extends keyof T | undefined = undefined
+  TUpdatedKey extends keyof T | undefined = undefined,
 > {
   path: string;
   isGroup: TIsGroup;

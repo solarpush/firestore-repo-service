@@ -8,6 +8,7 @@ import type {
 } from "firebase-admin/firestore";
 import type { createPaginationIterator, PaginationResult } from "../pagination";
 import type {
+  GetOptions,
   GetResult,
   QueryOptions,
   RelationConfig,
@@ -18,21 +19,17 @@ import type {
  * Extract the target model type from a relation config
  * @internal
  */
-type ExtractTargetModel<TRelation> = TRelation extends RelationConfig<
-  any,
-  any,
-  any,
-  infer TTargetModel
->
-  ? TTargetModel
-  : never;
+type ExtractTargetModel<TRelation> =
+  TRelation extends RelationConfig<any, any, any, infer TTargetModel>
+    ? TTargetModel
+    : never;
 
 /**
  * Typed populate options with select based on target model keys
  */
 export type PopulateOptionsTyped<
   TRelationalKeys,
-  K extends keyof TRelationalKeys
+  K extends keyof TRelationalKeys,
 > =
   | {
       /** Single relation key to populate */
@@ -54,7 +51,7 @@ export type PopulateOptionsTyped<
  */
 export type IncludeConfigTyped<
   TRelationalKeys,
-  K extends keyof TRelationalKeys = keyof TRelationalKeys
+  K extends keyof TRelationalKeys = keyof TRelationalKeys,
 > = K extends keyof TRelationalKeys
   ? {
       /** The relation key to include */
@@ -70,7 +67,7 @@ export type IncludeConfigTyped<
 export interface PaginationWithIncludeOptionsTyped<
   T,
   TRelationalKeys,
-  K extends keyof TRelationalKeys = keyof TRelationalKeys
+  K extends keyof TRelationalKeys = keyof TRelationalKeys,
 > {
   pageSize?: number;
   cursor?: any;
@@ -86,7 +83,7 @@ export interface PaginationWithIncludeOptionsTyped<
  * @internal
  */
 type SystemKeys<
-  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>,
 > =
   | T["documentKey"]
   | Extract<T["pathKey"], keyof T["type"]>
@@ -97,7 +94,7 @@ type SystemKeys<
  * @internal
  */
 type UpdatableData<
-  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>,
 > = Omit<Partial<T["type"]>, SystemKeys<T>>;
 
 /**
@@ -105,7 +102,7 @@ type UpdatableData<
  * @internal
  */
 type CreateData<
-  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>,
 > = Omit<
   T["type"],
   | T["documentKey"]
@@ -117,30 +114,34 @@ type CreateData<
 };
 
 /**
- * Helper type to extract populated data structure from a single relation
+ * Helper type to extract populated data structure from a single relation.
+ * Keyed by the **field name** (TFieldKey), not the repo name, to avoid collisions
+ * when two different fields point to the same repository.
  * @internal
  */
-type ExtractPopulatedFromRelation<TRelation> = TRelation extends RelationConfig<
-  infer TRepo,
-  any,
-  infer TType,
-  infer TTargetModel
->
-  ? { [P in TRepo]: TType extends "one" ? TTargetModel | null : TTargetModel[] }
-  : Record<string, never>;
+type ExtractPopulatedFromRelation<TRelation, TFieldKey extends string> =
+  TRelation extends RelationConfig<any, any, infer TType, infer TTargetModel>
+    ? {
+        [P in TFieldKey]: TType extends "one"
+          ? TTargetModel | null
+          : TTargetModel[];
+      }
+    : Record<string, never>;
 
 /**
  * Helper type to merge multiple populated objects into one
  * @internal
  */
 type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (
-  k: infer I
+  k: infer I,
 ) => void
   ? I
   : never;
 
 /**
- * Generates get.by* methods from foreign keys
+ * Generates get.by* methods from foreign keys.
+ * The second parameter accepts a boolean (returnDoc) or a GetOptions object.
+ * Return type is narrowed based on whether returnDoc is true.
  * @internal
  */
 export type GenerateGetMethods<
@@ -155,13 +156,15 @@ export type GenerateGetMethods<
     any,
     any,
     any
-  >
+  >,
 > = {
   [K in TConfig["foreignKeys"][number] as K extends string
     ? `by${Capitalize<K>}`
     : never]: <ReturnDoc extends boolean = false>(
-    value: TConfig["type"][K],
-    returnDoc?: ReturnDoc
+    value: TConfig["type"][K extends keyof TConfig["type"] ? K : never],
+    options?:
+      | ReturnDoc
+      | (GetOptions<TConfig["type"]> & { returnDoc?: ReturnDoc }),
   ) => Promise<GetResult<TConfig["type"], ReturnDoc>>;
 };
 
@@ -181,13 +184,13 @@ export type GenerateQueryMethods<
     any,
     any,
     any
-  >
+  >,
 > = {
   [K in TConfig["queryKeys"][number] as K extends string
     ? `by${Capitalize<K>}`
     : never]: (
     value: TConfig["type"][K],
-    options?: QueryOptions<TConfig["type"]>
+    options?: QueryOptions<TConfig["type"]>,
   ) => Promise<TConfig["type"][]>;
 };
 
@@ -195,7 +198,7 @@ export type GenerateQueryMethods<
  * Configured repository with organized methods
  */
 export type ConfiguredRepository<
-  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>,
 > = {
   ref: CollectionReference | Query;
 
@@ -204,7 +207,7 @@ export type ConfiguredRepository<
       key: K,
       values: T["type"][K][],
       operator?: "in" | "array-contains-any",
-      returnDoc?: ReturnDoc
+      returnDoc?: ReturnDoc,
     ) => Promise<
       ReturnDoc extends true
         ? Array<{ data: T["type"]; doc: DocumentSnapshot }>
@@ -218,16 +221,16 @@ export type ConfiguredRepository<
     onSnapshot: (
       options: QueryOptions<T["type"]>,
       onNext: (data: T["type"][]) => void,
-      onError?: (error: Error) => void
+      onError?: (error: Error) => void,
     ) => () => void;
     paginate: <
-      TIncludeKeys extends keyof NonNullable<T["relationalKeys"]> = never
+      TIncludeKeys extends keyof NonNullable<T["relationalKeys"]> = never,
     >(
       options: PaginationWithIncludeOptionsTyped<
         T["type"],
         NonNullable<T["relationalKeys"]>,
         TIncludeKeys
-      >
+      >,
     ) => Promise<
       [TIncludeKeys] extends [never]
         ? PaginationResult<T["type"]>
@@ -241,7 +244,7 @@ export type ConfiguredRepository<
           keyof NonNullable<T["relationalKeys"]>
         >,
         "cursor" | "direction"
-      >
+      >,
     ) => ReturnType<typeof createPaginationIterator<T["type"]>>;
   };
 
@@ -249,11 +252,11 @@ export type ConfiguredRepository<
     count: (options?: QueryOptions<T["type"]>) => Promise<number>;
     sum: <K extends keyof T["type"]>(
       field: K,
-      options?: QueryOptions<T["type"]>
+      options?: QueryOptions<T["type"]>,
     ) => Promise<number>;
     average: <K extends keyof T["type"]>(
       field: K,
-      options?: QueryOptions<T["type"]>
+      options?: QueryOptions<T["type"]>,
     ) => Promise<number | null>;
   };
 
@@ -265,7 +268,7 @@ export type ConfiguredRepository<
     ...args: [
       ...Parameters<T["documentRef"]>,
       UpdatableData<T>,
-      { merge?: boolean }?
+      { merge?: boolean }?,
     ]
   ) => Promise<T["type"]>;
 
@@ -282,7 +285,7 @@ export type ConfiguredRepository<
         ...args: [
           ...Parameters<T["documentRef"]>,
           UpdatableData<T>,
-          { merge?: boolean }?
+          { merge?: boolean }?,
         ]
       ) => void;
       update: (
@@ -303,7 +306,7 @@ export type ConfiguredRepository<
           ...args: [
             ...Parameters<T["documentRef"]>,
             UpdatableData<T>,
-            { merge?: boolean }?
+            { merge?: boolean }?,
           ]
         ) => void;
         update: (
@@ -311,7 +314,7 @@ export type ConfiguredRepository<
         ) => void;
         delete: (...args: Parameters<T["documentRef"]>) => void;
         raw: Transaction;
-      }) => Promise<R>
+      }) => Promise<R>,
     ) => Promise<R>;
   };
 
@@ -321,28 +324,31 @@ export type ConfiguredRepository<
         docRef: DocumentReference;
         data: UpdatableData<T>;
         merge?: boolean;
-      }>
+      }>,
     ) => Promise<void>;
     update: (
-      items: Array<{ docRef: DocumentReference; data: UpdatableData<T> }>
+      items: Array<{ docRef: DocumentReference; data: UpdatableData<T> }>,
     ) => Promise<void>;
     delete: (docRefs: DocumentReference[]) => Promise<void>;
   };
 
   populate: <
     K extends keyof NonNullable<T["relationalKeys"]>,
-    TDoc extends Pick<T["type"], K & keyof T["type"]>
+    TDoc extends Pick<T["type"], K & keyof T["type"]>,
   >(
     document: TDoc,
     relationKeyOrOptions:
       | K
       | K[]
-      | PopulateOptionsTyped<NonNullable<T["relationalKeys"]>, K>
+      | PopulateOptionsTyped<NonNullable<T["relationalKeys"]>, K>,
   ) => Promise<
     TDoc & {
       populated: UnionToIntersection<
         K extends keyof NonNullable<T["relationalKeys"]>
-          ? ExtractPopulatedFromRelation<NonNullable<T["relationalKeys"]>[K]>
+          ? ExtractPopulatedFromRelation<
+              NonNullable<T["relationalKeys"]>[K],
+              K & string
+            >
           : Record<string, never>
       >;
     }

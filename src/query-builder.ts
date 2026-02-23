@@ -13,12 +13,12 @@ function chunkArray<T>(array: T[], size: number): T[][] {
 }
 
 /**
- * Apply basic query options (orderBy, limit, offset, cursors)
+ * Apply basic query options (orderBy, limit, offset, select, cursors)
  */
 function applyBasicQueryOptions<T>(q: Query, options: QueryOptions<T>): Query {
   if (options.orderBy) {
     options.orderBy.forEach((o) => {
-      q = q.orderBy(String(o.field), o.direction || "asc");
+      q = q.orderBy(String(o.field), o.direction ?? "asc");
     });
   }
 
@@ -28,6 +28,10 @@ function applyBasicQueryOptions<T>(q: Query, options: QueryOptions<T>): Query {
 
   if (options.offset) {
     q = q.offset(options.offset);
+  }
+
+  if (options.select && options.select.length > 0) {
+    q = q.select(...options.select.map((f) => String(f)));
   }
 
   // Cursor-based pagination
@@ -90,7 +94,7 @@ function splitWhereClause<T>(clause: WhereClause<T>): WhereClause<T>[] {
  */
 function applyWhereClausesToQuery<T>(
   baseQuery: Query,
-  whereClauses: WhereClause<T>[]
+  whereClauses: WhereClause<T>[],
 ): Query {
   let q = baseQuery;
 
@@ -105,7 +109,7 @@ function applyWhereClausesToQuery<T>(
  * Execute multiple queries in parallel and merge results
  */
 async function executeAndMergeQueries(
-  queries: Query[]
+  queries: Query[],
 ): Promise<QuerySnapshot> {
   const snapshots = await Promise.all(queries.map((q) => q.get()));
 
@@ -140,7 +144,7 @@ async function executeAndMergeQueries(
  */
 export async function buildAndExecuteQuery<T>(
   baseQuery: Query,
-  options: QueryOptions<T>
+  options: QueryOptions<T>,
 ): Promise<QuerySnapshot> {
   // Case 1: Simple AND query with where
   if (options.where && !options.orWhere) {

@@ -11,6 +11,7 @@ export type {
   ExtractDocumentRefSignature,
   ExtractUpdateSignature,
   FieldPath,
+  GetOptions,
   GetResult,
   QueryOptions,
   RelationalKeys,
@@ -27,7 +28,7 @@ export {
 } from "./src/pagination";
 export type { PaginationOptions, PaginationResult } from "./src/pagination";
 
-// Query with include (legacy untyped versions)
+// Query pagination with include
 export type {
   IncludeConfig,
   PaginationWithIncludeOptions,
@@ -95,7 +96,7 @@ export function createRepositoryConfig<T>() {
     const TPathKey extends keyof T | undefined = undefined,
     const TCreatedKey extends keyof T | undefined = undefined,
     const TUpdatedKey extends keyof T | undefined = undefined,
-    TRefCb = undefined
+    TRefCb = undefined,
   >(config: {
     path: string;
     isGroup: TIsGroup;
@@ -205,10 +206,10 @@ export function buildRepositoryRelations<
           }[keyof TMapping];
         }
       : never;
-  }
+  },
 >(
   mapping: TMapping,
-  relations: TRelations
+  relations: TRelations,
 ): {
   [K in keyof TMapping]: K extends keyof TRelations
     ? TMapping[K] extends RepositoryConfig<
@@ -293,7 +294,7 @@ export class RepositoryMapping<T extends Record<string, any>> {
       this.allRepositories[key] = createRepository(
         this.db,
         this.mapping[key],
-        {}
+        {},
       );
     }
 
@@ -302,7 +303,7 @@ export class RepositoryMapping<T extends Record<string, any>> {
       this.allRepositories[key] = createRepository(
         this.db,
         this.mapping[key],
-        this.allRepositories
+        this.allRepositories,
       );
     }
   }
@@ -351,7 +352,7 @@ export class RepositoryMapping<T extends Record<string, any>> {
  */
 export function createRepositoryMapping<T extends Record<string, any>>(
   db: Firestore,
-  mapping: T
+  mapping: T,
 ): RepositoryMapping<T> & { [K in keyof T]: ConfiguredRepository<T[K]> } {
   const instance = new RepositoryMapping(db, mapping);
 
@@ -365,3 +366,21 @@ export function createRepositoryMapping<T extends Record<string, any>>(
     },
   }) as any;
 }
+
+// ============================================
+// Servers (pagination function & admin ORM)
+// ============================================
+export {
+  createAdminServer,
+  createPaginationFunction,
+  MiniRouter,
+} from "./servers/index";
+export type {
+  AdminRepoConfig,
+  AdminRepoEntry,
+  AdminServerOptions,
+  BasicAuthConfig,
+  PaginationFunctionOptions,
+  PaginationHttpResult,
+  SerializedCursor,
+} from "./servers/index";

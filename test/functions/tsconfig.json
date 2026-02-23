@@ -30,7 +30,17 @@
     "noPropertyAccessFromIndexSignature": false,
 
     // Allow importing .ts files in examples
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    // Resolve local sub-path exports from source (no build needed)
+    "paths": {
+      "@lpdjs/firestore-repo-service/servers": ["../../servers/index.ts"],
+      "@lpdjs/firestore-repo-service/servers/pagination": [
+        "../../servers/pagination/index.ts"
+      ],
+      "@lpdjs/firestore-repo-service/servers/admin": [
+        "../../servers/admin/index.ts"
+      ]
+    }
   },
   "include": ["index.ts"],
   "exclude": ["node_modules", "dist", "example.ts", "**/*.test.ts"]

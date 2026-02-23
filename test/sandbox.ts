@@ -75,13 +75,13 @@ const repositoryMappingWithRelations = buildRepositoryRelations(
     posts: {
       userId: { repo: "users", key: "docId", type: "one" as const },
     },
-  }
+  },
 );
 
 // Step 3: Create the repository mapping
 export const repos = createRepositoryMapping(
   db,
-  repositoryMappingWithRelations
+  repositoryMappingWithRelations,
 );
 
 // ============================================
@@ -139,7 +139,7 @@ async function test() {
   console.log("\n🔗 Test populate (one-to-one):");
   const postWithUser = await repos.posts.populate(post1, "userId");
   console.log(`  Post: "${postWithUser.title}"`);
-  const populatedUsers = postWithUser.populated?.users;
+  const populatedUsers = postWithUser.populated.userId;
   console.log(`  Auteur: ${populatedUsers?.name} (${populatedUsers?.email})`);
 
   // Test 4: Query posts par userId
@@ -154,7 +154,7 @@ async function test() {
   console.log(`  Total: ${allPosts.length} posts`);
   for (const post of allPosts) {
     const populated = await repos.posts.populate(post, "userId");
-    const author = populated.populated.users;
+    const author = populated.populated.userId;
     console.log(`  • "${populated.title}" par ${author?.name || "unknown"}`);
   }
 

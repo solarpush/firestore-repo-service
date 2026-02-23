@@ -1,6 +1,9 @@
 import type { DocumentSnapshot, Query } from "firebase-admin/firestore";
 import { buildAndExecuteQuery } from "./query-builder";
 import type { QueryOptions } from "./shared/types";
+import { applyQueryOptions } from "./shared/utils";
+
+export { applyQueryOptions };
 
 /**
  * Pagination result with data and cursor information
@@ -35,61 +38,6 @@ export interface PaginationOptions<T> extends Omit<QueryOptions<T>, "limit"> {
 }
 
 /**
- * Helper to apply query options to a Firestore query
- */
-export function applyQueryOptions<T>(
-  q: Query,
-  options: QueryOptions<T>
-): Query {
-  if (options.where) {
-    options.where.forEach(([field, operator, value]) => {
-      q = q.where(String(field), operator, value);
-    });
-  }
-
-  if (options.orderBy) {
-    options.orderBy.forEach((o) => {
-      q = q.orderBy(String(o.field), o.direction || "asc");
-    });
-  }
-
-  if (options.limit) {
-    q = q.limit(options.limit);
-  }
-
-  if (options.offset) {
-    q = q.offset(options.offset);
-  }
-
-  // Cursor-based pagination
-  if (options.startAt) {
-    q = Array.isArray(options.startAt)
-      ? q.startAt(...options.startAt)
-      : q.startAt(options.startAt);
-  }
-
-  if (options.startAfter) {
-    q = Array.isArray(options.startAfter)
-      ? q.startAfter(...options.startAfter)
-      : q.startAfter(options.startAfter);
-  }
-
-  if (options.endAt) {
-    q = Array.isArray(options.endAt)
-      ? q.endAt(...options.endAt)
-      : q.endAt(options.endAt);
-  }
-
-  if (options.endBefore) {
-    q = Array.isArray(options.endBefore)
-      ? q.endBefore(...options.endBefore)
-      : q.endBefore(options.endBefore);
-  }
-
-  return q;
-}
-
-/**
  * Executes a paginated query and returns results with pagination info
  * Uses the advanced query builder that handles OR conditions and automatic splitting
  * @template T - Data model type
@@ -99,7 +47,7 @@ export function applyQueryOptions<T>(
  */
 export async function executePaginatedQuery<T>(
   baseQuery: Query,
-  options: PaginationOptions<T>
+  options: PaginationOptions<T>,
 ): Promise<PaginationResult<T>> {
   // Prepare options with cursor-based pagination
   const queryOptions: QueryOptions<T> = {
@@ -157,7 +105,7 @@ export async function executePaginatedQuery<T>(
  */
 export async function* createPaginationIterator<T>(
   baseQuery: Query,
-  options: Omit<PaginationOptions<T>, "cursor" | "direction">
+  options: Omit<PaginationOptions<T>, "cursor" | "direction">,
 ): AsyncGenerator<PaginationResult<T>, void, unknown> {
   let cursor: DocumentSnapshot | undefined;
   let hasMore = true;

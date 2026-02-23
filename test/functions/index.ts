@@ -1,11 +1,13 @@
 import {
   buildRepositoryRelations,
+  createAdminServer,
   createRepositoryConfig,
   createRepositoryMapping,
 } from "@lpdjs/firestore-repo-service";
 import { initializeApp } from "firebase-admin/app";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
 import { onRequest } from "firebase-functions/https";
+import z from "zod";
 // IMPORTANT: Configurer les variables d'environnement AVANT d'initialiser
 process.env.FIRESTORE_EMULATOR_HOST = "localhost:8080";
 // Supprimer le warning de métadonnées GCP
@@ -122,7 +124,7 @@ const repositoryMappingWithRelations = buildRepositoryRelations(
       postId: { repo: "posts", key: "docId", type: "one" as const },
       userId: { repo: "users", key: "docId", type: "one" as const },
     },
-  }
+  },
 );
 
 // Step 3: Create the repository mapping
@@ -196,15 +198,15 @@ export const server = onRequest(async (req, res) => {
       {
         relation: "docId",
         select: ["docId", "title", "status"],
-      }
+      },
     );
     console.log("User with populated posts:", userWithPosts);
-    console.log("Populated posts data:", userWithPosts.populated.posts);
+    console.log("Populated posts data:", userWithPosts.populated.docId);
 
     // 8. Récupération d'un post avec ses comments via populate
     const postWithComments = await repos.posts.populate(firstPost, "docId");
     console.log("Post with populated comments:", postWithComments);
-    console.log("Populated comments:", postWithComments.populated.comments);
+    console.log("Populated comments:", postWithComments.populated.docId);
 
     // 9. Pagination des posts avec include pour récupérer les comments de chaque post
     const paginatedPostsWithComments = await repos.posts.query.paginate({
@@ -213,7 +215,7 @@ export const server = onRequest(async (req, res) => {
     });
     console.log(
       "Paginated posts with comments and user:",
-      paginatedPostsWithComments.data
+      paginatedPostsWithComments.data,
     );
 
     // 10. Pagination des comments avec include pour récupérer le post et l'user
@@ -223,7 +225,7 @@ export const server = onRequest(async (req, res) => {
     });
     console.log(
       "Paginated comments with post and user:",
-      paginatedCommentsWithRelations.data
+      paginatedCommentsWithRelations.data,
     );
 
     res.json({
@@ -241,3 +243,44 @@ export const server = onRequest(async (req, res) => {
     res.status(500).json({ error: String(error) });
   }
 });
+const postSchema = z.object({
+  docId: z.string(),
+  documentPath: z.string(),
+  userId: z.string(),
+  address: z.object({ street: z.string(), city: z.string() }),
+  title: z.string(),
+  content: z.string(),
+  status: z.enum(["draft", "published"]),
+  views: z.number(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+});
+export const admin = onRequest(
+  createAdminServer({
+    basePath: "/",
+    repos: {
+      posts: {
+        repo: repos.posts,
+        schema: postSchema,
+        path: "posts",
+        filterableFields: ["status", "userId"],
+        mutableFields: ["status", "title", "content", "address"],
+        allowDelete: true,
+      },
+      users: {
+        repo: repos.users,
+        schema: z.object({
+          docId: z.string(),
+          documentPath: z.string(),
+          email: z.string(),
+          name: z.string().nullable(),
+          age: z.number(),
+          isActive: z.boolean().nullable(),
+          createdAt: z.date(),
+          updatedAt: z.date(),
+        }),
+        path: "users",
+      },
+    },
+  }),
+);

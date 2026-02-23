@@ -1,12 +1,17 @@
-import type { Query, QuerySnapshot } from "firebase-admin/firestore";
+import type { Query } from "firebase-admin/firestore";
 import {
   createPaginationIterator,
   executePaginatedQuery,
   type PaginationOptions,
   type PaginationResult,
 } from "../pagination";
-import type { QueryOptions, RelationConfig } from "../shared/types";
-import { capitalize } from "../shared/utils";
+import { buildAndExecuteQuery } from "../query-builder";
+import type {
+  QueryOptions,
+  RelationConfig,
+  WhereClause,
+} from "../shared/types";
+import { applyQueryOptions, capitalize } from "../shared/utils";
 
 /**
  * Include configuration for a relation with optional select
@@ -21,67 +26,12 @@ export interface IncludeConfig {
 /**
  * Options for pagination with include support
  */
-export interface PaginationWithIncludeOptions<T, TRelationKeys = string>
-  extends PaginationOptions<T> {
+export interface PaginationWithIncludeOptions<
+  T,
+  TRelationKeys = string,
+> extends PaginationOptions<T> {
   /** Relations to include in results - can be relation keys or IncludeConfig objects */
   include?: (TRelationKeys | IncludeConfig)[];
-}
-
-/**
- * Apply query options to a Firestore query
- */
-export function applyQueryOptions(q: Query, options: QueryOptions): Query {
-  if (options.where) {
-    options.where.forEach(([field, operator, value]) => {
-      q = q.where(String(field), operator, value);
-    });
-  }
-
-  if (options.orderBy) {
-    options.orderBy.forEach((o) => {
-      q = q.orderBy(String(o.field), o.direction || "asc");
-    });
-  }
-
-  if (options.limit) {
-    q = q.limit(options.limit);
-  }
-
-  if (options.offset) {
-    q = q.offset(options.offset);
-  }
-
-  // Apply select if specified
-  if (options.select && options.select.length > 0) {
-    q = q.select(...options.select.map((f) => String(f)));
-  }
-
-  // Cursor-based pagination
-  if (options.startAt) {
-    q = Array.isArray(options.startAt)
-      ? q.startAt(...options.startAt)
-      : q.startAt(options.startAt);
-  }
-
-  if (options.startAfter) {
-    q = Array.isArray(options.startAfter)
-      ? q.startAfter(...options.startAfter)
-      : q.startAfter(options.startAfter);
-  }
-
-  if (options.endAt) {
-    q = Array.isArray(options.endAt)
-      ? q.endAt(...options.endAt)
-      : q.endAt(options.endAt);
-  }
-
-  if (options.endBefore) {
-    q = Array.isArray(options.endBefore)
-      ? q.endBefore(...options.endBefore)
-      : q.endBefore(options.endBefore);
-  }
-
-  return q;
 }
 
 /**
@@ -91,150 +41,141 @@ export function createQueryMethods<T>(
   collectionRef: Query,
   queryKeys: readonly string[],
   relationalKeys?: Record<string, RelationConfig>,
-  allRepositories?: Record<string, any>
+  allRepositories?: Record<string, any>,
 ) {
   const queryMethods: any = {};
 
   /**
-   * Helper to populate documents with relations
+   * Resolve included relations for a list of documents (parallel per document,
+   * parallel per relation). Stores results by field key to avoid repo-name collisions.
    */
   const populateDocuments = async (
     documents: T[],
-    includeConfigs: (string | IncludeConfig)[]
+    includeConfigs: (string | IncludeConfig)[],
   ): Promise<(T & { populated: Record<string, any> })[]> => {
     if (!relationalKeys || !allRepositories || includeConfigs.length === 0) {
       return documents as any;
     }
 
-    // Normalize include configs
     const normalizedConfigs: { key: string; select?: string[] }[] =
-      includeConfigs.map((config) =>
-        typeof config === "string"
-          ? { key: config }
-          : { key: config.relation, select: config.select }
+      includeConfigs.map((cfg) =>
+        typeof cfg === "string"
+          ? { key: cfg }
+          : { key: cfg.relation, select: cfg.select },
       );
 
-    const results: (T & { populated: Record<string, any> })[] = [];
+    return Promise.all(
+      documents.map(async (doc) => {
+        const entries = await Promise.all(
+          normalizedConfigs.map(async ({ key, select }) => {
+            const relation = relationalKeys[key];
+            if (!relation) return [key, undefined] as const;
 
-    for (const doc of documents) {
-      const populated: Record<string, any> = {};
+            const targetRepo = allRepositories[relation.repo];
+            if (!targetRepo) return [key, undefined] as const;
 
-      for (const { key, select } of normalizedConfigs) {
-        const relation = relationalKeys[key];
-        if (!relation) continue;
-
-        const targetRepo = allRepositories[relation.repo];
-        if (!targetRepo) continue;
-
-        const fieldValue = (doc as any)[key];
-        if (fieldValue === undefined || fieldValue === null) {
-          populated[relation.repo] = relation.type === "one" ? null : [];
-          continue;
-        }
-
-        // Build options with select if specified
-        const options = select ? { select } : {};
-
-        try {
-          if (relation.type === "one") {
-            const getMethod = `by${capitalize(relation.key)}`;
-            if (typeof targetRepo.get?.[getMethod] === "function") {
-              populated[relation.repo] = await targetRepo.get[getMethod](
-                fieldValue,
-                options
-              );
-            } else {
-              populated[relation.repo] = null;
+            const fieldValue = (doc as any)[key];
+            if (fieldValue === undefined || fieldValue === null) {
+              return [key, relation.type === "one" ? null : []] as const;
             }
-          } else {
-            const queryMethod = `by${capitalize(relation.key)}`;
-            if (typeof targetRepo.query?.[queryMethod] === "function") {
-              populated[relation.repo] = await targetRepo.query[queryMethod](
-                fieldValue,
-                options
-              );
-            } else {
-              populated[relation.repo] = [];
+
+            const opts = select ? { select } : undefined;
+
+            try {
+              if (relation.type === "one") {
+                const method = `by${capitalize(relation.key)}`;
+                const result =
+                  typeof targetRepo.get?.[method] === "function"
+                    ? await targetRepo.get[method](fieldValue, opts)
+                    : null;
+                return [key, result] as const;
+              } else {
+                const method = `by${capitalize(relation.key)}`;
+                const result =
+                  typeof targetRepo.query?.[method] === "function"
+                    ? await targetRepo.query[method](fieldValue, opts)
+                    : [];
+                return [key, result] as const;
+              }
+            } catch (err) {
+              console.error(`[include] Error populating "${key}":`, err);
+              return [key, relation.type === "one" ? null : []] as const;
             }
-          }
-        } catch (error) {
-          console.error(`[include] Error populating "${key}":`, error);
-          populated[relation.repo] = relation.type === "one" ? null : [];
+          }),
+        );
+
+        const populated: Record<string, any> = {};
+        for (const [k, v] of entries) {
+          if (k !== undefined) populated[k] = v;
         }
-      }
-
-      results.push({ ...doc, populated });
-    }
-
-    return results;
+        return { ...doc, populated };
+      }),
+    );
   };
 
-  // Generate query.by* methods for each query key
+  // Generate query.by* methods — inject queryKey condition into options so
+  // orWhere and other advanced options are all handled by buildAndExecuteQuery.
   queryKeys.forEach((queryKey: string) => {
-    const methodName = `by${capitalize(String(queryKey))}`;
+    const methodName = `by${capitalize(queryKey)}`;
     queryMethods[methodName] = async (
-      value: string,
-      options: QueryOptions = {}
+      value: any,
+      options: QueryOptions<T> = {},
     ): Promise<T[]> => {
-      let q: Query = collectionRef as any;
-      q = q.where(String(queryKey), "==", value);
-      q = applyQueryOptions(q, options);
-      const snapshot: QuerySnapshot = await q.get();
+      const mergedOptions: QueryOptions<T> = {
+        ...options,
+        where: [
+          [queryKey, "==", value] as unknown as WhereClause<T>,
+          ...(options.where ?? []),
+        ],
+      };
+      const snapshot = await buildAndExecuteQuery<T>(
+        collectionRef,
+        mergedOptions,
+      );
       return snapshot.docs.map((doc) => doc.data() as T);
     };
   });
 
-  // Generic query.by method
-  queryMethods.by = async (options: QueryOptions): Promise<T[]> => {
-    let q: Query = collectionRef as any;
-    q = applyQueryOptions(q, options);
-    const snapshot: QuerySnapshot = await q.get();
+  // Generic query.by — full orWhere support via buildAndExecuteQuery
+  queryMethods.by = async (options: QueryOptions<T>): Promise<T[]> => {
+    const snapshot = await buildAndExecuteQuery<T>(collectionRef, options);
     return snapshot.docs.map((doc) => doc.data() as T);
   };
 
-  // getAll - retrieve all documents
-  queryMethods.getAll = async (options: QueryOptions = {}): Promise<T[]> => {
-    let q: Query = collectionRef as any;
-    q = applyQueryOptions(q, options);
-    const snapshot: QuerySnapshot = await q.get();
+  // getAll — full orWhere support via buildAndExecuteQuery
+  queryMethods.getAll = async (options: QueryOptions<T> = {}): Promise<T[]> => {
+    const snapshot = await buildAndExecuteQuery<T>(collectionRef, options);
     return snapshot.docs.map((doc) => doc.data() as T);
   };
 
-  // onSnapshot - real-time listener
+  // onSnapshot — real-time listener (orWhere not supported by Firestore SDK real-time)
   queryMethods.onSnapshot = (
-    options: QueryOptions,
+    options: QueryOptions<T>,
     onNext: (data: T[]) => void,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
   ): (() => void) => {
-    let q: Query = collectionRef as any;
-    q = applyQueryOptions(q, options);
-
+    const q = applyQueryOptions(collectionRef, options);
     return q.onSnapshot((snapshot) => {
-      const data = snapshot.docs.map((doc) => doc.data() as T);
-      onNext(data);
+      onNext(snapshot.docs.map((doc) => doc.data() as T));
     }, onError);
   };
 
-  // Pagination methods with include support
+  // Paginate — includes relation resolution after each page
   queryMethods.paginate = async (
-    options: PaginationWithIncludeOptions<T, string>
+    options: PaginationWithIncludeOptions<T, string>,
   ): Promise<
     | PaginationResult<T>
     | PaginationResult<T & { populated: Record<string, any> }>
   > => {
     const { include, ...paginationOptions } = options;
     const result = await executePaginatedQuery<T>(
-      collectionRef as Query,
-      paginationOptions
+      collectionRef,
+      paginationOptions,
     );
 
-    // If include is specified, populate the relations
     if (include && include.length > 0) {
       const populatedData = await populateDocuments(result.data, include);
-      return {
-        ...result,
-        data: populatedData,
-      };
+      return { ...result, data: populatedData };
     }
 
     return result;
@@ -244,11 +185,8 @@ export function createQueryMethods<T>(
     options: Omit<
       PaginationWithIncludeOptions<T, string>,
       "cursor" | "direction"
-    >
-  ) => {
-    // Note: include will be applied per page in the iterator
-    return createPaginationIterator(collectionRef as Query, options);
-  };
+    >,
+  ) => createPaginationIterator(collectionRef, options);
 
   return queryMethods;
 }
