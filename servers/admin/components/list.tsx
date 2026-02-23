@@ -35,6 +35,7 @@ export function renderListJsx(
   flash?: PageOptions["flash"],
   columnMeta: ColumnMeta[] = [],
   activeFilters: FilterState[] = [],
+  allowDelete = false,
 ): string {
   const listUrl = `${basePath}/${repoName}`;
   const createUrl = `${listUrl}/create`;
@@ -119,18 +120,20 @@ export function renderListJsx(
                         <a href={editUrl} class="btn btn-xs btn-outline">
                           Edit
                         </a>
-                        <form
-                          method="post"
-                          action={deleteUrl}
-                          onsubmit="return confirm('Delete this document?')"
-                        >
-                          <button
-                            type="submit"
-                            class="btn btn-xs btn-error btn-outline"
+                        {allowDelete && (
+                          <form
+                            method="post"
+                            action={deleteUrl}
+                            onsubmit="return confirm('Delete this document?')"
                           >
-                            Delete
-                          </button>
-                        </form>
+                            <button
+                              type="submit"
+                              class="btn btn-xs btn-error btn-outline"
+                            >
+                              Delete
+                            </button>
+                          </form>
+                        )}
                       </div>
                     </td>
                   </tr>

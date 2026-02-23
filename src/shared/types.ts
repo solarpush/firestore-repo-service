@@ -232,6 +232,9 @@ export interface RepositoryConfig<
   createdKey?: TCreatedKey;
   updatedKey?: TUpdatedKey;
   type: T;
+  /** Zod schema attached when using createRepositoryConfig(schema)(config). Used by the admin server. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  schema?: import("zod").ZodObject<any>;
   refCb?: TRefCb;
   relationalKeys?: TRelationalKeys;
   documentRef: TRefCb extends undefined

@@ -38,7 +38,7 @@
 
 import type { z } from "zod";
 import type { ConfiguredRepository } from "../../src/repositories/types";
-import type { RepositoryConfig } from "../../src/shared/types";
+import type { FieldPath, RepositoryConfig } from "../../src/shared/types";
 import type { HttpRequest, HttpResponse } from "../http-types";
 import type { AdminRepoEntry, RepoRegistry } from "./handlers";
 import { createAdminHandlers } from "./handlers";
@@ -49,30 +49,46 @@ import { type Middleware, MiniRouter } from "./router";
 // ---------------------------------------------------------------------------
 
 /**
+ * Extracts the model type `T` from a `ConfiguredRepository`.
+ * @internal
+ */
+type RepoModelType<TRepo> =
+  TRepo extends ConfiguredRepository<
+    RepositoryConfig<infer T, any, any, any, any, any, any, any, any, any>
+  >
+    ? T
+    : never;
+
+/**
  * Configuration for a single repository in the admin server.
- * @template TConfig - Repository configuration
+ *
+ * @template TRepo - The `ConfiguredRepository` type; used to derive typed field names.
+ *
+ * If the repository was created with `createRepositoryConfig(schema)(config)`,
+ * the `schema` field is optional — it is auto-detected from the repo.
+ * Otherwise, pass `schema` explicitly.
+ *
+ * @example
+ * ```ts
+ * posts: {
+ *   repo: repos.posts,            // ConfiguredRepository inferred → PostModel
+ *   filterableFields: ["status"],  // ✔ autocomplete + error if invalid key
+ *   mutableFields: ["title"],
+ *   createFields: ["title", "content"],
+ *   allowDelete: true,
+ * }
+ * ```
  */
 export interface AdminRepoConfig<
-  TConfig extends RepositoryConfig<
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any
-  > = RepositoryConfig<any, any, any, any, any, any, any, any, any, any>,
+  TRepo extends ConfiguredRepository<any> = ConfiguredRepository<any>,
 > {
-  /** The configured repository instance */
-  repo: ConfiguredRepository<TConfig>;
+  /** The configured repository instance. Drives type inference for all other fields. */
+  repo: TRepo;
   /**
-   * Zod schema that **exactly** maps to the repository's model type.
-   * Used to generate forms and validate submissions.
+   * Zod schema — optional when the repo was created with `createRepositoryConfig(schema)`.
+   * Pass explicitly for repos created with the legacy `createRepositoryConfig<T>()` form.
    */
-  schema: z.ZodObject<z.ZodRawShape>;
+  schema?: z.ZodObject<z.ZodRawShape>;
   /** Firestore collection path (for display only) */
   path: string;
   /** Key used to identify documents (default: "docId") */
@@ -81,6 +97,28 @@ export interface AdminRepoConfig<
   listColumns?: string[];
   /** Number of documents per page in the list view (default: 25) */
   pageSize?: number;
+  /**
+   * Fields shown in the filter bar — typed to the model keys.
+   * Defaults to all schema keys.
+   */
+  filterableFields?: FieldPath<RepoModelType<TRepo>>[];
+  /**
+   * Fields shown in the **edit** form — typed to the model keys.
+   * Supports dot-notation for nested fields (e.g. `"address.city"`).
+   * If unset, all schema fields are shown.
+   */
+  mutableFields?: FieldPath<RepoModelType<TRepo>>[];
+  /**
+   * Fields shown in the **create** form — typed to the model keys.
+   * Supports dot-notation for nested fields (e.g. `"address.city"`).
+   * If unset, all schema fields are shown.
+   */
+  createFields?: FieldPath<RepoModelType<TRepo>>[];
+  /**
+   * Whether to show the delete button in the list view.
+   * Default: false — delete is disabled unless explicitly set to true.
+   */
+  allowDelete?: boolean;
 }
 
 /**
@@ -96,9 +134,20 @@ export interface BasicAuthConfig {
 }
 
 /**
- * Options for `createAdminServer`
+ * Options for `createAdminServer`.
+ *
+ * Made generic so TypeScript can infer the model type of each repo entry
+ * and provide autocomplete + type-checking on `filterableFields`, `mutableFields`,
+ * and `createFields`.
+ *
+ * @template TRepos - Shape of the repos map (inferred automatically at the call site)
  */
-export interface AdminServerOptions {
+export interface AdminServerOptions<
+  TRepos extends Record<string, ConfiguredRepository<any>> = Record<
+    string,
+    ConfiguredRepository<any>
+  >,
+> {
   /**
    * Base URL path of the function (e.g. "/admin").
    * Must match the path where the Firebase Function is mounted.
@@ -108,48 +157,36 @@ export interface AdminServerOptions {
 
   /**
    * Repository entries keyed by a display name.
+   * TypeScript infers the model type from each `repo` field,
+   * so `filterableFields`, `mutableFields`, and `createFields` are
+   * typed to `keyof` that model.
    *
    * @example
+   * ```ts
    * repos: {
-   *   posts: { repo: repos.posts, schema: postSchema, path: "posts" },
-   *   users: { repo: repos.users, schema: userSchema, path: "users" },
+   *   posts: {
+   *     repo: repos.posts,
+   *     filterableFields: ["status", "userId"],  // ✔ typed to PostModel keys
+   *     mutableFields:    ["title", "content"],
+   *     createFields:     ["title", "content", "status"],
+   *   },
    * }
+   * ```
    */
-  repos: Record<string, AdminRepoConfig>;
+  repos: { [K in keyof TRepos]: AdminRepoConfig<TRepos[K]> };
 
-  /**
-   * Whether to parse URL-encoded bodies. Default: true.
-   * Set to false if you handle body parsing elsewhere.
-   */
+  /** Whether to parse URL-encoded bodies. Default: true. */
   parseBody?: boolean;
 
   /**
    * Authentication guard executed before every request.
-   * - Pass a `BasicAuthConfig` to enable HTTP Basic Auth (browser login dialog).
-   * - Pass a `Middleware` function for custom auth logic (JWT, session, etc.).
-   *
-   * @example — Basic Auth
-   * auth: { type: "basic", username: "admin", password: "secret" }
-   *
-   * @example — Custom middleware
-   * auth: (req, res, next) => {
-   *   if (req.headers?.["x-admin-token"] !== "mytoken") {
-   *     res.status(401).set("Content-Type", "text/plain").send("Unauthorized");
-   *     return;
-   *   }
-   *   next();
-   * }
+   * - Pass a `BasicAuthConfig` to enable HTTP Basic Auth.
+   * - Pass a `Middleware` function for custom auth logic.
    */
   auth?: BasicAuthConfig | Middleware;
 
   /**
    * Additional middleware functions executed after auth, before route handlers.
-   * Useful for logging, rate-limiting, injecting context, etc.
-   *
-   * @example
-   * middleware: [
-   *   (req, _res, next) => { console.log(req.method, req.url); next(); },
-   * ]
    */
   middleware?: Middleware[];
 }
@@ -195,8 +232,10 @@ function parseUrlEncoded(body: string): Record<string, string | string[]> {
 /**
  * Creates an Express-compatible request handler for the admin ORM UI.
  */
-export function createAdminServer(
-  options: AdminServerOptions,
+export function createAdminServer<
+  TRepos extends Record<string, ConfiguredRepository<any>>,
+>(
+  options: AdminServerOptions<TRepos>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): (req: any, res: any) => Promise<void> {
   const {
@@ -213,14 +252,26 @@ export function createAdminServer(
   // Build the registry
   const registry: RepoRegistry = {};
   for (const [name, cfg] of Object.entries(repos)) {
+    // Schema resolution: explicit cfg.schema > embedded in repo (createRepositoryConfig(schema))
+    const resolvedSchema = cfg.schema ?? (cfg.repo as any).schema ?? null;
+    if (!resolvedSchema) {
+      throw new Error(
+        `[createAdminServer] Repository "${name}" has no Zod schema. ` +
+          `Either use createRepositoryConfig(schema)(config) or pass schema: explicitly.`,
+      );
+    }
     const entry: AdminRepoEntry = {
       name,
       path: cfg.path,
       repo: cfg.repo,
-      schema: cfg.schema,
+      schema: resolvedSchema,
       documentKey: cfg.documentKey ?? "docId",
       listColumns: cfg.listColumns,
       pageSize: cfg.pageSize,
+      filterableFields: cfg.filterableFields as string[] | undefined,
+      mutableFields: cfg.mutableFields as string[] | undefined,
+      createFields: cfg.createFields as string[] | undefined,
+      allowDelete: cfg.allowDelete ?? false,
     };
     registry[name] = entry;
   }

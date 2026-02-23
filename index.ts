@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 
 import type { Firestore } from "firebase-admin/firestore";
+import type { z } from "zod";
 
 // ============================================
 // Re-exports from modules
@@ -65,8 +66,17 @@ import type { RelationConfig, RepositoryConfig } from "./src/shared/types";
 /**
  * Helper to create a typed repository configuration with literal type preservation
  * Uses currying pattern to allow type parameter inference
- * @template T - The data model type
- * @returns Builder function that accepts repository configuration with withRelations method
+ *
+ * @overload Pass the model type explicitly (legacy):
+ * `createRepositoryConfig<UserModel>()(config)`
+ *
+ * @overload Pass a Zod schema to infer the model type automatically:
+ * `createRepositoryConfig<typeof userSchema>()(config)`
+ * or more idiomatically, pass the schema instance as a runtime argument:
+ * `createRepositoryConfig(userSchema)(config)` — the model type is `z.infer<typeof userSchema>`
+ *
+ * @template T_or_Schema - Either the model type OR a ZodObject schema (inferred automatically)
+ * @returns Builder function that accepts repository configuration
  * @example
  * ```typescript
  * const mapping = {
@@ -87,45 +97,116 @@ import type { RelationConfig, RepositoryConfig } from "./src/shared/types";
  * };
  * ```
  */
-export function createRepositoryConfig<T>() {
-  return <
-    const TForeignKeys extends readonly (keyof T)[],
-    const TQueryKeys extends readonly (keyof T)[],
-    const TIsGroup extends boolean,
-    const TDocumentKey extends keyof T,
-    const TPathKey extends keyof T | undefined = undefined,
-    const TCreatedKey extends keyof T | undefined = undefined,
-    const TUpdatedKey extends keyof T | undefined = undefined,
-    TRefCb = undefined,
-  >(config: {
-    path: string;
-    isGroup: TIsGroup;
-    foreignKeys: TForeignKeys;
-    queryKeys: TQueryKeys;
-    documentKey: TDocumentKey;
-    pathKey?: TPathKey;
-    createdKey?: TCreatedKey;
-    updatedKey?: TUpdatedKey;
-    refCb: TRefCb;
-  }): RepositoryConfig<
-    T,
-    TForeignKeys,
-    TQueryKeys,
-    TIsGroup,
-    TRefCb,
-    {},
-    TDocumentKey,
-    TPathKey,
-    TCreatedKey,
-    TUpdatedKey
-  > => {
-    return {
-      ...config,
-      type: null as any as T,
-      documentRef: null as any,
-      update: null as any,
-    } as any;
-  };
+// ---------------------------------------------------------------------------
+// createRepositoryConfig — two overloads
+// ---------------------------------------------------------------------------
+
+/**
+ * Overload 1 — pass the Zod schema as a runtime argument.
+ * The model type is inferred automatically as `z.infer<TSchema>`.
+ * The schema is stored in the resulting config so the admin server
+ * can pick it up without requiring you to pass it a second time.
+ *
+ * @example
+ * ```ts
+ * const postSchema = z.object({ title: z.string(), ... });
+ *
+ * const postsConfig = createRepositoryConfig(postSchema)({
+ *   path: "posts",
+ *   foreignKeys: ["docId"] as const,
+ *   ...
+ * });
+ * ```
+ */
+export function createRepositoryConfig<
+  TSchema extends z.ZodObject<z.ZodRawShape>,
+>(
+  schema: TSchema,
+): <
+  const TForeignKeys extends readonly (keyof z.infer<TSchema>)[],
+  const TQueryKeys extends readonly (keyof z.infer<TSchema>)[],
+  const TIsGroup extends boolean,
+  const TDocumentKey extends keyof z.infer<TSchema>,
+  const TPathKey extends keyof z.infer<TSchema> | undefined = undefined,
+  const TCreatedKey extends keyof z.infer<TSchema> | undefined = undefined,
+  const TUpdatedKey extends keyof z.infer<TSchema> | undefined = undefined,
+  TRefCb = undefined,
+>(config: {
+  path: string;
+  isGroup: TIsGroup;
+  foreignKeys: TForeignKeys;
+  queryKeys: TQueryKeys;
+  documentKey: TDocumentKey;
+  pathKey?: TPathKey;
+  createdKey?: TCreatedKey;
+  updatedKey?: TUpdatedKey;
+  refCb: TRefCb;
+}) => RepositoryConfig<
+  z.infer<TSchema>,
+  TForeignKeys,
+  TQueryKeys,
+  TIsGroup,
+  TRefCb,
+  {},
+  TDocumentKey,
+  TPathKey,
+  TCreatedKey,
+  TUpdatedKey
+> & { schema: TSchema };
+
+/**
+ * Overload 2 — no schema, explicit model type (legacy / repos without an admin UI).
+ *
+ * @example
+ * ```ts
+ * const commentsConfig = createRepositoryConfig<CommentModel>()({
+ *   path: "comments",
+ *   foreignKeys: ["docId"] as const,
+ *   ...
+ * });
+ * ```
+ */
+export function createRepositoryConfig<T>(): <
+  const TForeignKeys extends readonly (keyof T)[],
+  const TQueryKeys extends readonly (keyof T)[],
+  const TIsGroup extends boolean,
+  const TDocumentKey extends keyof T,
+  const TPathKey extends keyof T | undefined = undefined,
+  const TCreatedKey extends keyof T | undefined = undefined,
+  const TUpdatedKey extends keyof T | undefined = undefined,
+  TRefCb = undefined,
+>(config: {
+  path: string;
+  isGroup: TIsGroup;
+  foreignKeys: TForeignKeys;
+  queryKeys: TQueryKeys;
+  documentKey: TDocumentKey;
+  pathKey?: TPathKey;
+  createdKey?: TCreatedKey;
+  updatedKey?: TUpdatedKey;
+  refCb: TRefCb;
+}) => RepositoryConfig<
+  T,
+  TForeignKeys,
+  TQueryKeys,
+  TIsGroup,
+  TRefCb,
+  {},
+  TDocumentKey,
+  TPathKey,
+  TCreatedKey,
+  TUpdatedKey
+>;
+
+// Implementation
+export function createRepositoryConfig(schema?: z.ZodObject<z.ZodRawShape>) {
+  return (config: any): any => ({
+    ...config,
+    ...(schema !== undefined ? { schema } : {}),
+    type: null as any,
+    documentRef: null as any,
+    update: null as any,
+  });
 }
 
 /**

@@ -48,6 +48,7 @@ export function renderList(
   flash?: PageOptions["flash"],
   columnMeta?: ColumnMeta[],
   activeFilters?: FilterState[],
+  allowDelete?: boolean,
 ): string {
   return renderListJsx(
     repoName,
@@ -58,6 +59,7 @@ export function renderList(
     flash,
     columnMeta,
     activeFilters,
+    allowDelete,
   );
 }
 

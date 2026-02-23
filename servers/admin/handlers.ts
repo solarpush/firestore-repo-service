@@ -11,7 +11,7 @@
  *   POST /:repoName/:id/delete   → delete document
  */
 
-import type { z } from "zod";
+import { z } from "zod";
 import type { ConfiguredRepository } from "../../src/repositories/types";
 import type { RepositoryConfig } from "../../src/shared/types";
 import { renderForm, zodToFields, type FieldDescriptor } from "./form-gen";
@@ -37,6 +37,14 @@ export interface AdminRepoEntry {
   listColumns?: string[];
   /** Page size for list view (default: 25) */
   pageSize?: number;
+  /** Fields exposed in the filter bar (defaults to all schema keys) */
+  filterableFields?: string[];
+  /** Fields shown in the edit form (defaults to all schema fields if unset) */
+  mutableFields?: string[];
+  /** Fields shown in the create form (defaults to all schema fields if unset) */
+  createFields?: string[];
+  /** Whether delete is allowed (default: false) */
+  allowDelete?: boolean;
 }
 
 export type RepoRegistry = Record<string, AdminRepoEntry>;
@@ -421,6 +429,100 @@ function buildColumnMeta(
 // ---------------------------------------------------------------------------
 
 /**
+ * Resolve the ZodType at a dot-notation path (e.g. "address.city") within a schema.
+ * Returns null if the path cannot be resolved.
+ */
+function resolveZodAtPath(
+  schema: z.ZodObject<z.ZodRawShape>,
+  path: string,
+): z.ZodTypeAny | null {
+  const parts = path.split(".");
+  let s: z.ZodTypeAny = schema as z.ZodTypeAny;
+  for (const part of parts) {
+    // Unwrap Optional / Nullable / Default wrappers
+    while (true) {
+      const itn: string = (s as any)._def?.typeName ?? "";
+      if (
+        itn === "ZodOptional" ||
+        itn === "ZodNullable" ||
+        itn === "ZodDefault"
+      ) {
+        s = (s as any)._def.innerType;
+      } else break;
+    }
+    const shape: Record<string, z.ZodTypeAny> =
+      (s as any)._def?.shape?.() ?? (s as any)._def?.shape ?? {};
+    if (!(part in shape)) return null;
+    s = shape[part]!;
+  }
+  return s;
+}
+
+/**
+ * Returns a Zod schema restricted to `fields` when defined.
+ * Supports dot-notation paths (e.g. "address.city") by building partial
+ * nested sub-schemas — useful for edit/create forms.
+ * Falls back to the full schema if fields is undefined/empty.
+ */
+function getMutableSchema(
+  schema: z.ZodObject<z.ZodRawShape>,
+  fields: string[] | undefined,
+): z.ZodObject<z.ZodRawShape> {
+  if (!fields || fields.length === 0) return schema;
+
+  const topLevel: string[] = [];
+  // parent key → list of sub-field names requested
+  const dotGroups = new Map<string, string[]>();
+
+  for (const f of fields) {
+    const dot = f.indexOf(".");
+    if (dot === -1) {
+      topLevel.push(f);
+    } else {
+      const parent = f.slice(0, dot);
+      const child = f.slice(dot + 1);
+      if (!dotGroups.has(parent)) dotGroups.set(parent, []);
+      dotGroups.get(parent)!.push(child);
+    }
+  }
+
+  const picked: z.ZodRawShape = {};
+
+  // Direct top-level fields
+  for (const f of topLevel) {
+    if (f in schema.shape) picked[f] = schema.shape[f]!;
+  }
+
+  // Partial nested objects for dot-notation entries
+  for (const [parent, subFields] of dotGroups) {
+    if (!(parent in schema.shape)) continue;
+    // Unwrap to the inner ZodObject
+    let inner: z.ZodTypeAny = schema.shape[parent] as z.ZodTypeAny;
+    while (true) {
+      const itn: string = (inner as any)._def?.typeName ?? "";
+      if (
+        itn === "ZodOptional" ||
+        itn === "ZodNullable" ||
+        itn === "ZodDefault"
+      ) {
+        inner = (inner as any)._def.innerType;
+      } else break;
+    }
+    if ((inner as any)._def?.typeName !== "ZodObject") {
+      // Not an object — include as-is
+      picked[parent] = schema.shape[parent]!;
+      continue;
+    }
+    // Recurse: build a partial sub-schema for the requested sub-fields
+    picked[parent] = getMutableSchema(
+      inner as z.ZodObject<z.ZodRawShape>,
+      subFields,
+    );
+  }
+
+  return z.object(picked);
+}
+/**
  * Compute the link base for all UI links.
  *
  * ── Emulator (FUNCTIONS_EMULATOR=true) ──────────────────────────────────────
@@ -490,7 +592,39 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     const allColumns = entry.listColumns ?? Object.keys(entry.schema.shape);
     const docKey = entry.documentKey ?? "docId";
     const columns = [docKey, ...allColumns.filter((c: string) => c !== docKey)];
-    const columnMeta = buildColumnMeta(allColumns, entry.schema);
+    // Restrict filterable columns to filterableFields when defined.
+    // Dot-notation paths (e.g. "address.city") are passed through directly;
+    // top-level keys expand to sub-fields via buildColumnMeta as before.
+    const filterableColumns: string[] = entry.filterableFields
+      ? (() => {
+          const out: string[] = [];
+          for (const f of entry.filterableFields!) {
+            if (f.includes(".")) {
+              out.push(f); // direct dot-notation path
+            } else if (allColumns.includes(f)) {
+              out.push(f); // regular top-level key
+            }
+          }
+          return out;
+        })()
+      : allColumns;
+    // For dot-notation entries, resolve the correct ZodType; for top-level
+    // keys, delegate to the existing buildColumnMeta (handles ZodObject expansion).
+    const columnMeta: import("./renderer").ColumnMeta[] = (() => {
+      const out: import("./renderer").ColumnMeta[] = [];
+      for (const col of filterableColumns) {
+        if (col.includes(".")) {
+          const resolved = resolveZodAtPath(entry.schema, col);
+          out.push({
+            name: col,
+            zodType: resolved ? resolveTypeName(resolved) : "ZodString",
+          });
+        } else {
+          out.push(...buildColumnMeta([col], entry.schema));
+        }
+      }
+      return out;
+    })();
 
     // Parse and validate filters from query params
     // validFields built from columnMeta so dot-notation fields (address.city) are accepted
@@ -541,6 +675,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
         undefined,
         columnMeta,
         activeFilters,
+        entry.allowDelete ?? false,
       ),
     );
   };
@@ -562,7 +697,8 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     }
 
     const lb = getLinkBase(req, basePath);
-    const fields = zodToFields(entry.schema);
+    const createSchema = getMutableSchema(entry.schema, entry.createFields);
+    const fields = zodToFields(createSchema);
     const actionUrl = `${lb}/${entry.name}/create`;
     const formHtml = renderForm(fields, actionUrl, "POST", "Create document");
 
@@ -589,10 +725,11 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     const rawBody =
       (req.body as Record<string, string | string[] | undefined>) ?? {};
     const parsed = parseFormBody(rawBody, entry.schema);
-    const validation = entry.schema.safeParse(parsed);
+    const createSchema = getMutableSchema(entry.schema, entry.createFields);
+    const validation = createSchema.safeParse(parsed);
 
     if (!validation.success) {
-      const fields = zodToFields(entry.schema);
+      const fields = zodToFields(createSchema);
       const actionUrl = `${lb}/${entry.name}/create`;
       const formHtml = renderForm(fields, actionUrl, "POST", "Create document");
       const errorMsg = validation.error.errors
@@ -616,7 +753,8 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       await entry.repo.create(validation.data);
       redirect(res, `${lb}/${entry.name}?flash=created`);
     } catch (err) {
-      const fields = zodToFields(entry.schema);
+      const createSchema2 = getMutableSchema(entry.schema, entry.createFields);
+      const fields = zodToFields(createSchema2);
       const actionUrl = `${lb}/${entry.name}/create`;
       const formHtml = renderForm(fields, actionUrl, "POST", "Create document");
       sendHtml(
@@ -677,7 +815,8 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     }
 
     const prefilled = prefillFromDoc(doc, entry.schema);
-    const fields = applyPrefill(zodToFields(entry.schema), prefilled);
+    const mutableSchema = getMutableSchema(entry.schema, entry.mutableFields);
+    const fields = applyPrefill(zodToFields(mutableSchema), prefilled);
 
     const lb = getLinkBase(req, basePath);
     const actionUrl = `${lb}/${entry.name}/${encodeURIComponent(docId)}/edit`;
@@ -707,8 +846,9 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       (req.body as Record<string, string | string[] | undefined>) ?? {};
     const parsed = parseFormBody(rawBody, entry.schema);
 
-    // Partial validation for updates
-    const partialSchema = entry.schema.partial();
+    // Partial validation for updates (restricted to mutableFields)
+    const mutableSchema = getMutableSchema(entry.schema, entry.mutableFields);
+    const partialSchema = mutableSchema.partial();
     const validation = partialSchema.safeParse(parsed);
 
     if (!validation.success) {
@@ -718,7 +858,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
           Array.isArray(v) ? v.join(",") : (v ?? ""),
         ]),
       );
-      const fields = applyPrefill(zodToFields(entry.schema), prefilled);
+      const fields = applyPrefill(zodToFields(mutableSchema), prefilled);
       const actionUrl = `${lb}/${entry.name}/${encodeURIComponent(docId)}/edit`;
       const formHtml = renderForm(fields, actionUrl, "POST", "Save changes");
       const errorMsg = validation.error.errors
@@ -742,7 +882,11 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       await entry.repo.update(docId, validation.data);
       redirect(res, `${lb}/${entry.name}?flash=updated`);
     } catch (err) {
-      const fields = zodToFields(entry.schema);
+      const mutableSchema2 = getMutableSchema(
+        entry.schema,
+        entry.mutableFields,
+      );
+      const fields = zodToFields(mutableSchema2);
       const actionUrl = `${lb}/${entry.name}/${encodeURIComponent(docId)}/edit`;
       const formHtml = renderForm(fields, actionUrl, "POST", "Save changes");
       sendHtml(
@@ -770,6 +914,10 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     const entry = registry[repoName];
     if (!entry) {
       sendHtml(res, "Repository not found", 404);
+      return;
+    }
+    if (!entry.allowDelete) {
+      sendHtml(res, "Delete is not allowed for this repository", 403);
       return;
     }
     const lb = getLinkBase(req, basePath);

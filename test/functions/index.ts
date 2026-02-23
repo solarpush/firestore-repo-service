@@ -23,33 +23,8 @@ initializeApp({
 const db = getFirestore();
 
 // ============================================
-// Models
+// Models (interfaces pour repos sans schema Zod)
 // ============================================
-
-interface UserModel {
-  docId: string;
-
-  documentPath: string;
-  email: string;
-  name: string;
-  age: number;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-interface PostModel {
-  docId: string;
-  documentPath: string;
-  userId: string;
-  address: { street: string; city: string };
-  title: string;
-  content: string;
-  status: "draft" | "published";
-  views: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
 
 interface CommentModel {
   docId: string;
@@ -63,12 +38,40 @@ interface CommentModel {
 }
 
 // ============================================
+// Zod Schemas
+// ============================================
+
+const postSchema = z.object({
+  docId: z.string(),
+  documentPath: z.string(),
+  userId: z.string(),
+  address: z.object({ street: z.string(), city: z.string() }),
+  title: z.string(),
+  content: z.string(),
+  status: z.enum(["draft", "published"]),
+  views: z.number().array(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+});
+
+const userSchema = z.object({
+  docId: z.string(),
+  documentPath: z.string(),
+  email: z.string(),
+  name: z.string().nullable(),
+  age: z.number(),
+  isActive: z.boolean().nullable(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+});
+
+// ============================================
 // Repository Configuration
 // ============================================
 
 // Step 1: Build the base mapping
 const repositoryMapping = {
-  users: createRepositoryConfig<UserModel>()({
+  users: createRepositoryConfig(userSchema)({
     path: "users",
     isGroup: false,
     foreignKeys: ["docId", "email"] as const,
@@ -80,7 +83,7 @@ const repositoryMapping = {
     refCb: (db: Firestore, docId: string) => db.collection("users").doc(docId),
   }),
 
-  posts: createRepositoryConfig<PostModel>()({
+  posts: createRepositoryConfig(postSchema)({
     path: "posts",
     isGroup: false,
     foreignKeys: ["docId", "userId"] as const,
@@ -158,7 +161,7 @@ export const server = onRequest(async (req, res) => {
         status: (i % 2 === 0 ? "published" : "draft") as "draft" | "published",
         title: `Post ${i}`,
         userId: user.docId,
-        views: i * 10,
+        views: [i * 10],
       };
       postBatch.set(postId, postData);
     }
@@ -243,43 +246,22 @@ export const server = onRequest(async (req, res) => {
     res.status(500).json({ error: String(error) });
   }
 });
-const postSchema = z.object({
-  docId: z.string(),
-  documentPath: z.string(),
-  userId: z.string(),
-  address: z.object({ street: z.string(), city: z.string() }),
-  title: z.string(),
-  content: z.string(),
-  status: z.enum(["draft", "published"]),
-  views: z.number(),
-  createdAt: z.date(),
-  updatedAt: z.date(),
-});
 export const admin = onRequest(
   createAdminServer({
     basePath: "/",
     repos: {
       posts: {
         repo: repos.posts,
-        schema: postSchema,
         path: "posts",
-        filterableFields: ["status", "userId"],
-        mutableFields: ["status", "title", "content", "address"],
+        filterableFields: ["status", "userId", "address", "views"],
+        mutableFields: ["status", "title", "content", "address", "views"], // edit form only
+        createFields: ["title", "content", "address", "views"], // create form only
         allowDelete: true,
       },
       users: {
         repo: repos.users,
-        schema: z.object({
-          docId: z.string(),
-          documentPath: z.string(),
-          email: z.string(),
-          name: z.string().nullable(),
-          age: z.number(),
-          isActive: z.boolean().nullable(),
-          createdAt: z.date(),
-          updatedAt: z.date(),
-        }),
         path: "users",
+        // no createFields/mutableFields → all schema fields shown in both forms
       },
     },
   }),

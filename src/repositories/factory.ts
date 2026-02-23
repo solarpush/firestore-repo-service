@@ -18,11 +18,11 @@ import type { ConfiguredRepository } from "./types";
  * Creates a configured repository instance with all methods
  */
 export function createRepository<
-  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>,
 >(
   db: Firestore,
   config: T,
-  allRepositories: Record<string, any> = {}
+  allRepositories: Record<string, any> = {},
 ): ConfiguredRepository<T> {
   // Create collection reference
   const collectionRef: CollectionReference | Query = config.isGroup
@@ -41,13 +41,13 @@ export function createRepository<
     config.foreignKeys,
     actualCollection,
     documentRef,
-    config.documentKey as string
+    config.documentKey as string,
   );
   const queryMethods = createQueryMethods(
     collectionRef as Query,
     config.queryKeys,
     config.relationalKeys as Record<string, any> | undefined,
-    allRepositories
+    allRepositories,
   );
   const aggregateMethods = createAggregateMethods(collectionRef as Query);
   const crudMethods = createCrudMethods(
@@ -56,7 +56,7 @@ export function createRepository<
     config.documentKey as string,
     config.pathKey as string | undefined,
     config.createdKey as string | undefined,
-    config.updatedKey as string | undefined
+    config.updatedKey as string | undefined,
   );
   const batchMethods = createBatchMethods(
     db,
@@ -64,13 +64,13 @@ export function createRepository<
     config.documentKey as string,
     config.pathKey as string | undefined,
     config.createdKey as string | undefined,
-    config.updatedKey as string | undefined
+    config.updatedKey as string | undefined,
   );
   const transactionMethods = createTransactionMethods(db, documentRef);
   const bulkMethods = createBulkMethods(
     db,
     config.createdKey as string | undefined,
-    config.updatedKey as string | undefined
+    config.updatedKey as string | undefined,
   );
   const populateMethods = createPopulateMethods(config, allRepositories);
 
@@ -85,5 +85,7 @@ export function createRepository<
     transaction: transactionMethods,
     bulk: bulkMethods,
     ...populateMethods,
+    // Pass through the Zod schema if one was attached via createRepositoryConfig(schema)
+    schema: (config as any).schema,
   } as unknown as ConfiguredRepository<T>;
 }
