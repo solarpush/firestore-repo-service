@@ -19,27 +19,27 @@ export type {
   RelationConfig,
   RepositoryConfig,
   WhereClause,
-} from "./src/shared/types";
+} from "./shared/types";
 
 // Pagination
 export {
   applyQueryOptions as applyPaginationQueryOptions,
   createPaginationIterator,
   executePaginatedQuery,
-} from "./src/pagination";
-export type { PaginationOptions, PaginationResult } from "./src/pagination";
+} from "./pagination";
+export type { PaginationOptions, PaginationResult } from "./pagination";
 
 // Query pagination with include
 export type {
   IncludeConfig,
   PaginationWithIncludeOptions,
-} from "./src/methods/query";
+} from "./methods/query";
 
 // Populate options
-export type { PopulateOptions } from "./src/methods/relations";
+export type { PopulateOptions } from "./methods/relations";
 
 // Query builder
-export { buildAndExecuteQuery } from "./src/query-builder";
+export { buildAndExecuteQuery } from "./query-builder";
 
 // Repository types
 export type {
@@ -49,73 +49,68 @@ export type {
   IncludeConfigTyped,
   PaginationWithIncludeOptionsTyped,
   PopulateOptionsTyped,
-} from "./src/repositories/types";
+} from "./repositories/types";
 
 // ============================================
 // Imports for internal use
 // ============================================
 
-import { createRepository } from "./src/repositories/factory";
-import type { ConfiguredRepository } from "./src/repositories/types";
-import type { RelationConfig, RepositoryConfig } from "./src/shared/types";
+import { createRepository } from "./repositories/factory";
+import type { ConfiguredRepository } from "./repositories/types";
+import type { RelationConfig, RepositoryConfig } from "./shared/types";
 
 // ============================================
 // Repository Configuration Helper
 // ============================================
 
 /**
- * Helper to create a typed repository configuration with literal type preservation
- * Uses currying pattern to allow type parameter inference
+ * Helper to create a typed repository configuration with literal type preservation.
+ * Uses currying pattern to allow type parameter inference.
  *
- * @overload Pass the model type explicitly (legacy):
- * `createRepositoryConfig<UserModel>()(config)`
+ * **IMPORTANT:** A Zod schema is required. The model type is automatically
+ * inferred from the schema via `z.infer<TSchema>`.
  *
- * @overload Pass a Zod schema to infer the model type automatically:
- * `createRepositoryConfig<typeof userSchema>()(config)`
- * or more idiomatically, pass the schema instance as a runtime argument:
- * `createRepositoryConfig(userSchema)(config)` — the model type is `z.infer<typeof userSchema>`
- *
- * @template T_or_Schema - Either the model type OR a ZodObject schema (inferred automatically)
+ * @template TSchema - Zod schema that defines the model structure
+ * @param schema - The Zod schema for validation and type inference
  * @returns Builder function that accepts repository configuration
+ *
  * @example
  * ```typescript
+ * const userSchema = z.object({
+ *   docId: z.string(),
+ *   email: z.string().email(),
+ *   name: z.string(),
+ *   isActive: z.boolean(),
+ * });
+ *
+ * const postSchema = z.object({
+ *   docId: z.string(),
+ *   userId: z.string(),
+ *   title: z.string(),
+ *   content: z.string(),
+ *   status: z.enum(["draft", "published"]),
+ * });
+ *
  * const mapping = {
- *   users: createRepositoryConfig<UserModel>()({
+ *   users: createRepositoryConfig(userSchema)({
  *     path: "users",
+ *     isGroup: false,
  *     foreignKeys: ["docId", "email"] as const,
  *     queryKeys: ["isActive"] as const,
+ *     documentKey: "docId",
  *     refCb: (db, docId: string) => db.collection("users").doc(docId),
  *   }),
- *   posts: createRepositoryConfig<PostModel>()({
+ *   posts: createRepositoryConfig(postSchema)({
  *     path: "posts",
+ *     isGroup: false,
  *     foreignKeys: ["docId", "userId"] as const,
  *     queryKeys: ["status"] as const,
+ *     documentKey: "docId",
  *     refCb: (db, docId: string) => db.collection("posts").doc(docId),
- *   }).withRelations<typeof mapping>()({
- *     userId: { repo: "users", key: "docId", type: "one" as const }
- *   })
+ *   }),
  * };
- * ```
- */
-// ---------------------------------------------------------------------------
-// createRepositoryConfig — two overloads
-// ---------------------------------------------------------------------------
-
-/**
- * Overload 1 — pass the Zod schema as a runtime argument.
- * The model type is inferred automatically as `z.infer<TSchema>`.
- * The schema is stored in the resulting config so the admin server
- * can pick it up without requiring you to pass it a second time.
  *
- * @example
- * ```ts
- * const postSchema = z.object({ title: z.string(), ... });
- *
- * const postsConfig = createRepositoryConfig(postSchema)({
- *   path: "posts",
- *   foreignKeys: ["docId"] as const,
- *   ...
- * });
+ * const repos = createRepositoryMapping(db, mapping);
  * ```
  */
 export function createRepositoryConfig<
@@ -152,57 +147,10 @@ export function createRepositoryConfig<
   TPathKey,
   TCreatedKey,
   TUpdatedKey
-> & { schema: TSchema };
-
-/**
- * Overload 2 — no schema, explicit model type (legacy / repos without an admin UI).
- *
- * @example
- * ```ts
- * const commentsConfig = createRepositoryConfig<CommentModel>()({
- *   path: "comments",
- *   foreignKeys: ["docId"] as const,
- *   ...
- * });
- * ```
- */
-export function createRepositoryConfig<T>(): <
-  const TForeignKeys extends readonly (keyof T)[],
-  const TQueryKeys extends readonly (keyof T)[],
-  const TIsGroup extends boolean,
-  const TDocumentKey extends keyof T,
-  const TPathKey extends keyof T | undefined = undefined,
-  const TCreatedKey extends keyof T | undefined = undefined,
-  const TUpdatedKey extends keyof T | undefined = undefined,
-  TRefCb = undefined,
->(config: {
-  path: string;
-  isGroup: TIsGroup;
-  foreignKeys: TForeignKeys;
-  queryKeys: TQueryKeys;
-  documentKey: TDocumentKey;
-  pathKey?: TPathKey;
-  createdKey?: TCreatedKey;
-  updatedKey?: TUpdatedKey;
-  refCb: TRefCb;
-}) => RepositoryConfig<
-  T,
-  TForeignKeys,
-  TQueryKeys,
-  TIsGroup,
-  TRefCb,
-  {},
-  TDocumentKey,
-  TPathKey,
-  TCreatedKey,
-  TUpdatedKey
->;
-
-// Implementation
-export function createRepositoryConfig(schema?: z.ZodObject<z.ZodRawShape>) {
+> & { schema: TSchema } {
   return (config: any): any => ({
     ...config,
-    ...(schema !== undefined ? { schema } : {}),
+    schema,
     type: null as any,
     documentRef: null as any,
     update: null as any,
@@ -449,19 +397,21 @@ export function createRepositoryMapping<T extends Record<string, any>>(
 }
 
 // ============================================
-// Servers (pagination function & admin ORM)
+// Servers (admin ORM & CRUD API)
 // ============================================
 export {
   createAdminServer,
-  createPaginationFunction,
+  createCrudServer,
   MiniRouter,
 } from "./servers/index";
 export type {
   AdminRepoConfig,
   AdminRepoEntry,
   AdminServerOptions,
+  ApiResponse,
   BasicAuthConfig,
-  PaginationFunctionOptions,
-  PaginationHttpResult,
-  SerializedCursor,
+  CrudRepoConfig,
+  CrudServerOptions,
+  ListResponseData,
+  QueryRequestBody,
 } from "./servers/index";

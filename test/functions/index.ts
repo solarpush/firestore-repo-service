@@ -1,6 +1,7 @@
 import {
   buildRepositoryRelations,
   createAdminServer,
+  createCrudServer,
   createRepositoryConfig,
   createRepositoryMapping,
 } from "@lpdjs/firestore-repo-service";
@@ -291,3 +292,190 @@ export const admin = onRequest(
     },
   }),
 );
+const crudServer = createCrudServer({
+  basePath: "/",
+  repos: {
+    posts: {
+      repo: repos.posts,
+      path: "posts",
+      filterableFields: ["title", "status", "userId", "address", "views"],
+      mutableFields: ["status", "title", "content", "address", "views"], // edit form only
+      createFields: ["title", "content", "address", "views"], // create form only
+      allowDelete: true,
+    },
+  },
+});
+export const crud = onRequest(crudServer);
+
+/**
+ * Test endpoint for CRUD server - runs all operations and returns results.
+ */
+export const testCrud = onRequest(async (req, res) => {
+  const baseUrl = `http://localhost:5001/demo-no-project/us-central1/crud`;
+  const results: Record<string, unknown> = {};
+
+  try {
+    // 1. CREATE - POST /posts
+    console.log("1. Testing CREATE...");
+    const createRes = await fetch(`${baseUrl}/posts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Test Post from CRUD",
+        content: "This is a test post created via CRUD API",
+        status: "draft",
+        address: { street: "123 Test St", city: "Test City" },
+        views: [1, 2, 3],
+        userId: "test-user-123",
+      }),
+    });
+    const createData: any = await createRes.json();
+    results.create = { status: createRes.status, data: createData };
+    const createdId = createData.data?.docId;
+    console.log("Created:", createdId);
+
+    if (!createdId) {
+      throw new Error("CREATE failed - no docId returned");
+    }
+
+    // 2. GET by ID - GET /posts/:id
+    console.log("2. Testing GET by ID...");
+    const getRes = await fetch(`${baseUrl}/posts/${createdId}`);
+    const getData: any = await getRes.json();
+    results.getById = { status: getRes.status, data: getData };
+
+    // 3. LIST - GET /posts
+    console.log("3. Testing LIST...");
+    const listRes = await fetch(`${baseUrl}/posts?pageSize=5`);
+    const listData: any = await listRes.json();
+    results.list = {
+      status: listRes.status,
+      itemCount: listData.data?.items?.length,
+      hasNextPage: listData.data?.hasNextPage,
+      nextCursor: listData.data?.nextCursor,
+    };
+
+    // 4. LIST with filters - GET /posts?status=draft
+    console.log("4. Testing LIST with filters...");
+    const filterRes = await fetch(`${baseUrl}/posts?status=draft&pageSize=5`);
+    const filterData: any = await filterRes.json();
+    results.listFiltered = {
+      status: filterRes.status,
+      itemCount: filterData.data?.items?.length,
+    };
+
+    // 5. QUERY (POST) - POST /posts/query
+    console.log("5. Testing QUERY (POST)...");
+    const queryRes = await fetch(`${baseUrl}/posts/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        where: [["status", "==", "draft"]],
+        orderBy: [{ field: "createdAt", direction: "desc" }],
+        pageSize: 5,
+      }),
+    });
+    const queryData: any = await queryRes.json();
+    results.query = {
+      status: queryRes.status,
+      itemCount: queryData.data?.items?.length,
+      hasNextPage: queryData.data?.hasNextPage,
+    };
+
+    // 6. Pagination with cursor - use cursor from list
+    if (listData.data?.nextCursor) {
+      console.log("6. Testing pagination with cursor...");
+      const cursorStr = JSON.stringify(listData.data.nextCursor);
+      const page2Res = await fetch(
+        `${baseUrl}/posts?pageSize=5&cursor=${encodeURIComponent(cursorStr)}`,
+      );
+      const page2Data: any = await page2Res.json();
+      results.pagination = {
+        status: page2Res.status,
+        itemCount: page2Data.data?.items?.length,
+        hasPrevPage: page2Data.data?.hasPrevPage,
+      };
+    } else {
+      results.pagination = { skipped: "No cursor available" };
+    }
+
+    // 7. UPDATE (PUT) - PUT /posts/:id
+    console.log("7. Testing UPDATE (PUT)...");
+    const updateRes = await fetch(`${baseUrl}/posts/${createdId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Updated Test Post",
+        content: "Updated content via PUT",
+        status: "published",
+        address: { street: "456 New St", city: "New City" },
+        views: [10, 20, 30],
+      }),
+    });
+    const updateData: any = await updateRes.json();
+    results.updatePut = { status: updateRes.status, data: updateData };
+
+    // 8. UPDATE (PATCH) - PATCH /posts/:id
+    console.log("8. Testing UPDATE (PATCH)...");
+    const patchRes = await fetch(`${baseUrl}/posts/${createdId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Patched Title Only",
+      }),
+    });
+    const patchData: any = await patchRes.json();
+    results.updatePatch = { status: patchRes.status, data: patchData };
+
+    // 9. Verify update - GET again
+    console.log("9. Verifying updates...");
+    const verifyRes = await fetch(`${baseUrl}/posts/${createdId}`);
+    const verifyData: any = await verifyRes.json();
+    results.verifyUpdate = {
+      status: verifyRes.status,
+      title: verifyData.data?.title,
+      status_field: verifyData.data?.status,
+    };
+
+    // 10. DELETE - DELETE /posts/:id
+    console.log("10. Testing DELETE...");
+    const deleteRes = await fetch(`${baseUrl}/posts/${createdId}`, {
+      method: "DELETE",
+    });
+    const deleteData: any = await deleteRes.json();
+    results.delete = { status: deleteRes.status, data: deleteData };
+
+    // 11. Verify deletion - GET should 404
+    console.log("11. Verifying deletion...");
+    const verify404Res = await fetch(`${baseUrl}/posts/${createdId}`);
+    const verify404Data: any = await verify404Res.json();
+    results.verifyDelete = {
+      status: verify404Res.status,
+      expected404: verify404Res.status === 404,
+    };
+
+    // Summary
+    const allPassed =
+      results.create &&
+      (results.create as any).status === 201 &&
+      (results.getById as any).status === 200 &&
+      (results.list as any).status === 200 &&
+      (results.updatePut as any).status === 200 &&
+      (results.updatePatch as any).status === 200 &&
+      (results.delete as any).status === 200 &&
+      (results.verifyDelete as any).expected404;
+
+    res.status(allPassed ? 200 : 500).json({
+      success: allPassed,
+      message: allPassed ? "All CRUD tests passed!" : "Some tests failed",
+      results,
+    });
+  } catch (error) {
+    console.error("Test error:", error);
+    res.status(500).json({
+      success: false,
+      error: String(error),
+      results,
+    });
+  }
+});

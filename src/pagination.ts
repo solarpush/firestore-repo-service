@@ -38,12 +38,56 @@ export interface PaginationOptions<T> extends Omit<QueryOptions<T>, "limit"> {
 }
 
 /**
- * Executes a paginated query and returns results with pagination info
- * Uses the advanced query builder that handles OR conditions and automatic splitting
+ * Executes a paginated query and returns results with pagination info.
+ * Uses the advanced query builder that handles OR conditions and automatic splitting.
+ *
  * @template T - Data model type
  * @param baseQuery - Base Firestore query
  * @param options - Pagination options
  * @returns Pagination result with data and cursor information
+ *
+ * @example
+ * ```typescript
+ * // Basic pagination
+ * const firstPage = await executePaginatedQuery(collectionRef, {
+ *   pageSize: 10
+ * });
+ * console.log(firstPage.data);        // Array of 10 items
+ * console.log(firstPage.hasNextPage); // true if more pages exist
+ *
+ * // Get next page using cursor
+ * if (firstPage.hasNextPage) {
+ *   const secondPage = await executePaginatedQuery(collectionRef, {
+ *     pageSize: 10,
+ *     cursor: firstPage.nextCursor,
+ *     direction: "next"
+ *   });
+ * }
+ *
+ * // Pagination with filters and sorting
+ * const filteredPage = await executePaginatedQuery(collectionRef, {
+ *   pageSize: 20,
+ *   where: [["status", "==", "active"]],
+ *   orderBy: [["createdAt", "desc"]],
+ *   select: ["title", "status", "createdAt"]
+ * });
+ *
+ * // Pagination with OR conditions
+ * const orPage = await executePaginatedQuery(collectionRef, {
+ *   pageSize: 10,
+ *   orWhere: [
+ *     ["status", "==", "published"],
+ *     ["status", "==", "featured"]
+ *   ]
+ * });
+ *
+ * // Go to previous page
+ * const prevPage = await executePaginatedQuery(collectionRef, {
+ *   pageSize: 10,
+ *   cursor: currentPage.prevCursor,
+ *   direction: "prev"
+ * });
+ * ```
  */
 export async function executePaginatedQuery<T>(
   baseQuery: Query,
@@ -99,18 +143,52 @@ export async function executePaginatedQuery<T>(
 }
 
 /**
- * Creates an async generator for iterating through all pages
+ * Creates an async generator for iterating through all pages.
+ * Useful for processing large datasets without loading everything into memory.
+ *
  * @template T - Data model type
  * @param baseQuery - Base Firestore query
  * @param options - Pagination options (without cursor)
  * @yields Pagination results for each page
+ *
  * @example
  * ```typescript
- * const pageIterator = createPaginationIterator(query, { pageSize: 10 });
+ * // Basic iteration through all pages
+ * const pageIterator = createPaginationIterator(query, { pageSize: 100 });
  * for await (const page of pageIterator) {
- *   console.log(`Page with ${page.pageSize} items`);
- *   page.data.forEach(item => console.log(item));
- *   if (!page.hasNextPage) break;
+ *   console.log(`Processing ${page.data.length} items`);
+ *   for (const item of page.data) {
+ *     await processItem(item);
+ *   }
+ * }
+ *
+ * // With filters and sorting
+ * const filteredIterator = createPaginationIterator(query, {
+ *   pageSize: 50,
+ *   where: [["status", "==", "pending"]],
+ *   orderBy: [["createdAt", "asc"]]
+ * });
+ *
+ * let totalProcessed = 0;
+ * for await (const page of filteredIterator) {
+ *   totalProcessed += page.data.length;
+ *   console.log(`Processed ${totalProcessed} items so far`);
+ * }
+ *
+ * // Export all data to CSV
+ * const allData: User[] = [];
+ * for await (const page of createPaginationIterator(usersQuery, { pageSize: 500 })) {
+ *   allData.push(...page.data);
+ * }
+ * exportToCsv(allData);
+ *
+ * // Early exit if condition met
+ * for await (const page of createPaginationIterator(query, { pageSize: 100 })) {
+ *   const found = page.data.find(item => item.id === targetId);
+ *   if (found) {
+ *     console.log("Found target item!");
+ *     break; // Stop iteration early
+ *   }
  * }
  * ```
  */

@@ -23,11 +23,11 @@
       "servers": [
         "./dist/servers/index.d.ts"
       ],
-      "servers/pagination": [
-        "./dist/servers/pagination/index.d.ts"
-      ],
       "servers/admin": [
         "./dist/servers/admin/index.d.ts"
+      ],
+      "servers/crud": [
+        "./dist/servers/crud/index.d.ts"
       ]
     }
   },
@@ -102,8 +102,8 @@
     }
   },
   "devDependencies": {
-    "@types/express": "latest",
     "@types/bun": "latest",
+    "@types/express": "latest",
     "concurrently": "^9.2.1",
     "firebase-admin": "^13.6.0",
     "firebase-functions": "^7.0.1",

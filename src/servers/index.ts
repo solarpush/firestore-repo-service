@@ -5,15 +5,7 @@
  *
  * Two independently usable sub-modules:
  *
- * ## 1. Pagination function
- * Creates a Firebase HTTPS function that exposes a cursor-based pagination
- * endpoint for any repository with optional relation population.
- *
- * ```ts
- * import { createPaginationFunction } from "@lpdjs/firestore-repo-service/servers/pagination";
- * ```
- *
- * ## 2. Admin ORM server
+ * ## 1. Admin ORM server
  * Creates a full static admin UI served as a Firebase HTTPS function.
  * Forms are automatically generated from Zod schemas that map to the
  * repository model types.
@@ -22,9 +14,17 @@
  * import { createAdminServer } from "@lpdjs/firestore-repo-service/servers/admin";
  * ```
  *
+ * ## 2. CRUD API server
+ * Creates a REST API server for CRUD operations with validation,
+ * cursor-based pagination (bidirectional), and relation population.
+ *
+ * ```ts
+ * import { createCrudServer } from "@lpdjs/firestore-repo-service/servers/crud";
+ * ```
+ *
  * ## Combined import
  * ```ts
- * import { createPaginationFunction, createAdminServer } from "@lpdjs/firestore-repo-service/servers";
+ * import { createAdminServer, createCrudServer } from "@lpdjs/firestore-repo-service/servers";
  * ```
  *
  * ## Peer dependencies required for this module
@@ -35,16 +35,6 @@
  * }
  * ```
  */
-
-// ── Pagination ──────────────────────────────────────────────────────────────
-export { createPaginationFunction } from "./pagination/index";
-export type {
-  ExtractRelationalKeys,
-  ExtractRepoModel,
-  PaginationFunctionOptions,
-  PaginationHttpResult,
-  SerializedCursor,
-} from "./pagination/types";
 
 // ── Admin ORM ───────────────────────────────────────────────────────────────
 export { createAdminServer, MiniRouter } from "./admin/index";
@@ -57,6 +47,18 @@ export type {
   RepoRegistry,
   RouteHandler,
 } from "./admin/index";
+
+// ── CRUD API ────────────────────────────────────────────────────────────────
+export { createCrudServer } from "./crud/index";
+export type {
+  ApiResponse,
+  CrudRepoConfig,
+  CrudRepoEntry,
+  CrudRepoRegistry,
+  CrudServerOptions,
+  ListResponseData,
+  QueryRequestBody,
+} from "./crud/index";
 
 // ── Form generator (re-exported for custom use) ─────────────────────────────
 export { renderField, renderForm, zodToFields } from "./admin/form-gen";

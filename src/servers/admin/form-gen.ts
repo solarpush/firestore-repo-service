@@ -9,6 +9,44 @@
  *
  * For ZodObject fields, nested sections are rendered with indentation.
  * For ZodArray and unknown types, a `<textarea>` with JSON hint is used.
+ *
+ * @example
+ * ```typescript
+ * import { zodToFields, renderForm } from "@lpdjs/firestore-repo-service/servers/admin";
+ *
+ * // Convert Zod schema to field descriptors
+ * const schema = z.object({
+ *   name: z.string(),
+ *   email: z.string().email(),
+ *   age: z.number().optional(),
+ *   role: z.enum(["admin", "user"]),
+ *   isActive: z.boolean().default(true),
+ *   address: z.object({
+ *     street: z.string(),
+ *     city: z.string(),
+ *   }),
+ * });
+ *
+ * const fields = zodToFields(schema);
+ * // Returns:
+ * // [
+ * //   { name: "name", type: "text", required: true, ... },
+ * //   { name: "email", type: "text", required: true, hint: "email", ... },
+ * //   { name: "age", type: "number", required: false, ... },
+ * //   { name: "role", type: "select", options: ["admin", "user"], ... },
+ * //   { name: "isActive", type: "checkbox", defaultValue: true, ... },
+ * //   { name: "address", nested: [...], ... },
+ * // ]
+ *
+ * // Render form HTML
+ * const html = renderForm(fields, "create", {
+ *   name: "John",
+ *   email: "john@example.com",
+ * });
+ *
+ * // Render single field
+ * const fieldHtml = renderField(fields[0], { name: "Jane" });
+ * ```
  */
 
 import type { z } from "zod";

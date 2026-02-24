@@ -37,8 +37,8 @@
  */
 
 import type { z } from "zod";
-import type { ConfiguredRepository } from "../../src/repositories/types";
-import type { FieldPath, RepositoryConfig } from "../../src/shared/types";
+import type { ConfiguredRepository } from "../../repositories/types";
+import type { FieldPath, RepositoryConfig } from "../../shared/types";
 import type { HttpRequest, HttpResponse } from "../http-types";
 import type { AdminRepoEntry, RepoRegistry } from "./handlers";
 import { createAdminHandlers } from "./handlers";
@@ -261,6 +261,110 @@ function parseUrlEncoded(body: string): Record<string, string | string[]> {
 
 /**
  * Creates an Express-compatible request handler for the admin ORM UI.
+ * Generates a complete admin interface with dashboard, lists, and CRUD forms.
+ *
+ * @template TRepos - Shape of the repos map (inferred automatically)
+ * @param options - Admin server configuration
+ * @returns Express-compatible request handler for Firebase Functions
+ *
+ * @example
+ * ```typescript
+ * // Basic admin server
+ * import { onRequest } from "firebase-functions/https";
+ * import { createAdminServer } from "@lpdjs/firestore-repo-service/servers/admin";
+ *
+ * export const admin = onRequest(
+ *   createAdminServer({
+ *     basePath: "/admin",
+ *     repos: {
+ *       users: {
+ *         repo: repos.users,
+ *         path: "users",
+ *       },
+ *       posts: {
+ *         repo: repos.posts,
+ *         path: "posts",
+ *       },
+ *     },
+ *   })
+ * );
+ *
+ * // With HTTP Basic Auth
+ * export const admin = onRequest(
+ *   createAdminServer({
+ *     basePath: "/admin",
+ *     auth: {
+ *       type: "basic",
+ *       realm: "Admin Area",
+ *       username: "admin",
+ *       password: process.env.ADMIN_PASSWORD!,
+ *     },
+ *     repos: { ... },
+ *   })
+ * );
+ *
+ * // With custom auth middleware
+ * export const admin = onRequest(
+ *   createAdminServer({
+ *     auth: async (req, res, next) => {
+ *       const token = req.headers?.authorization?.replace("Bearer ", "");
+ *       if (!token || !(await verifyToken(token))) {
+ *         res.status(401).send("Unauthorized");
+ *         return;
+ *       }
+ *       next();
+ *     },
+ *     repos: { ... },
+ *   })
+ * );
+ *
+ * // Full configuration with all options
+ * export const admin = onRequest(
+ *   createAdminServer({
+ *     basePath: "/admin",
+ *     parseBody: true,                    // Parse URL-encoded bodies
+ *     auth: { type: "basic", username: "admin", password: "secret" },
+ *     middleware: [loggingMiddleware],    // Additional middleware
+ *     repos: {
+ *       posts: {
+ *         repo: repos.posts,
+ *         path: "posts",
+ *         documentKey: "docId",           // Field used as document ID
+ *         listColumns: ["title", "status", "createdAt"], // Columns in list
+ *         pageSize: 25,                   // Items per page in list
+ *         filterableFields: ["status", "userId", "title"], // Filter bar fields
+ *         mutableFields: ["title", "content", "status"],   // Edit form fields
+ *         createFields: ["title", "content"],              // Create form fields
+ *         allowDelete: true,              // Enable delete button
+ *         relationalFields: [             // Relation navigation buttons
+ *           { key: "userId", column: "Author" },    // Link to user
+ *           { key: "docId", column: "Comments" },   // Link to comments list
+ *         ],
+ *       },
+ *       users: {
+ *         repo: repos.users,
+ *         path: "users",
+ *         filterableFields: ["email", "isActive"],
+ *         mutableFields: ["name", "email", "isActive"],
+ *         createFields: ["name", "email"],
+ *         allowDelete: false,
+ *         relationalFields: [
+ *           { key: "docId", column: "Posts" },
+ *         ],
+ *       },
+ *     },
+ *   })
+ * );
+ *
+ * // Routes generated automatically:
+ * // GET  /admin/              → Dashboard (list of repos)
+ * // GET  /admin/:repo         → Document list with pagination
+ * // GET  /admin/:repo/create  → Create form
+ * // POST /admin/:repo/create  → Submit create
+ * // GET  /admin/:repo/:id/edit → Edit form
+ * // POST /admin/:repo/:id/edit → Submit edit
+ * // POST /admin/:repo/:id/delete → Delete document
+ * ```
  */
 export function createAdminServer<
   TRepos extends Record<string, ConfiguredRepository<any>>,

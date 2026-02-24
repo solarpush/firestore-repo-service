@@ -35,7 +35,52 @@ export interface PaginationWithIncludeOptions<
 }
 
 /**
- * Creates query.by* methods for query keys
+ * Creates query.by* methods for query keys.
+ * These methods return arrays of documents matching a query condition.
+ *
+ * @template T - The document type
+ * @param collectionRef - Firestore query reference
+ * @param queryKeys - Array of field names to generate query methods for
+ * @param relationalKeys - Optional relation configuration for includes
+ * @param allRepositories - Optional map of all repositories for relation resolution
+ * @returns Object containing generated query methods
+ *
+ * @example
+ * ```typescript
+ * // Generated methods based on queryKeys: ["status", "categoryId"]
+ * // Basic usage - get all posts with status "published"
+ * const publishedPosts = await repos.posts.query.byStatus("published");
+ *
+ * // With options - filter, sort, limit and select
+ * const recentPosts = await repos.posts.query.byStatus("published", {
+ *   orderBy: [["createdAt", "desc"]],
+ *   limit: 10,
+ *   select: ["title", "createdAt"]
+ * });
+ *
+ * // Generic query.by with full options
+ * const filteredPosts = await repos.posts.query.by({
+ *   where: [["views", ">=", 1000]],
+ *   orWhere: [
+ *     ["status", "==", "published"],
+ *     ["status", "==", "featured"]
+ *   ],
+ *   orderBy: [["views", "desc"]],
+ *   limit: 20
+ * });
+ *
+ * // Pagination with include (relation population)
+ * const paginatedPosts = await repos.posts.query.paginate({
+ *   pageSize: 10,
+ *   orderBy: [["createdAt", "desc"]],
+ *   include: ["userId", { relation: "categoryId", select: ["name"] }]
+ * });
+ *
+ * // Iterate through all pages
+ * for await (const page of repos.posts.query.paginateAll({ pageSize: 50 })) {
+ *   console.log(`Processing ${page.data.length} posts`);
+ * }
+ * ```
  */
 export function createQueryMethods<T>(
   collectionRef: Query,

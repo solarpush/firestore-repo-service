@@ -9,7 +9,48 @@ import type { GetOptions } from "../shared/types";
 import { capitalize, chunkArray } from "../shared/utils";
 
 /**
- * Creates get.by* methods for foreign keys
+ * Creates get.by* methods for foreign keys.
+ * These methods return a single document or null.
+ *
+ * @template T - The document type
+ * @param collectionRef - Firestore query reference
+ * @param foreignKeys - Array of field names to generate get methods for
+ * @param actualCollection - The actual collection reference (null for collection groups)
+ * @param documentRef - Function to create document references
+ * @param documentKey - The field name used as document ID
+ * @returns Object containing generated get methods
+ *
+ * @example
+ * ```typescript
+ * // Generated methods based on foreignKeys: ["docId", "email", "slug"]
+ *
+ * // Basic usage - get user by docId
+ * const user = await repos.users.get.byDocId("user-123");
+ *
+ * // Get user by email
+ * const userByEmail = await repos.users.get.byEmail("john@example.com");
+ *
+ * // With select - only return specific fields
+ * const partialUser = await repos.users.get.byDocId("user-123", {
+ *   select: ["name", "email"]
+ * });
+ *
+ * // With returnDoc - get both data and Firestore DocumentSnapshot
+ * const { data, doc } = await repos.users.get.byDocId("user-123", {
+ *   returnDoc: true
+ * });
+ * console.log("Document path:", doc.ref.path);
+ *
+ * // Get multiple documents by list of values
+ * const users = await repos.users.get.byList("docId", ["user-1", "user-2", "user-3"]);
+ *
+ * // Get by list with array-contains-any operator
+ * const usersWithTags = await repos.users.get.byList(
+ *   "tags",
+ *   ["admin", "moderator"],
+ *   "array-contains-any"
+ * );
+ * ```
  */
 export function createGetMethods<T>(
   collectionRef: Query,

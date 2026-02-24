@@ -2,10 +2,10 @@ import { defineConfig } from "tsup";
 
 export default defineConfig({
   entry: {
-    index: "index.ts",
-    "servers/index": "servers/index.ts",
-    "servers/pagination/index": "servers/pagination/index.ts",
-    "servers/admin/index": "servers/admin/index.ts",
+    index: "src/index.ts",
+    "servers/index": "src/servers/index.ts",
+    "servers/admin/index": "src/servers/admin/index.ts",
+    "servers/crud/index": "src/servers/crud/index.ts",
   },
   format: ["cjs", "esm"],
   dts: true,

@@ -39,6 +39,6 @@
     // Allow *.raw.js imports with a sibling .d.ts (e.g. client-script.raw.js.d.ts)
     "allowArbitraryExtensions": true
   },
-  "include": ["index.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "dist", "example.ts", "**/*.test.ts"]
 }

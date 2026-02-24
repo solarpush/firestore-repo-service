@@ -1,7 +1,52 @@
 import type { Firestore, WriteBatch } from "firebase-admin/firestore";
 
 /**
- * Creates batch operation methods
+ * Creates batch operation methods for atomic writes (max 500 operations).
+ * All operations in a batch either succeed or fail together.
+ *
+ * @param db - Firestore database instance
+ * @param documentRef - Function to create document references
+ * @param documentKey - The field name used as document ID
+ * @param pathKey - Optional field name to store the document path
+ * @param createdKey - Optional field name for creation timestamp
+ * @param updatedKey - Optional field name for update timestamp
+ * @returns Object containing batch creation method
+ *
+ * @example
+ * ```typescript
+ * // Create a batch for atomic operations
+ * const batch = repos.users.batch.create();
+ *
+ * // SET - Add multiple documents
+ * batch.set("user-1", { name: "Alice", email: "alice@example.com" });
+ * batch.set("user-2", { name: "Bob", email: "bob@example.com" });
+ * batch.set("user-3", { name: "Charlie", email: "charlie@example.com" });
+ *
+ * // For subcollections (e.g., posts/{postId}/comments/{commentId}):
+ * const commentBatch = repos.comments.batch.create();
+ * commentBatch.set("post-1", "comment-1", { content: "First comment" });
+ * commentBatch.set("post-1", "comment-2", { content: "Second comment" });
+ *
+ * // UPDATE - Update existing documents in batch
+ * batch.update("user-1", { name: "Alice Updated" });
+ * batch.update("user-2", { age: 30 });
+ *
+ * // DELETE - Delete documents in batch
+ * batch.delete("user-3");
+ *
+ * // COMMIT - Execute all operations atomically
+ * await batch.commit();
+ *
+ * // With merge option (default: true)
+ * batch.set("user-4", { name: "David" }, { merge: false }); // Overwrites entirely
+ *
+ * // Full example with mixed operations
+ * const orderBatch = repos.orders.batch.create();
+ * orderBatch.set("order-new", { status: "pending", total: 99.99 });
+ * orderBatch.update("order-old", { status: "completed" });
+ * orderBatch.delete("order-cancelled");
+ * await orderBatch.commit(); // All or nothing
+ * ```
  */
 export function createBatchMethods(
   db: Firestore,
@@ -9,7 +54,7 @@ export function createBatchMethods(
   documentKey: string,
   pathKey?: string,
   createdKey?: string,
-  updatedKey?: string
+  updatedKey?: string,
 ) {
   const now = () => new Date();
 

@@ -1,7 +1,67 @@
 import type { CollectionReference } from "firebase-admin/firestore";
 
 /**
- * Creates CRUD methods (create, set, update, delete)
+ * Creates CRUD methods (create, set, update, delete).
+ *
+ * @template T - The document type
+ * @param actualCollection - The collection reference (null for collection groups)
+ * @param documentRef - Function to create document references
+ * @param documentKey - The field name used as document ID
+ * @param pathKey - Optional field name to store the document path
+ * @param createdKey - Optional field name for creation timestamp
+ * @param updatedKey - Optional field name for update timestamp
+ * @returns Object containing CRUD methods
+ *
+ * @example
+ * ```typescript
+ * // CREATE - Add a new document
+ * // Auto-generates docId if not provided, sets createdAt/updatedAt
+ * const newUser = await repos.users.create({
+ *   name: "John Doe",
+ *   email: "john@example.com",
+ *   age: 28
+ * });
+ * console.log(newUser.docId); // Auto-generated ID
+ *
+ * // Create with custom docId
+ * const customUser = await repos.users.create({
+ *   docId: "custom-id-123",
+ *   name: "Jane Doe",
+ *   email: "jane@example.com"
+ * });
+ *
+ * // SET - Create or replace a document by ID
+ * // For regular collections:
+ * const user = await repos.users.set("user-123", {
+ *   name: "Updated Name",
+ *   email: "new@example.com"
+ * });
+ *
+ * // For subcollections (e.g., posts/{postId}/comments/{commentId}):
+ * const comment = await repos.comments.set("post-123", "comment-456", {
+ *   content: "Great post!",
+ *   likes: 0
+ * });
+ *
+ * // Set with merge option (default: true)
+ * await repos.users.set("user-123", { name: "Only Name" }, { merge: true });
+ *
+ * // UPDATE - Partially update an existing document
+ * const updatedUser = await repos.users.update("user-123", {
+ *   name: "New Name"
+ * });
+ *
+ * // Update subcollection document:
+ * await repos.comments.update("post-123", "comment-456", {
+ *   likes: 10
+ * });
+ *
+ * // DELETE - Remove a document
+ * await repos.users.delete("user-123");
+ *
+ * // Delete subcollection document:
+ * await repos.comments.delete("post-123", "comment-456");
+ * ```
  */
 export function createCrudMethods<T>(
   actualCollection: CollectionReference | null,

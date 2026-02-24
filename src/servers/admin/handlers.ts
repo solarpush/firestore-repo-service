@@ -12,8 +12,8 @@
  */
 
 import { z } from "zod";
-import type { ConfiguredRepository } from "../../src/repositories/types";
-import type { RepositoryConfig } from "../../src/shared/types";
+import type { ConfiguredRepository } from "../../repositories/types";
+import type { RepositoryConfig } from "../../shared/types";
 import { renderForm, zodToFields, type FieldDescriptor } from "./form-gen";
 import type {
   ColumnMeta,

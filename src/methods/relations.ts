@@ -21,6 +21,66 @@ export type PopulateOptions<TRelationKey = string> =
  * Creates populate methods for resolving relations between repositories.
  * Results are keyed by the **field name** (relation key) — not the repo name —
  * to avoid collisions when two fields point to the same repository.
+ *
+ * @template TConfig - Repository configuration type
+ * @param config - Repository configuration with relational keys
+ * @param allRepositories - Map of all repositories for relation resolution
+ * @returns Object containing the populate method
+ *
+ * @example
+ * ```typescript
+ * // Assume relations configured as:
+ * // posts.userId -> users.docId (one-to-one)
+ * // posts.categoryId -> categories.docId (one-to-one)
+ * // users.docId -> posts.userId (one-to-many)
+ *
+ * // POPULATE SINGLE RELATION - Get post with its author
+ * const post = await repos.posts.get.byDocId("post-123");
+ * const postWithAuthor = await repos.posts.populate(post, "userId");
+ * console.log(postWithAuthor.populated.userId); // User object
+ *
+ * // POPULATE WITH SELECT - Only fetch specific fields
+ * const postWithPartialAuthor = await repos.posts.populate(post, {
+ *   relation: "userId",
+ *   select: ["name", "email", "avatar"]
+ * });
+ * console.log(postWithPartialAuthor.populated.userId.name);
+ *
+ * // POPULATE MULTIPLE RELATIONS - Get post with author and category
+ * const postWithRelations = await repos.posts.populate(post, ["userId", "categoryId"]);
+ * console.log(postWithRelations.populated.userId);     // User object
+ * console.log(postWithRelations.populated.categoryId); // Category object
+ *
+ * // POPULATE MULTIPLE WITH DIFFERENT SELECTS
+ * const postWithCustomSelects = await repos.posts.populate(post, {
+ *   relations: ["userId", "categoryId"],
+ *   select: {
+ *     userId: ["name", "avatar"],
+ *     categoryId: ["name", "slug"]
+ *   }
+ * });
+ *
+ * // POPULATE ONE-TO-MANY - Get user with all their posts
+ * const user = await repos.users.get.byDocId("user-123");
+ * const userWithPosts = await repos.users.populate(user, "docId");
+ * console.log(userWithPosts.populated.docId); // Array of Post objects
+ *
+ * // With select on one-to-many
+ * const userWithPartialPosts = await repos.users.populate(user, {
+ *   relation: "docId",
+ *   select: ["title", "status", "createdAt"]
+ * });
+ *
+ * // Chained population (nested relations)
+ * const post = await repos.posts.get.byDocId("post-123");
+ * const postWithAuthor = await repos.posts.populate(post, "userId");
+ * // If you need author's posts too:
+ * const authorWithPosts = await repos.users.populate(
+ *   postWithAuthor.populated.userId,
+ *   "docId"
+ * );
+ * ```
+ *
  * @internal
  */
 export function createPopulateMethods<

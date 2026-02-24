@@ -7,6 +7,69 @@
  *  - GET, POST, DELETE methods
  *  - Global middleware (before each route)
  *  - 404 / error fallbacks
+ *
+ * @example
+ * ```typescript
+ * import { MiniRouter } from "@lpdjs/firestore-repo-service/servers/admin";
+ *
+ * // Create router
+ * const router = new MiniRouter();
+ *
+ * // Add global middleware (executed before every route)
+ * router.use(async (req, res, next) => {
+ *   console.log(`${req.method} ${req.url}`);
+ *   await next();
+ * });
+ *
+ * // Auth middleware
+ * router.use((req, res, next) => {
+ *   if (!req.headers?.authorization) {
+ *     res.status(401).send("Unauthorized");
+ *     return;
+ *   }
+ *   next();
+ * });
+ *
+ * // Define routes with path parameters
+ * router.get("/users", async (req, res) => {
+ *   res.json({ users: await getAllUsers() });
+ * });
+ *
+ * router.get("/users/:id", async (req, res) => {
+ *   const user = await getUser(req.params.id); // Access path params
+ *   if (!user) {
+ *     res.status(404).send("User not found");
+ *     return;
+ *   }
+ *   res.json(user);
+ * });
+ *
+ * router.post("/users", async (req, res) => {
+ *   const user = await createUser(req.body);
+ *   res.status(201).json(user);
+ * });
+ *
+ * router.delete("/users/:id", async (req, res) => {
+ *   await deleteUser(req.params.id);
+ *   res.status(204).end();
+ * });
+ *
+ * // Custom 404 handler
+ * router.onNotFound((req, res) => {
+ *   res.status(404).json({ error: "Route not found", path: req.url });
+ * });
+ *
+ * // Custom error handler
+ * router.onError((err, req, res) => {
+ *   console.error("Error:", err);
+ *   res.status(500).json({ error: "Internal server error" });
+ * });
+ *
+ * // Use with Firebase Functions
+ * export const api = onRequest(async (req, res) => {
+ *   await router.handle(req, res);
+ * });
+ * ```
  */
 
 export type AnyReq = {
@@ -102,6 +165,14 @@ export class MiniRouter {
 
   post(path: string, handler: RouteHandler): this {
     return this.addRoute("POST", path, handler);
+  }
+
+  put(path: string, handler: RouteHandler): this {
+    return this.addRoute("PUT", path, handler);
+  }
+
+  patch(path: string, handler: RouteHandler): this {
+    return this.addRoute("PATCH", path, handler);
   }
 
   delete(path: string, handler: RouteHandler): this {

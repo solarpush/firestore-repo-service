@@ -173,7 +173,12 @@ export function renderListJsx(
                     class="text-xs font-semibold text-base-content/60 uppercase tracking-wide"
                   >
                     <a
-                      href={sortHref(c, sortState, activeFilters, currentPageSize)}
+                      href={sortHref(
+                        c,
+                        sortState,
+                        activeFilters,
+                        currentPageSize,
+                      )}
                       class={`hover:text-base-content transition-colors${isSorted ? " text-primary" : ""}`}
                     >
                       {c}
@@ -227,7 +232,7 @@ export function renderListJsx(
                             href={href}
                             class="btn btn-xs btn-ghost btn-outline gap-1"
                           >
-                            {m.column} ↗
+                            {m.column}
                           </a>
                         </td>
                       );
@@ -265,7 +270,13 @@ export function renderListJsx(
       <div class="flex justify-between items-center mt-4">
         {pagination.hasPrev ? (
           <a
-            href={paginationHref(activeFilters, pagination.prevCursor, "prev", sortState, currentPageSize)}
+            href={paginationHref(
+              activeFilters,
+              pagination.prevCursor,
+              "prev",
+              sortState,
+              currentPageSize,
+            )}
             class="btn btn-sm btn-outline"
           >
             ← Previous
@@ -277,7 +288,13 @@ export function renderListJsx(
         )}
         {pagination.hasNext ? (
           <a
-            href={paginationHref(activeFilters, pagination.nextCursor, "next", sortState, currentPageSize)}
+            href={paginationHref(
+              activeFilters,
+              pagination.nextCursor,
+              "next",
+              sortState,
+              currentPageSize,
+            )}
             class="btn btn-sm btn-outline"
           >
             Next →
