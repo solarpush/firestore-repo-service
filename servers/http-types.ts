@@ -9,8 +9,8 @@
  * keeping `servers/` free of hard runtime dependencies.
  */
 
-import { Response } from "express";
-import { Request } from "firebase-functions/https";
+import type { Response } from "express";
+import type { Request } from "firebase-functions/https";
 /** Minimal HTTP request interface */
 export interface HttpRequest extends Request {}
 

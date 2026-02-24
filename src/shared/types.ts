@@ -115,7 +115,32 @@ export type WhereClause<T = any> = {
  */
 export interface QueryOptions<T = any> {
   where?: WhereClause<T>[];
-  orWhere?: WhereClause<T>[][];
+  /**
+   * Simple OR: each clause is independently OR'd with the others.
+   * Under the hood, generates one Firestore query per clause and merges results.
+   * Base `where` conditions are applied to every OR branch.
+   *
+   * @example
+   * ```ts
+   * // Posts where status==draft OR status==published
+   * orWhere: [["status", "==", "draft"], ["status", "==", "published"]]
+   * ```
+   */
+  orWhere?: WhereClause<T>[];
+  /**
+   * Advanced OR: each element is a GROUP of AND conditions.
+   * Groups are OR'd together. Base `where` conditions are applied to every group.
+   *
+   * @example
+   * ```ts
+   * // (status==published AND views>100) OR (status==draft AND userId=="abc")
+   * orWhereGroups: [
+   *   [["status", "==", "published"], ["views", ">", 100]],
+   *   [["status", "==", "draft"],     ["userId", "==", "abc"]],
+   * ]
+   * ```
+   */
+  orWhereGroups?: WhereClause<T>[][];
   orderBy?: { field: FieldPath<T>; direction?: "asc" | "desc" }[];
   limit?: number;
   offset?: number;

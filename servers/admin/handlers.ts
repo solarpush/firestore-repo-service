@@ -15,7 +15,12 @@ import { z } from "zod";
 import type { ConfiguredRepository } from "../../src/repositories/types";
 import type { RepositoryConfig } from "../../src/shared/types";
 import { renderForm, zodToFields, type FieldDescriptor } from "./form-gen";
-import type { ColumnMeta, FilterState, WhereOp } from "./renderer";
+import type {
+  ColumnMeta,
+  FilterState,
+  RelationalFieldMeta,
+  WhereOp,
+} from "./renderer";
 import { renderDashboard, renderFormPage, renderList } from "./renderer";
 import type { AnyReq, AnyRes, RouteParams } from "./router";
 
@@ -45,6 +50,11 @@ export interface AdminRepoEntry {
   createFields?: string[];
   /** Whether delete is allowed (default: false) */
   allowDelete?: boolean;
+  /**
+   * Fields that link to another repository.
+   * Populated automatically from the repo's relationalKeys.
+   */
+  relationalMeta?: RelationalFieldMeta[];
 }
 
 export type RepoRegistry = Record<string, AdminRepoEntry>;
@@ -589,6 +599,18 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     const cursorStr = query["cursor"];
     const dir = query["dir"] === "prev" ? "prev" : "next";
 
+    // Sort
+    const sortField = query["ob"] ?? "";
+    const sortDir = (query["od"] === "desc" ? "desc" : "asc") as "asc" | "desc";
+    const sortState = sortField
+      ? { field: sortField, dir: sortDir }
+      : undefined;
+
+    // Rows per page (query ?ps= overrides config, capped at 200)
+    const psRaw = parseInt(query["ps"] ?? "");
+    const currentPageSize =
+      Number.isFinite(psRaw) && psRaw > 0 ? Math.min(psRaw, 200) : pageSize;
+
     const allColumns = entry.listColumns ?? Object.keys(entry.schema.shape);
     const docKey = entry.documentKey ?? "docId";
     const columns = [docKey, ...allColumns.filter((c: string) => c !== docKey)];
@@ -648,11 +670,18 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     }
 
     const result = await entry.repo.query.paginate({
-      pageSize,
+      pageSize: currentPageSize,
       cursor: cursorSnapshot,
-      // direction + where are supported at runtime but not in the strict typed interface
+      // direction + where + orderBy are supported at runtime but not in the strict typed interface
       ...{ direction: dir },
       ...(whereFilters.length > 0 ? { where: whereFilters } : {}),
+      ...(sortState
+        ? {
+            orderBy: [
+              { field: sortState.field as any, direction: sortState.dir },
+            ],
+          }
+        : {}),
     });
 
     const nextCursorId = result.nextCursor?.id ?? "";
@@ -676,6 +705,9 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
         columnMeta,
         activeFilters,
         entry.allowDelete ?? false,
+        entry.relationalMeta,
+        sortState,
+        currentPageSize,
       ),
     );
   };

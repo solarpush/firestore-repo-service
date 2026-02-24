@@ -9,13 +9,21 @@ export type {
   ColumnMeta,
   FilterState,
   PageOptions,
+  RelationalFieldMeta,
+  SortState,
   WhereOp,
 } from "./components";
 
 /** @deprecated Styles come from DaisyUI CDN — no inline CSS needed */
 export const CSS = "";
 
-import type { ColumnMeta, FilterState, PageOptions } from "./components";
+import type {
+  ColumnMeta,
+  FilterState,
+  PageOptions,
+  RelationalFieldMeta,
+  SortState,
+} from "./components";
 import {
   renderDashboardJsx,
   renderFormPageJsx,
@@ -49,6 +57,9 @@ export function renderList(
   columnMeta?: ColumnMeta[],
   activeFilters?: FilterState[],
   allowDelete?: boolean,
+  relationalMeta?: RelationalFieldMeta[],
+  sortState?: SortState,
+  currentPageSize?: number,
 ): string {
   return renderListJsx(
     repoName,
@@ -60,6 +71,9 @@ export function renderList(
     columnMeta,
     activeFilters,
     allowDelete,
+    relationalMeta,
+    sortState,
+    currentPageSize,
   );
 }
 

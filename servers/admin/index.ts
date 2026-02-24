@@ -42,6 +42,7 @@ import type { FieldPath, RepositoryConfig } from "../../src/shared/types";
 import type { HttpRequest, HttpResponse } from "../http-types";
 import type { AdminRepoEntry, RepoRegistry } from "./handlers";
 import { createAdminHandlers } from "./handlers";
+import type { RelationalFieldMeta } from "./renderer";
 import { type Middleware, MiniRouter } from "./router";
 
 // ---------------------------------------------------------------------------
@@ -119,6 +120,35 @@ export interface AdminRepoConfig<
    * Default: false — delete is disabled unless explicitly set to true.
    */
   allowDelete?: boolean;
+  /**
+   * Relational action columns appended to the list table.
+   * Each entry adds a dedicated button that navigates to the linked repository.
+   *
+   * - **type "one"** (e.g. `userId` on a post) → button links to the target
+   *   document edit page: `/{targetRepo}/{value}/edit`
+   * - **type "many"** (e.g. `docId` on a user) → button links to the target
+   *   repo list filtered by value: `/{targetRepo}?fv_{targetKey}={value}`
+   *
+   * @example
+   * ```ts
+   * users: {
+   *   repo: repos.users,
+   *   relationalFields: [
+   *     { key: "docId", column: "Posts" },     // many → list of posts by this user
+   *   ]
+   * }
+   * posts: {
+   *   repo: repos.posts,
+   *   relationalFields: [
+   *     { key: "userId", column: "Author" },   // one → edit page of the user
+   *   ]
+   * }
+   * ```
+   */
+  relationalFields?: {
+    key: keyof RepoModelType<TRepo> & string;
+    column: string;
+  }[];
 }
 
 /**
@@ -272,6 +302,25 @@ export function createAdminServer<
       mutableFields: cfg.mutableFields as string[] | undefined,
       createFields: cfg.createFields as string[] | undefined,
       allowDelete: cfg.allowDelete ?? false,
+      relationalMeta: (() => {
+        if (!cfg.relationalFields || cfg.relationalFields.length === 0)
+          return undefined;
+        const repoRelKeys = (cfg.repo as any).relationalKeys ?? {};
+        const meta: RelationalFieldMeta[] = [];
+        for (const entry of cfg.relationalFields) {
+          const rel = repoRelKeys[entry.key];
+          if (rel) {
+            meta.push({
+              key: entry.key,
+              column: entry.column,
+              targetRepo: String(rel.repo),
+              targetKey: String(rel.key),
+              type: rel.type as "one" | "many",
+            });
+          }
+        }
+        return meta.length > 0 ? meta : undefined;
+      })(),
     };
     registry[name] = entry;
   }

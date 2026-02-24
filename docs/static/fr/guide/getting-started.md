@@ -1,53 +1,53 @@
-# Getting Started
+# Démarrage rapide
 
 ## Installation
 
 ```bash
 npm install @lpdjs/firestore-repo-service firebase-admin
-# or
+# ou
 bun add @lpdjs/firestore-repo-service firebase-admin
 ```
 
-## Quick Start
+## Démarrage en 3 étapes
 
-### 1. Define your models with Zod (recommended)
+### 1. Définir les modèles avec Zod (recommandé)
 
-Using Zod gives you automatic schema inference — no need to declare the model interface separately.
+Zod permet l'inférence automatique du type — pas besoin de déclarer l'interface séparément.
 
 ```typescript
 import z from "zod";
 
 const userSchema = z.object({
-  docId:          z.string(),
-  documentPath:   z.string(),
-  email:          z.string(),
-  name:           z.string().nullable(),
-  age:            z.number(),
-  isActive:       z.boolean().nullable(),
-  createdAt:      z.date(),
-  updatedAt:      z.date(),
+  docId:        z.string(),
+  documentPath: z.string(),
+  email:        z.string(),
+  name:         z.string().nullable(),
+  age:          z.number(),
+  isActive:     z.boolean().nullable(),
+  createdAt:    z.date(),
+  updatedAt:    z.date(),
 });
 
 const postSchema = z.object({
-  docId:         z.string(),
-  documentPath:  z.string(),
-  userId:        z.string(),
-  title:         z.string(),
-  content:       z.string(),
-  status:        z.enum(["draft", "published"]),
-  createdAt:     z.date(),
-  updatedAt:     z.date(),
+  docId:        z.string(),
+  documentPath: z.string(),
+  userId:       z.string(),
+  title:        z.string(),
+  content:      z.string(),
+  status:       z.enum(["draft", "published"]),
+  createdAt:    z.date(),
+  updatedAt:    z.date(),
 });
 ```
 
-::: tip Without Zod
-Pass the TypeScript interface as generic and omit the schema argument:
+::: tip Sans Zod
+Passer l'interface TypeScript en générique :
 ```typescript
 const users = createRepositoryConfig<UserModel>()({ /* config */ });
 ```
 :::
 
-### 2. Create your repository mapping
+### 2. Créer le mapping de repositories
 
 ```typescript
 import {
@@ -61,7 +61,6 @@ import { getFirestore, Firestore } from "firebase-admin/firestore";
 initializeApp();
 const db = getFirestore();
 
-// Step 1 — base config
 const repositoryMapping = {
   users: createRepositoryConfig(userSchema)({
     path:        "users",
@@ -88,47 +87,45 @@ const repositoryMapping = {
   }),
 };
 
-// Step 2 — relations (optional)
 const mappingWithRelations = buildRepositoryRelations(repositoryMapping, {
-  users: { docId:  { repo: "posts",  key: "userId", type: "many" as const } },
-  posts: { userId: { repo: "users",  key: "docId",  type: "one"  as const } },
+  users: { docId:  { repo: "posts", key: "userId", type: "many" as const } },
+  posts: { userId: { repo: "users", key: "docId",  type: "one"  as const } },
 });
 
-// Step 3 — create the service
 export const repos = createRepositoryMapping(db, mappingWithRelations);
 ```
 
-### 3. Use the repositories
+### 3. Utiliser les repositories
 
 ```typescript
-// Create
+// Créer
 const user = await repos.users.create({
   name: "Alice", email: "alice@example.com", age: 28, isActive: true,
 });
-console.log(user.docId);        // auto-injected
-console.log(user.documentPath); // auto-injected
+console.log(user.docId);        // injecté automatiquement
+console.log(user.documentPath); // injecté automatiquement
 
-// Read
+// Lire
 const found   = await repos.users.get.byDocId(user.docId);
 const byEmail = await repos.users.get.byEmail("alice@example.com");
 
-// Query
+// Requêter
 const active = await repos.users.query.byIsActive(true);
 
-// Update
+// Mettre à jour
 await repos.users.update(user.docId, { age: 29 });
 
-// Delete
+// Supprimer
 await repos.users.delete(user.docId);
 
-// Paginate
+// Paginer
 const page = await repos.posts.query.paginate({
   pageSize: 10,
   orderBy:  [{ field: "createdAt", direction: "desc" }],
 });
 console.log(page.data, page.hasNextPage);
 
-// Populate a relation
+// Peupler une relation
 const post = await repos.posts.get.byDocId("post_1");
 const withAuthor = await repos.posts.populate(post!, "userId");
 console.log(withAuthor.populated.userId); // UserModel | null

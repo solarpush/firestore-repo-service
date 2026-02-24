@@ -26,17 +26,6 @@ const db = getFirestore();
 // Models (interfaces pour repos sans schema Zod)
 // ============================================
 
-interface CommentModel {
-  docId: string;
-  documentPath: string;
-  postId: string;
-  userId: string;
-  content: string;
-  likes: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
 // ============================================
 // Zod Schemas
 // ============================================
@@ -64,7 +53,16 @@ const userSchema = z.object({
   createdAt: z.date(),
   updatedAt: z.date(),
 });
-
+const CommentModel = z.object({
+  docId: z.string(),
+  documentPath: z.string(),
+  postId: z.string(),
+  userId: z.string(),
+  content: z.string(),
+  likes: z.number(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+});
 // ============================================
 // Repository Configuration
 // ============================================
@@ -95,7 +93,7 @@ const repositoryMapping = {
     refCb: (db: Firestore, docId: string) => db.collection("posts").doc(docId),
   }),
 
-  comments: createRepositoryConfig<CommentModel>()({
+  comments: createRepositoryConfig(CommentModel)({
     path: "comments",
     isGroup: true,
     foreignKeys: ["docId", "postId", "userId"] as const,
@@ -214,7 +212,9 @@ export const server = onRequest(async (req, res) => {
     // 9. Pagination des posts avec include pour récupérer les comments de chaque post
     const paginatedPostsWithComments = await repos.posts.query.paginate({
       pageSize: 10,
+
       include: ["docId", { relation: "userId", select: ["docId"] }], // Inclure comments ET user
+      orWhere: [["userId", "==", user.docId]], // Filtrer pour n'avoir que les posts de notre user
     });
     console.log(
       "Paginated posts with comments and user:",
@@ -248,19 +248,44 @@ export const server = onRequest(async (req, res) => {
 });
 export const admin = onRequest(
   createAdminServer({
+    auth: {
+      type: "basic",
+      realm: "Admin Area",
+      username: "admin",
+      password: "password",
+    },
     basePath: "/",
     repos: {
       posts: {
         repo: repos.posts,
         path: "posts",
-        filterableFields: ["status", "userId", "address", "views"],
+        filterableFields: ["title", "status", "userId", "address", "views"],
         mutableFields: ["status", "title", "content", "address", "views"], // edit form only
         createFields: ["title", "content", "address", "views"], // create form only
+        relationalFields: [
+          { key: "userId", column: "Author" },
+          { key: "docId", column: "Comments" },
+        ],
         allowDelete: true,
       },
       users: {
         repo: repos.users,
         path: "users",
+        allowDelete: true,
+        createFields: ["name", "email", "age", "isActive"],
+        mutableFields: ["name", "email", "age", "isActive"],
+        filterableFields: ["docId", "name", "email", "age", "isActive"],
+        relationalFields: [{ key: "docId", column: "Posts" }],
+        // no createFields/mutableFields → all schema fields shown in both forms
+      },
+      comments: {
+        repo: repos.comments,
+        path: "comments",
+        allowDelete: true,
+        createFields: [],
+        mutableFields: [],
+        filterableFields: ["docId", "likes"],
+        relationalFields: [],
         // no createFields/mutableFields → all schema fields shown in both forms
       },
     },

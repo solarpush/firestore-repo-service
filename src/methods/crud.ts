@@ -9,7 +9,7 @@ export function createCrudMethods<T>(
   documentKey: string,
   pathKey?: string,
   createdKey?: string,
-  updatedKey?: string
+  updatedKey?: string,
 ) {
   const now = () => new Date();
 
@@ -17,7 +17,7 @@ export function createCrudMethods<T>(
   const create = async (data: any): Promise<T> => {
     if (!actualCollection) {
       throw new Error(
-        "Cannot use create() on collection groups. Use set() with a specific document ID instead."
+        "Cannot use create() on collection groups. Use set() with a specific document ID instead.",
       );
     }
 
@@ -68,13 +68,25 @@ export function createCrudMethods<T>(
     const pathArgs = hasOptions ? args.slice(0, -2) : args.slice(0, -1);
     const mergeOption = hasOptions ? lastArg : { merge: true };
 
-    // Auto-set updatedKey
     const enrichedData = { ...data };
+
+    // Auto-set updatedKey
     if (updatedKey) {
       enrichedData[updatedKey] = now();
     }
 
     const docRef = documentRef(...pathArgs);
+
+    // Inject documentKey (last segment of the path args) and pathKey — same
+    // behaviour as create() and batch.set() so the fields are always present.
+    const docIdValue = pathArgs[pathArgs.length - 1];
+    if (documentKey && docIdValue != null) {
+      enrichedData[documentKey] = docIdValue;
+    }
+    if (pathKey) {
+      enrichedData[pathKey] = docRef.path;
+    }
+
     await docRef.set(enrichedData, mergeOption);
 
     const setDocument = await docRef.get();

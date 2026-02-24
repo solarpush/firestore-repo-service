@@ -26,4 +26,8 @@ features:
     details: Count, sum, average with server-side execution for optimal performance.
   - title: 📦 Batch & Bulk
     details: Batch operations (atomic, max 500) and bulk operations (auto-split for large datasets).
+  - title: 🖥️ Admin Server
+    details: Auto-generated admin UI with Zod-powered forms, filtering, relations navigation, and CRUD operations.
+  - title: 🔌 Pagination API
+    details: Ready-to-use Firebase HTTPS function for cursor-based pagination with relation population.
 ---

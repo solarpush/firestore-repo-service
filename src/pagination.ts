@@ -77,12 +77,23 @@ export async function executePaginatedQuery<T>(
     docId: doc.id,
   })) as T[];
 
+  const isPrev = options.direction === "prev";
+
   return {
     data,
-    nextCursor: hasMore ? actualDocs[actualDocs.length - 1] : undefined,
-    prevCursor: actualDocs[0],
-    hasNextPage: hasMore,
-    hasPrevPage: !!options.cursor,
+    // When going "prev": nextCursor always points to last doc of the page (to go forward
+    // again), prevCursor only set when there are even earlier docs (hasMore).
+    // When going "next" (default): same logic as before.
+    nextCursor: isPrev
+      ? actualDocs.length > 0
+        ? actualDocs[actualDocs.length - 1]
+        : undefined
+      : hasMore
+        ? actualDocs[actualDocs.length - 1]
+        : undefined,
+    prevCursor: isPrev ? (hasMore ? actualDocs[0] : undefined) : actualDocs[0],
+    hasNextPage: isPrev ? !!options.cursor : hasMore,
+    hasPrevPage: isPrev ? hasMore : !!options.cursor,
     pageSize: data.length,
   };
 }

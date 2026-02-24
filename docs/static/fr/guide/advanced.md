@@ -1,27 +1,26 @@
-# Advanced Usage
+# Usage avancé
 
 ## CRUD `set()`
 
-Creates or replaces a document with a specific ID.
-`documentKey` and `pathKey` are automatically injected (same as `create()`).
+Crée ou remplace un document avec un ID spécifique.
+`documentKey` et `pathKey` sont injectés automatiquement (comme `create()`).
 
 ```typescript
-const post = await repos.posts.set("my-post-id", {
+const post = await repos.posts.set("mon-post", {
   title: "Hello",
   status: "draft",
   userId: "user_1",
-  // docId / documentPath are injected automatically
 });
-console.log(post.docId);        // "my-post-id"
-console.log(post.documentPath); // "posts/my-post-id"
+console.log(post.docId);        // "mon-post"
+console.log(post.documentPath); // "posts/mon-post"
 
-// With merge option
-await repos.posts.set("my-post-id", { title: "Updated" }, { merge: true });
+// Avec merge
+await repos.posts.set("mon-post", { title: "Mis à jour" }, { merge: true });
 ```
 
-## Batch Operations
+## Opérations Batch
 
-Atomic write up to 500 operations.
+Écriture atomique, maximum 500 opérations.
 
 ```typescript
 const batch = repos.posts.batch.create();
@@ -29,61 +28,50 @@ const batch = repos.posts.batch.create();
 batch.set("post-1", { title: "Post 1", userId: "u1", status: "draft" });
 batch.set("post-2", { title: "Post 2", userId: "u1", status: "published" });
 batch.update("post-3", { status: "published" });
-batch.delete("post-old");
+batch.delete("post-ancien");
 
 await batch.commit();
 ```
 
-### Sub-collection batch
-
-Pass parent IDs before the document ID:
+### Batch sur sous-collection
 
 ```typescript
 const batch = repos.comments.batch.create();
-
-batch.set(postId, "comment-1", { postId, userId, content: "Hello!", likes: 0 });
-batch.set(postId, "comment-2", { postId, userId, content: "World!", likes: 0 });
-
+batch.set(postId, "comment-1", { postId, userId, content: "Salut !", likes: 0 });
+batch.set(postId, "comment-2", { postId, userId, content: "Monde !", likes: 0 });
 await batch.commit();
 ```
 
-## Bulk Operations
+## Opérations Bulk
 
-Auto-split into batches of 500 for large datasets.
+Découpées automatiquement en batches de 500.
 
 ```typescript
 const db = getFirestore();
 
-// Bulk set
 await repos.users.bulk.set([
   { docRef: db.collection("users").doc("u1"), data: { name: "Alice" }, merge: true },
   { docRef: db.collection("users").doc("u2"), data: { name: "Bob" } },
-  // ... thousands of documents
 ]);
 
-// Bulk update
 await repos.users.bulk.update([
   { docRef: db.collection("users").doc("u1"), data: { age: 30 } },
 ]);
 
-// Bulk delete
 await repos.users.bulk.delete([
   db.collection("users").doc("u1"),
-  db.collection("users").doc("u2"),
 ]);
 ```
 
-## Aggregations
+## Agrégations
 
-Server-side — no documents transferred.
+Exécutées côté serveur Firestore — aucun document transféré.
 
 ```typescript
-const total   = await repos.users.aggregate.count();
-const active  = await repos.users.aggregate.count({ where: [["isActive", "==", true]] });
-const ageSum  = await repos.users.aggregate.sum("age");
-const ageAvg  = await repos.users.aggregate.average("age", {
-  where: [["isActive", "==", true]],
-});
+const total  = await repos.users.aggregate.count();
+const actifs = await repos.users.aggregate.count({ where: [["isActive", "==", true]] });
+const somme  = await repos.users.aggregate.sum("age");
+const moy    = await repos.users.aggregate.average("age", { where: [["isActive", "==", true]] });
 ```
 
 ## Transactions
@@ -91,12 +79,12 @@ const ageAvg  = await repos.users.aggregate.average("age", {
 ```typescript
 await repos.users.transaction.run(async (tx) => {
   const user = await tx.get("user_1");
-  if (!user) throw new Error("not found");
+  if (!user) throw new Error("introuvable");
   await tx.update("user_1", { age: user.age + 1 });
 });
 ```
 
-## Real-time listener
+## Listener temps réel
 
 ```typescript
 const unsub = repos.users.query.onSnapshot(
@@ -104,24 +92,22 @@ const unsub = repos.users.query.onSnapshot(
   (users) => console.log("live:", users),
   (err)   => console.error(err),
 );
-
-// Later:
 unsub();
 ```
 
-## OR queries — advanced patterns
+## Patterns OR avancés
 
 ```typescript
-// Simple OR (one clause per entry)
+// OR simple
 await repos.posts.query.by({
-  where:   [["isPublic", "==", true]],       // applied to every OR branch
+  where:   [["isPublic", "==", true]],
   orWhere: [
     ["userId",   "==", "user-A"],
     ["authorId", "==", "user-A"],
   ],
 });
 
-// Compound OR: (A AND B) OR (C AND D)
+// OR composé : (A ET B) OU (C ET D)
 await repos.posts.query.by({
   orWhereGroups: [
     [["status", "==", "published"], ["views", ">", 1000]],
@@ -130,14 +116,12 @@ await repos.posts.query.by({
 });
 ```
 
-## `in` operator with >30 values
-
-Automatically split into multiple queries:
+## Opérateur `in` avec >30 valeurs
 
 ```typescript
 const ids = Array.from({ length: 90 }, (_, i) => `id-${i}`);
 
-// Generates 3 Firestore queries (30+30+30) merged in memory
+// Génère 3 requêtes Firestore (30+30+30) fusionnées en mémoire
 const docs = await repos.users.query.by({
   where: [["docId", "in", ids]],
 });

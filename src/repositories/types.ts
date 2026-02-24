@@ -71,8 +71,21 @@ export interface PaginationWithIncludeOptionsTyped<
 > {
   pageSize?: number;
   cursor?: any;
+  direction?: "next" | "prev";
   orderBy?: { field: keyof T; direction?: "asc" | "desc" }[];
   where?: [keyof T, any, any][];
+  /**
+   * Simple OR: each clause is independently OR'd with the others.
+   * Base `where` conditions are applied to every OR branch.
+   * @example
+   * orWhere: [["status", "==", "draft"], ["status", "==", "published"]]
+   */
+  orWhere?: [keyof T, any, any][];
+  /**
+   * Advanced OR: each element is a GROUP of AND conditions, groups are OR'd.
+   * Base `where` conditions are applied to every group.
+   */
+  orWhereGroups?: [keyof T, any, any][][];
   select?: (keyof T)[];
   /** Relations to include - can be relation keys or typed IncludeConfig */
   include?: (K | IncludeConfigTyped<TRelationalKeys>)[];

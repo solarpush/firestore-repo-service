@@ -5,4 +5,11 @@ export { FilterBar } from "./filter-bar";
 export { renderFormPageJsx } from "./form";
 export { renderListJsx } from "./list";
 export { PageShell, renderHtml, renderPageJsx } from "./shell";
-export type { ColumnMeta, FilterState, PageOptions, WhereOp } from "./types";
+export type {
+  ColumnMeta,
+  FilterState,
+  PageOptions,
+  RelationalFieldMeta,
+  SortState,
+  WhereOp,
+} from "./types";

@@ -181,12 +181,30 @@ export function createQueryMethods<T>(
     return result;
   };
 
-  queryMethods.paginateAll = (
+  queryMethods.paginateAll = async function* (
     options: Omit<
       PaginationWithIncludeOptions<T, string>,
       "cursor" | "direction"
     >,
-  ) => createPaginationIterator(collectionRef, options);
+  ): AsyncGenerator<
+    | PaginationResult<T>
+    | PaginationResult<T & { populated: Record<string, any> }>,
+    void,
+    unknown
+  > {
+    const { include, ...paginationOptions } = options;
+    for await (const page of createPaginationIterator<T>(
+      collectionRef,
+      paginationOptions,
+    )) {
+      if (include && include.length > 0) {
+        const populatedData = await populateDocuments(page.data, include);
+        yield { ...page, data: populatedData };
+      } else {
+        yield page;
+      }
+    }
+  };
 
   return queryMethods;
 }

@@ -87,5 +87,7 @@ export function createRepository<
     ...populateMethods,
     // Pass through the Zod schema if one was attached via createRepositoryConfig(schema)
     schema: (config as any).schema,
+    // Pass through relational keys built by buildRepositoryRelations
+    relationalKeys: (config as any).relationalKeys,
   } as unknown as ConfiguredRepository<T>;
 }

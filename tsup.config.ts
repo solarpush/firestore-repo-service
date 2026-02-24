@@ -20,6 +20,7 @@ export default defineConfig({
     "hono",
     "@hono/node-server",
   ],
+  minify: true,
   treeshake: true,
   esbuildOptions(opts) {
     opts.jsx = "automatic";
