@@ -96,5 +96,7 @@ export function createRepository<
       config.createdKey as string | undefined,
       config.updatedKey as string | undefined,
     ].filter((k): k is string => typeof k === "string"),
+    // Expose pathKey name so server handlers can extract path args from documents
+    _pathKey: (config.pathKey as string | undefined) ?? null,
   } as unknown as ConfiguredRepository<T>;
 }

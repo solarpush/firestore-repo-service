@@ -195,6 +195,8 @@ export interface CrudRepoEntry {
   /** Keys automatically managed by Firestore (docId, path, timestamps) — excluded from create/update payloads */
   systemKeys: string[];
   documentKey: string;
+  /** Field name that stores the full Firestore document path (e.g. "documentPath") */
+  pathKey?: string;
   pageSize: number;
   /** Resolved from fieldsConfig: fields with role "filterable" */
   filterableFields?: string[];

@@ -282,6 +282,52 @@ export function createCrudHandlers(
     return registry[repoName];
   }
 
+  /**
+   * Extract Firestore document path args from a document's stored path.
+   * e.g. "posts/abc/comments/xyz" → ["abc", "xyz"] (the doc-ID segments).
+   */
+  function extractPathArgs(
+    doc: Record<string, unknown>,
+    pathKey?: string,
+  ): string[] | undefined {
+    if (!pathKey) return undefined;
+    const fullPath = doc[pathKey];
+    if (typeof fullPath !== "string" || !fullPath) return undefined;
+    const segments = fullPath.split("/").filter(Boolean);
+    const args: string[] = [];
+    for (let i = 1; i < segments.length; i += 2) {
+      args.push(segments[i]);
+    }
+    return args.length > 0 ? args : undefined;
+  }
+
+  /**
+   * Fetch a single document by its documentKey, with fallback to query
+   * for collection-group repos where direct documentRef may fail.
+   */
+  async function fetchDocById(
+    entry: CrudRepoEntry,
+    docId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const getterName = `by${entry.documentKey.charAt(0).toUpperCase()}${entry.documentKey.slice(1)}`;
+    const getter = (entry.repo.get as any)[getterName];
+
+    if (typeof getter === "function") {
+      try {
+        const doc = (await getter(docId)) as Record<string, unknown> | null;
+        if (doc) return doc;
+      } catch {
+        // Direct ref may fail for subcollections — fall through to query
+      }
+    }
+
+    const results = await entry.repo.query.by({
+      where: [[entry.documentKey, "==", docId]],
+      limit: 1,
+    });
+    return (results[0] as Record<string, unknown>) ?? null;
+  }
+
   // ── LIST: GET /:repoName ────────────────────────────────────────────────
   async function handleList(req: any, res: any): Promise<void> {
     const params = req.params || {};
@@ -535,20 +581,7 @@ export function createCrudHandlers(
     }
 
     try {
-      // Build dynamic getter name (e.g., byDocId)
-      const getterName = `by${entry.documentKey.charAt(0).toUpperCase()}${entry.documentKey.slice(1)}`;
-      const getter = (entry.repo.get as any)[getterName];
-
-      if (typeof getter !== "function") {
-        sendError(
-          res,
-          `Getter method "${getterName}" not found on repository`,
-          500,
-        );
-        return;
-      }
-
-      const doc = await getter(id);
+      const doc = await fetchDocById(entry, id);
 
       if (!doc) {
         sendError(res, "Document not found", 404);
@@ -650,8 +683,14 @@ export function createCrudHandlers(
         }
       }
 
-      // Update document
-      const updated = await entry.repo.update(id, validation.data as any);
+      // Update document — fetch first to get path args for subcollections
+      const existingDoc = await fetchDocById(entry, id);
+      const pathArgs =
+        (existingDoc && extractPathArgs(existingDoc, entry.pathKey)) ?? [id];
+      const updated = await entry.repo.update(
+        ...pathArgs,
+        validation.data as any,
+      );
 
       sendSuccess(res, updated);
     } catch (err) {
@@ -681,7 +720,11 @@ export function createCrudHandlers(
     }
 
     try {
-      await entry.repo.delete(id);
+      // Fetch first to get path args for subcollections
+      const doc = await fetchDocById(entry, id);
+      const pathArgs =
+        (doc && extractPathArgs(doc, entry.pathKey)) ?? [id];
+      await entry.repo.delete(...pathArgs);
       sendSuccess(res, { deleted: true });
     } catch (err) {
       const message =

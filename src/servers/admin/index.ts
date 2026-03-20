@@ -433,6 +433,7 @@ export function createAdminServer<
       repo: cfg.repo,
       schema: resolvedSchema,
       documentKey: cfg.documentKey ?? "docId",
+      pathKey: (cfg.repo as any)._pathKey ?? undefined,
       listColumns: cfg.listColumns,
       pageSize: cfg.pageSize,
       filterableFields,

@@ -39,6 +39,8 @@ export interface AdminRepoEntry {
   schema: z.ZodObject<any>;
   /** document key field name (default: "docId") */
   documentKey?: string;
+  /** Field name that stores the full Firestore document path (e.g. "documentPath") */
+  pathKey?: string;
   /** List of columns to display in the table (defaults to schema keys) */
   listColumns?: string[];
   /** Page size for list view (default: 25) */
@@ -63,6 +65,59 @@ export type RepoRegistry = Record<string, AdminRepoEntry>;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Extract Firestore document path args from a document's stored path.
+ * e.g. "posts/abc/comments/xyz" → ["abc", "xyz"] (the doc-ID segments).
+ * Returns `undefined` when no usable path is available.
+ */
+function extractPathArgs(
+  doc: Record<string, unknown>,
+  pathKey?: string,
+): string[] | undefined {
+  if (!pathKey) return undefined;
+  const fullPath = doc[pathKey];
+  if (typeof fullPath !== "string" || !fullPath) return undefined;
+  const segments = fullPath.split("/").filter(Boolean);
+  // Doc IDs are at odd indices: col/id/col/id/...
+  const args: string[] = [];
+  for (let i = 1; i < segments.length; i += 2) {
+    args.push(segments[i]!);
+  }
+  return args.length > 0 ? args : undefined;
+}
+
+/**
+ * Fetch a single document by its documentKey, with fallback to query
+ * for collection-group repos where direct documentRef may fail.
+ */
+async function fetchDocById(
+  entry: AdminRepoEntry,
+  docId: string,
+): Promise<Record<string, unknown> | null> {
+  const docKey = entry.documentKey ?? "docId";
+  const getMethod =
+    `by${docKey.charAt(0).toUpperCase()}${docKey.slice(1)}` as keyof typeof entry.repo.get;
+
+  // Try direct get first
+  if (typeof entry.repo.get[getMethod] === "function") {
+    try {
+      const doc = (await (entry.repo.get[getMethod] as Function)(
+        docId,
+      )) as Record<string, unknown> | null;
+      if (doc) return doc;
+    } catch {
+      // Direct ref may fail for subcollections — fall through to query
+    }
+  }
+
+  // Fallback: query-based lookup (works for collectionGroup)
+  const results = await entry.repo.query.by({
+    where: [[docKey, "==", docId]],
+    limit: 1,
+  });
+  return (results[0] as Record<string, unknown>) ?? null;
+}
 
 function sendHtml(res: AnyRes, html: string, status = 200): void {
   res.status(status).set("Content-Type", "text/html; charset=utf-8").send(html);
@@ -806,26 +861,10 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       sendHtml(res, "Repository not found", 404);
       return;
     }
-    const docKey = entry.documentKey ?? "docId";
 
-    // Fetch document using the first get.by* method that accepts docId
     let doc: Record<string, unknown> | null = null;
     try {
-      const getMethod =
-        `by${docKey.charAt(0).toUpperCase()}${docKey.slice(1)}` as keyof typeof entry.repo.get;
-      if (typeof entry.repo.get[getMethod] === "function") {
-        doc = (await (entry.repo.get[getMethod] as Function)(docId)) as Record<
-          string,
-          unknown
-        > | null;
-      } else {
-        // Fallback: use query.getAll with where clause
-        const results = await entry.repo.query.by({
-          where: [[docKey, "==", docId]],
-          limit: 1,
-        });
-        doc = (results[0] as Record<string, unknown>) ?? null;
-      }
+      doc = await fetchDocById(entry, docId);
     } catch (err) {
       sendHtml(res, `Error fetching document: ${(err as Error).message}`, 500);
       return;
@@ -898,7 +937,10 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     }
 
     try {
-      await entry.repo.update(docId, validation.data);
+      // Fetch document to extract path args for subcollection repos
+      const doc = await fetchDocById(entry, docId);
+      const pathArgs = (doc && extractPathArgs(doc, entry.pathKey)) ?? [docId];
+      await entry.repo.update(...pathArgs, validation.data);
       redirect(res, `${lb}/${entry.name}?flash=updated`);
     } catch (err) {
       const mutableSchema2 = getMutableSchema(
@@ -941,7 +983,10 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     }
     const lb = getLinkBase(req, basePath);
     try {
-      await entry.repo.delete(docId);
+      // Fetch document to extract path args for subcollection repos
+      const doc = await fetchDocById(entry, docId);
+      const pathArgs = (doc && extractPathArgs(doc, entry.pathKey)) ?? [docId];
+      await entry.repo.delete(...pathArgs);
       redirect(res, `${lb}/${entry.name}?flash=deleted`);
     } catch (err) {
       sendHtml(res, `Delete error: ${(err as Error).message}`, 500);

@@ -297,6 +297,7 @@ export function createCrudServer<
       schema: resolvedSchema,
       systemKeys: (cfg.repo as any)._systemKeys ?? [cfg.documentKey ?? "docId"],
       documentKey: cfg.documentKey ?? "docId",
+      pathKey: (cfg.repo as any)._pathKey ?? undefined,
       pageSize: cfg.pageSize ?? 25,
       filterableFields,
       mutableFields,
