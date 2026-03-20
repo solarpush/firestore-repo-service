@@ -345,7 +345,9 @@ const crudServer = createCrudServer({
   openapi: {
     title: "Mon API",
     version: "1.0.0",
-    servers: [{ url: "https://api.example.com" }],
+    servers: [
+      { url: "http://127.0.0.1:5001/demo-no-project/us-central1/crud" },
+    ],
     auth: "bearer",
   },
 });
