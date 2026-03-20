@@ -292,9 +292,9 @@ export const admin = onRequest(
         path: "comments",
         allowDelete: true,
         fieldsConfig: {
-          docId: ["filterable"],
+          docId: ["create","filterable"],
           likes: ["filterable"],
-          content: ["mutable"],
+          content: ["create", "mutable"],
         },
         relationalFields: [],
       },

@@ -1,17 +1,102 @@
-// ── Form validation ─────────────────────────────────────────────────────────
+// ── Form validation + array serialization ───────────────────────────────────
 document.addEventListener("submit", function (e) {
   var form = e.target;
   if (!form.hasAttribute("data-frs-form")) return;
+
+  // 1. Validate JSON textareas
+  var valid = true;
   form.querySelectorAll("textarea[data-json]").forEach(function (ta) {
     var v = ta.value.trim();
     if (!v) return;
     try {
       JSON.parse(v);
     } catch (err) {
+      valid = false;
       e.preventDefault();
       alert('Invalid JSON in field "' + ta.name + '":\n' + err.message);
     }
   });
+  if (!valid) return;
+
+  // 2. Serialize array fields into hidden inputs
+  form.querySelectorAll("[data-frs-array]").forEach(function (fieldset) {
+    var hidden = fieldset.querySelector("input[type=hidden][name]");
+    if (!hidden || hidden.disabled) return;
+
+    var type = fieldset.getAttribute("data-frs-array-type");
+    var items = fieldset.querySelectorAll("[data-frs-array-item]");
+    var arr = [];
+
+    if (type === "object") {
+      items.forEach(function (item) {
+        var obj = {};
+        item.querySelectorAll("[data-frs-key]").forEach(function (inp) {
+          var key = inp.getAttribute("data-frs-key");
+          if (inp.type === "checkbox") {
+            obj[key] = inp.checked;
+          } else if (inp.type === "number") {
+            obj[key] = inp.value === "" ? null : Number(inp.value);
+          } else if (inp.tagName === "TEXTAREA") {
+            var v = inp.value.trim();
+            if (v) {
+              try {
+                obj[key] = JSON.parse(v);
+              } catch (_) {
+                obj[key] = v;
+              }
+            } else {
+              obj[key] = null;
+            }
+          } else {
+            obj[key] = inp.value;
+          }
+        });
+        arr.push(obj);
+      });
+    } else {
+      items.forEach(function (item) {
+        var inp = item.querySelector("[data-frs-val]");
+        if (!inp) return;
+        if (type === "checkbox") {
+          arr.push(inp.checked);
+        } else if (type === "number") {
+          if (inp.value !== "") arr.push(Number(inp.value));
+        } else {
+          if (inp.value !== "") arr.push(inp.value);
+        }
+      });
+    }
+
+    hidden.value = JSON.stringify(arr);
+  });
+});
+
+// ── Array add / remove buttons ──────────────────────────────────────────────
+document.addEventListener("click", function (e) {
+  // Add item
+  var addBtn = e.target.closest("[data-frs-array-add]");
+  if (addBtn) {
+    var fieldset = addBtn.closest("[data-frs-array]");
+    if (!fieldset) return;
+    var tpl = fieldset.querySelector("template[data-frs-array-tpl]");
+    var container = fieldset.querySelector("[data-frs-array-items]");
+    if (!tpl || !container) return;
+    var clone = tpl.content.cloneNode(true);
+    container.appendChild(clone);
+    var last = container.lastElementChild;
+    if (last) {
+      var firstInp = last.querySelector("input,select,textarea");
+      if (firstInp) firstInp.focus();
+    }
+    return;
+  }
+
+  // Remove item
+  var rmBtn = e.target.closest("[data-frs-array-rm]");
+  if (rmBtn) {
+    var item = rmBtn.closest("[data-frs-array-item]");
+    if (item) item.remove();
+  }
 });
 
 // ── Table enhancements ──────────────────────────────────────────────────────

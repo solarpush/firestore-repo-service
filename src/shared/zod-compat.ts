@@ -111,6 +111,24 @@ export function getInnerType(schema: z.ZodType): z.ZodType | undefined {
 }
 
 /**
+ * Get the **element schema** from a `ZodArray`.
+ * Returns `undefined` for non-array schemas.
+ */
+export function getArrayElementType(
+  schema: z.ZodType,
+): z.ZodType | undefined {
+  const s = schema as any;
+
+  // Zod 4: _zod.def.element
+  if (s._zod?.def?.element) return s._zod.def.element;
+
+  // Zod 3: _def.type (ZodArray stores element schema in _def.type)
+  if (s._def?.type) return s._def.type;
+
+  return undefined;
+}
+
+/**
  * Returns the list of **required** (non-optional) top-level keys of a ZodObject.
  * A key is required when its schema is NOT wrapped in ZodOptional.
  * ZodNullable / ZodDefault fields are still considered required — they must be present.

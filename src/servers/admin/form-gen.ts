@@ -51,6 +51,7 @@
 
 import type { z } from "zod";
 import {
+  getArrayElementType,
   getDefaultValue,
   getEnumValues,
   getInnerType,
@@ -81,6 +82,18 @@ export interface FieldDescriptor {
   defaultValue?: unknown;
   nested?: FieldDescriptor[]; // for objects
   hint?: string;
+  /** For array fields: the element input type */
+  arrayElementType?:
+    | "text"
+    | "number"
+    | "checkbox"
+    | "select"
+    | "datetime-local"
+    | "object";
+  /** For enum arrays: the allowed values */
+  arrayElementOptions?: string[];
+  /** For object arrays: the field descriptors for one element */
+  arrayElementFields?: FieldDescriptor[];
 }
 
 // ---------------------------------------------------------------------------
@@ -263,7 +276,67 @@ function zodFieldToDescriptor(
       };
     }
 
-    case "ZodArray":
+    case "ZodArray": {
+      const elSchema = getArrayElementType(inner);
+      if (!elSchema) {
+        return {
+          name,
+          label,
+          type: "textarea",
+          required,
+          nullable,
+          defaultValue,
+          hint: "JSON array",
+        };
+      }
+      const { inner: elInner } = unwrap(elSchema);
+      const elTn = getTypeName(elInner);
+
+      let arrayElementType: FieldDescriptor["arrayElementType"];
+      let arrayElementOptions: string[] | undefined;
+      let arrayElementFields: FieldDescriptor[] | undefined;
+
+      switch (elTn) {
+        case "ZodString":
+          arrayElementType = "text";
+          break;
+        case "ZodNumber":
+        case "ZodBigInt":
+          arrayElementType = "number";
+          break;
+        case "ZodBoolean":
+          arrayElementType = "checkbox";
+          break;
+        case "ZodDate":
+          arrayElementType = "datetime-local";
+          break;
+        case "ZodEnum":
+          arrayElementType = "select";
+          arrayElementOptions = getEnumValues(elInner);
+          break;
+        case "ZodNativeEnum":
+          arrayElementType = "select";
+          arrayElementOptions = Object.values(
+            getNativeEnumValues(elInner),
+          ).filter((v) => typeof v === "string") as string[];
+          break;
+        case "ZodObject":
+          arrayElementType = "object";
+          arrayElementFields = zodToFields(elInner);
+          break;
+        default:
+          // Unknown element type → JSON textarea fallback
+          return {
+            name,
+            label,
+            type: "textarea",
+            required,
+            nullable,
+            defaultValue,
+            hint: "JSON array",
+          };
+      }
+
       return {
         name,
         label,
@@ -271,8 +344,11 @@ function zodFieldToDescriptor(
         required,
         nullable,
         defaultValue,
-        hint: "JSON array",
+        arrayElementType,
+        arrayElementOptions,
+        arrayElementFields,
       };
+    }
 
     default:
       return {
@@ -369,6 +445,9 @@ export function renderField(field: FieldDescriptor, depth = 0): string {
       break;
 
     case "textarea":
+      if (field.arrayElementType) {
+        return renderArrayField(field, depth);
+      }
       if (field.nested && field.nested.length > 0) {
         const subFields = field.nested
           .map((f) => renderField(f, depth + 1))
@@ -423,6 +502,182 @@ function e(s: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+
+// ---------------------------------------------------------------------------
+// Array field rendering
+// ---------------------------------------------------------------------------
+
+function renderArrayField(field: FieldDescriptor, depth: number): string {
+  const indent = depth > 0 ? `ml-${depth * 4}` : "";
+  const id = `field_${field.name.replace(/\./g, "__")}`;
+  const isNullValue = field.defaultValue === "__null__";
+  const isObject = field.arrayElementType === "object";
+
+  // Parse existing value (JSON string → array)
+  let items: unknown[] = [];
+  if (
+    field.defaultValue != null &&
+    field.defaultValue !== "" &&
+    field.defaultValue !== "__null__"
+  ) {
+    try {
+      items = JSON.parse(String(field.defaultValue));
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!Array.isArray(items)) items = [];
+
+  const itemsHtml = isObject
+    ? items
+        .map((item) =>
+          renderObjectItem(field, (item as Record<string, unknown>) ?? {}),
+        )
+        .join("\n")
+    : items.map((item) => renderPrimitiveItem(field, item)).join("\n");
+
+  const templateHtml = isObject
+    ? renderObjectItem(field, {})
+    : renderPrimitiveItem(field, "");
+
+  // Null toggle for nullable array fields
+  const nullToggle =
+    field.nullable
+      ? `<span class="flex items-center gap-1 mt-2">
+          <input type="hidden" id="${id}__isnull" name="${e(field.name)}__isnull" value="${isNullValue ? "1" : ""}">
+          <label class="flex items-center gap-1 cursor-pointer select-none text-xs text-base-content/40 hover:text-base-content/70 border border-base-300 rounded px-2 py-1">
+            <input type="checkbox" class="checkbox checkbox-xs" ${isNullValue ? "checked" : ""}
+              onchange="(function(cb){
+                var fs = cb.closest('[data-frs-array]');
+                var h = document.getElementById('${id}__isnull');
+                var hidden = document.getElementById('${id}');
+                if (cb.checked) { fs.querySelector('[data-frs-array-items]').style.opacity='0.35'; h.value='1'; hidden.disabled=true; }
+                else { fs.querySelector('[data-frs-array-items]').style.opacity=''; h.value=''; hidden.disabled=false; }
+              })(this)">
+            <span>null</span>
+          </label>
+        </span>`
+      : "";
+
+  return `
+      <fieldset class="fieldset border border-base-300 rounded-box p-3 mb-3 ${indent}"
+                data-frs-array="${e(field.name)}" data-frs-array-type="${e(field.arrayElementType ?? "text")}">
+        <legend class="fieldset-legend text-xs font-semibold text-base-content/60 px-1">
+          ${e(field.label)}${field.required ? ` <span class="text-error">*</span>` : ""}
+        </legend>
+        <input type="hidden" id="${id}" name="${e(field.name)}" value="${e(JSON.stringify(items))}"${isNullValue ? " disabled" : ""}>
+        <div data-frs-array-items${isNullValue ? ' style="opacity:0.35"' : ""}>
+          ${itemsHtml}
+        </div>
+        <template data-frs-array-tpl>${templateHtml}</template>
+        <button type="button" class="btn btn-xs btn-outline mt-1" data-frs-array-add>+ Add</button>
+        ${nullToggle}
+      </fieldset>`;
+}
+
+function renderPrimitiveItem(
+  field: FieldDescriptor,
+  value: unknown,
+): string {
+  const strVal = value != null ? String(value) : "";
+  let inputHtml: string;
+
+  switch (field.arrayElementType) {
+    case "select":
+      inputHtml = `<select data-frs-val class="select select-bordered select-sm flex-1">
+        <option value="">—</option>
+        ${(field.arrayElementOptions ?? []).map((o) => `<option value="${e(o)}"${strVal === o ? " selected" : ""}>${e(o)}</option>`).join("")}
+      </select>`;
+      break;
+    case "checkbox":
+      inputHtml = `<label class="flex items-center gap-2 flex-1 cursor-pointer">
+        <input type="checkbox" data-frs-val class="checkbox checkbox-sm checkbox-primary"${strVal === "true" ? " checked" : ""}>
+        <span class="text-sm">true</span>
+      </label>`;
+      break;
+    case "number":
+      inputHtml = `<input type="number" data-frs-val value="${e(strVal)}" class="input input-bordered input-sm flex-1">`;
+      break;
+    case "datetime-local":
+      inputHtml = `<input type="datetime-local" data-frs-val value="${e(strVal)}" class="input input-bordered input-sm flex-1">`;
+      break;
+    default:
+      inputHtml = `<input type="text" data-frs-val value="${e(strVal)}" class="input input-bordered input-sm flex-1">`;
+  }
+
+  return `<div class="flex items-center gap-2 mb-2" data-frs-array-item>
+    ${inputHtml}
+    <button type="button" class="btn btn-xs btn-ghost text-error" data-frs-array-rm>&times;</button>
+  </div>`;
+}
+
+function renderObjectItem(
+  field: FieldDescriptor,
+  obj: Record<string, unknown>,
+): string {
+  const elFields = field.arrayElementFields ?? [];
+
+  const fieldsHtml = elFields
+    .map((f) => {
+      const val = obj[f.name];
+      const strVal =
+        val == null
+          ? ""
+          : typeof val === "object"
+            ? JSON.stringify(val)
+            : String(val);
+
+      switch (f.type) {
+        case "checkbox":
+          return `<div class="form-control mb-2">
+            <label class="label cursor-pointer justify-start gap-3">
+              <input type="checkbox" data-frs-key="${e(f.name)}" class="checkbox checkbox-sm checkbox-primary"${strVal === "true" ? " checked" : ""}>
+              <span class="label-text text-sm">${e(f.label)}</span>
+            </label>
+          </div>`;
+        case "select":
+          return `<div class="form-control mb-2">
+            <label class="label pb-1"><span class="label-text text-sm">${e(f.label)}</span></label>
+            <select data-frs-key="${e(f.name)}" class="select select-bordered select-sm w-full">
+              ${f.required ? "" : `<option value="">—</option>`}
+              ${(f.options ?? []).map((o) => `<option value="${e(o)}"${strVal === o ? " selected" : ""}>${e(o)}</option>`).join("")}
+            </select>
+          </div>`;
+        case "number":
+          return `<div class="form-control mb-2">
+            <label class="label pb-1"><span class="label-text text-sm">${e(f.label)}</span></label>
+            <input type="number" data-frs-key="${e(f.name)}" value="${e(strVal)}" class="input input-bordered input-sm w-full">
+          </div>`;
+        case "datetime-local":
+          return `<div class="form-control mb-2">
+            <label class="label pb-1"><span class="label-text text-sm">${e(f.label)}</span></label>
+            <input type="datetime-local" data-frs-key="${e(f.name)}" value="${e(strVal)}" class="input input-bordered input-sm w-full">
+          </div>`;
+        case "textarea":
+          return `<div class="form-control mb-2">
+            <label class="label pb-1"><span class="label-text text-sm">${e(f.label)}</span></label>
+            <textarea data-frs-key="${e(f.name)}" rows="2" class="textarea textarea-bordered textarea-sm w-full font-mono text-xs" placeholder="JSON">${e(strVal)}</textarea>
+          </div>`;
+        default:
+          return `<div class="form-control mb-2">
+            <label class="label pb-1"><span class="label-text text-sm">${e(f.label)}</span></label>
+            <input type="text" data-frs-key="${e(f.name)}" value="${e(strVal)}" class="input input-bordered input-sm w-full">
+          </div>`;
+      }
+    })
+    .join("\n");
+
+  return `<div class="border border-base-200 rounded p-3 mb-2" data-frs-array-item>
+    <div class="flex justify-end mb-1">
+      <button type="button" class="btn btn-xs btn-ghost text-error" data-frs-array-rm>&times;</button>
+    </div>
+    ${fieldsHtml}
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Full form render
+// ---------------------------------------------------------------------------
 
 export function renderForm(
   fields: FieldDescriptor[],
