@@ -113,9 +113,7 @@ import type { RelationConfig, RepositoryConfig } from "./shared/types";
  * const repos = createRepositoryMapping(db, mapping);
  * ```
  */
-export function createRepositoryConfig<
-  TSchema extends z.ZodObject<z.ZodRawShape>,
->(
+export function createRepositoryConfig<TSchema extends z.ZodObject<any>>(
   schema: TSchema,
 ): <
   const TForeignKeys extends readonly (keyof z.infer<TSchema>)[],
@@ -412,6 +410,10 @@ export type {
   BasicAuthConfig,
   CrudRepoConfig,
   CrudServerOptions,
+  FieldRole,
   ListResponseData,
   QueryRequestBody,
+  RepoFieldPath,
+  RepoRelationKeys,
+  UserFieldPath,
 } from "./servers/index";

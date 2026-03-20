@@ -33,7 +33,10 @@
  *         repo: repos.posts,
  *         schema: postSchema,
  *         path: "posts",
- *         filterableFields: ["status", "authorId"],
+ *         fieldsConfig: {
+ *           status:   ["filterable"],
+ *           authorId: ["filterable"],
+ *         },
  *         allowDelete: true,
  *       },
  *     },
@@ -80,15 +83,58 @@
  * | __contains  | array-contains    | tags__contains=news   |
  */
 
-import type { ConfiguredRepository } from "../../repositories/types";
 import { MiniRouter } from "../admin/router";
 import type { HttpRequest, HttpResponse } from "../http-types";
+import type { ConfiguredRepository } from "../../repositories/types";
 import { createCrudHandlers } from "./handlers";
+import { generateOpenAPISpec, type OpenAPIDocument } from "./openapi";
 import type {
   CrudRepoEntry,
   CrudRepoRegistry,
   CrudServerOptions,
 } from "./types";
+
+// ---------------------------------------------------------------------------
+// Scalar API docs HTML template
+// ---------------------------------------------------------------------------
+
+/** Returns a self-contained HTML page using Scalar to render the spec. */
+function scalarDocsHtml(title: string, specUrl: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title}</title>
+</head>
+<body>
+  <script id="api-reference" data-url="${specUrl}"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+</body>
+</html>`;
+}
+
+/**
+ * Compute the URL prefix for links / spec URLs.
+ * In the Firebase emulator the /{project}/{region}/{functionTarget} prefix
+ * is visible in URLs but stripped before the handler receives `req.url`.
+ * In production Firebase proxy strips it automatically.
+ */
+function getLinkBase(staticBasePath: string): string {
+  const base = staticBasePath === "/" ? "" : staticBasePath.replace(/\/$/, "");
+
+  if (process.env["FUNCTIONS_EMULATOR"] === "true") {
+    const project =
+      process.env["GCLOUD_PROJECT"] ??
+      process.env["GOOGLE_CLOUD_PROJECT"] ??
+      "demo-project";
+    const region = process.env["FUNCTION_REGION"] ?? "us-central1";
+    const target = process.env["FUNCTION_TARGET"] ?? "";
+    return `/${project}/${region}/${target}${base}`;
+  }
+
+  return base;
+}
 
 // ---------------------------------------------------------------------------
 // Body parser
@@ -127,15 +173,20 @@ async function readRawBody(req: HttpRequest): Promise<string> {
  *       users: {
  *         repo: repos.users,
  *         path: "users",
- *         filterableFields: ["email", "isActive"],
- *         mutableFields: ["name", "email"],
- *         createFields: ["name", "email"],
+ *         fieldsConfig: {
+ *           name:     ["create", "mutable"],
+ *           email:    ["create", "mutable", "filterable"],
+ *           isActive: ["filterable"],
+ *         },
  *         allowDelete: false,
  *       },
  *       posts: {
  *         repo: repos.posts,
  *         path: "posts",
- *         filterableFields: ["status", "userId"],
+ *         fieldsConfig: {
+ *           status: ["filterable"],
+ *           userId: ["filterable"],
+ *         },
  *         allowDelete: true,
  *       },
  *     },
@@ -191,7 +242,9 @@ async function readRawBody(req: HttpRequest): Promise<string> {
  */
 export function createCrudServer<
   TRepos extends Record<string, ConfiguredRepository<any>>,
->(options: CrudServerOptions<TRepos>): (req: any, res: any) => Promise<void> {
+>(
+  options: CrudServerOptions<TRepos>,
+): (req: any, res: any) => Promise<void> {
   const {
     basePath = "/",
     repos,
@@ -216,24 +269,67 @@ export function createCrudServer<
       );
     }
 
+    // Resolve fieldsConfig → separate arrays for runtime
+    let filterableFields: string[] | undefined;
+    let mutableFields: string[] | undefined;
+    let createFields: string[] | undefined;
+    if (cfg.fieldsConfig) {
+      const fc = cfg.fieldsConfig as Record<string, readonly string[]>;
+      filterableFields = [];
+      mutableFields = [];
+      createFields = [];
+      for (const [field, roles] of Object.entries(fc)) {
+        for (const role of roles) {
+          if (role === "filterable") filterableFields.push(field);
+          else if (role === "mutable") mutableFields.push(field);
+          else if (role === "create") createFields.push(field);
+        }
+      }
+      if (filterableFields.length === 0) filterableFields = undefined;
+      if (mutableFields.length === 0) mutableFields = undefined;
+      if (createFields.length === 0) createFields = undefined;
+    }
+
     const entry: CrudRepoEntry = {
       name,
       path: cfg.path,
       repo: cfg.repo,
       schema: resolvedSchema,
+      systemKeys: (cfg.repo as any)._systemKeys ?? [cfg.documentKey ?? "docId"],
       documentKey: cfg.documentKey ?? "docId",
       pageSize: cfg.pageSize ?? 25,
-      filterableFields: cfg.filterableFields as string[] | undefined,
-      mutableFields: cfg.mutableFields as string[] | undefined,
-      createFields: cfg.createFields as string[] | undefined,
+      filterableFields,
+      mutableFields,
+      createFields,
       allowDelete: cfg.allowDelete ?? false,
-      allowedIncludes: cfg.allowedIncludes,
+      allowedIncludes: cfg.allowedIncludes as string[] | undefined,
       validate: cfg.validate as CrudRepoEntry["validate"],
     };
+
     registry[name] = entry;
   }
 
   const handlers = createCrudHandlers(registry, base, verbose);
+
+  // ── OpenAPI spec (cached) ─────────────────────────────────────────────
+  const openapi = options.openapi;
+  const openapiOpts = openapi && typeof openapi === "object" ? openapi : {};
+  let _specCache: OpenAPIDocument | null = null;
+  function getSpec(): OpenAPIDocument {
+    if (!_specCache) {
+      const authType =
+        auth && typeof auth !== "function"
+          ? ("basic" as const)
+          : auth
+            ? ("bearer" as const)
+            : false;
+      _specCache = generateOpenAPISpec(registry, base, {
+        ...openapiOpts,
+        auth: openapiOpts.auth ?? authType,
+      });
+    }
+    return _specCache;
+  }
 
   // ── Router ─────────────────────────────────────────────────────────────
   const router = new MiniRouter();
@@ -303,6 +399,31 @@ export function createCrudServer<
 
   // ── 4. Routes ─────────────────────────────────────────────────────────────
 
+  // ── OpenAPI spec & docs endpoints (before auth so they're public) ────
+  if (openapi !== false) {
+    const specPath = `${base}/__spec.json`;
+    const docsPath = `${base}/__docs`;
+
+    router.get(specPath, (_req: any, res: any) => {
+      const spec = getSpec();
+      res
+        .status(200)
+        .set("Content-Type", "application/json; charset=utf-8")
+        .send(JSON.stringify(spec, null, 2));
+    });
+
+    router.get(docsPath, (_req: any, res: any) => {
+      // Rebuild spec URL with the Firebase Functions prefix when running
+      // in the emulator so Scalar can fetch the spec correctly.
+      const specUrl = getLinkBase(base) + "/__spec.json";
+      const html = scalarDocsHtml(openapiOpts.title ?? "CRUD API", specUrl);
+      res
+        .status(200)
+        .set("Content-Type", "text/html; charset=utf-8")
+        .send(html);
+    });
+  }
+
   // OPTIONS for CORS preflight
   router.use((req, res, next) => {
     if (req.method === "OPTIONS") {
@@ -338,12 +459,25 @@ export function createCrudServer<
   router.delete(`${base}/:repoName/:id`, handlers.handleDelete);
 
   // ── Request handler ─────────────────────────────────────────────────────
-  return async (req: HttpRequest, res: HttpResponse): Promise<void> => {
+  const handler = async (
+    req: HttpRequest,
+    res: HttpResponse,
+  ): Promise<void> => {
     await router.handle(req as any, res as any);
+  };
+
+  // Attach spec getter so users can call server.spec() programmatically
+  (handler as any).spec = getSpec;
+
+  return handler as ((req: any, res: any) => Promise<void>) & {
+    /** Return the generated OpenAPI 3.1 document. */
+    spec: () => OpenAPIDocument;
   };
 }
 
 // Re-exports for convenience
+export { generateOpenAPISpec } from "./openapi";
+export type { OpenAPIDocument, OpenAPISpecOptions } from "./openapi";
 export type {
   ApiResponse,
   BasicAuthConfig,
@@ -351,7 +485,11 @@ export type {
   CrudRepoEntry,
   CrudRepoRegistry,
   CrudServerOptions,
+  FieldRole,
   ListResponseData,
   Middleware,
   QueryRequestBody,
+  RepoFieldPath,
+  RepoRelationKeys,
+  UserFieldPath,
 } from "./types";

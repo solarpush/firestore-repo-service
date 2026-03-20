@@ -89,5 +89,12 @@ export function createRepository<
     schema: (config as any).schema,
     // Pass through relational keys built by buildRepositoryRelations
     relationalKeys: (config as any).relationalKeys,
+    // Auto-managed keys that should never be accepted in user-provided payloads
+    _systemKeys: [
+      config.documentKey as string,
+      config.pathKey as string | undefined,
+      config.createdKey as string | undefined,
+      config.updatedKey as string | undefined,
+    ].filter((k): k is string => typeof k === "string"),
   } as unknown as ConfiguredRepository<T>;
 }

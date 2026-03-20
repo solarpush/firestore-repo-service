@@ -5,7 +5,7 @@
 **Fonctionnalités :**
 - Dashboard listant tous les repositories
 - Liste de documents avec pagination curseur, colonnes triables, sélecteur de lignes par page
-- Barre de filtres générée depuis `filterableFields`
+- Barre de filtres générée depuis `fieldsConfig` (champs avec le rôle `"filterable"`)
 - Formulaires création / édition générés depuis le schéma Zod
 - Colonnes d'action relationnelles (naviguer vers le repo lié)
 - Authentification HTTP Basic ou middleware custom
@@ -27,19 +27,26 @@ export const admin = onRequest(
     },
     repos: {
       users: {
-        repo:             repos.users,
-        path:             "users",
-        filterableFields: ["docId", "name", "email", "age", "isActive"],
-        mutableFields:    ["name", "email", "age", "isActive"],
-        createFields:     ["name", "email", "age", "isActive"],
+        repo: repos.users,
+        path: "users",
+        fieldsConfig: {
+          name:     ["create", "mutable", "filterable"],
+          email:    ["create", "mutable", "filterable"],
+          age:      ["create", "mutable", "filterable"],
+          isActive: ["create", "mutable", "filterable"],
+          docId:    ["filterable"],
+        },
         allowDelete: true,
       },
       posts: {
-        repo:             repos.posts,
-        path:             "posts",
-        filterableFields: ["status", "userId"],
-        mutableFields:    ["status", "title", "content"],
-        createFields:     ["title", "content", "status", "userId"],
+        repo: repos.posts,
+        path: "posts",
+        fieldsConfig: {
+          title:   ["create", "mutable"],
+          content: ["create", "mutable"],
+          status:  ["create", "mutable", "filterable"],
+          userId:  ["create", "filterable"],
+        },
         relationalFields: [
           { key: "userId", column: "Auteur" },
         ],
@@ -60,17 +67,19 @@ export const admin = onRequest(
 | `documentKey`        | `string`                         | `"docId"` | Champ utilisé comme ID de document                      |
 | `listColumns`        | `string[]`                       | all keys  | Colonnes affichées dans la liste                        |
 | `pageSize`           | `number`                         | `25`      | Nombre de lignes par page par défaut                    |
-| `filterableFields`   | `FieldPath<Model>[]`             | all keys  | Champs affichés dans la barre de filtres                |
-| `mutableFields`      | `FieldPath<Model>[]`             | all keys  | Champs du formulaire **édition**                        |
-| `createFields`       | `FieldPath<Model>[]`             | all keys  | Champs du formulaire **création**                       |
+| `fieldsConfig`       | `Record<FieldPath, FieldRole[]>` | all keys  | Config par champ : `"create"`, `"mutable"`, `"filterable"` |
 | `allowDelete`        | `boolean`                        | `false`   | Afficher le bouton Supprimer                            |
 | `relationalFields`   | `{ key, column }[]`              | aucun     | Colonnes boutons relationnelles                         |
 
 ## Champs en dot-notation
 
 ```typescript
-filterableFields: ["status", "address.city", "address.street"],
-mutableFields:    ["title", "address.city", "address.street"],
+fieldsConfig: {
+  status:           ["filterable"],
+  "address.city":   ["create", "mutable", "filterable"],
+  "address.street": ["create", "mutable", "filterable"],
+  title:            ["create", "mutable"],
+}
 ```
 
 ## Champs relationnels

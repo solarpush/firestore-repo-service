@@ -50,6 +50,16 @@
  */
 
 import type { z } from "zod";
+import {
+  getDefaultValue,
+  getEnumValues,
+  getInnerType,
+  getLiteralValue,
+  getNativeEnumValues,
+  getShape,
+  getStringChecks,
+  getTypeName,
+} from "../../shared/zod-compat";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,31 +97,31 @@ function toLabel(name: string): string {
 }
 
 /** Unwrap ZodOptional / ZodNullable / ZodDefault to the inner schema */
-function unwrap(schema: z.ZodTypeAny): {
-  inner: z.ZodTypeAny;
+function unwrap(schema: z.ZodType): {
+  inner: z.ZodType;
   required: boolean;
   nullable: boolean;
   defaultValue: unknown;
 } {
-  let inner: z.ZodTypeAny = schema;
+  let inner: z.ZodType = schema;
   let required = true;
   let nullable = false;
   let defaultValue: unknown = undefined;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const tn: string = (inner as any)._def?.typeName ?? "";
+    const tn = getTypeName(inner);
     if (tn === "ZodOptional") {
       required = false;
-      inner = (inner as any)._def.innerType;
+      inner = getInnerType(inner)!;
     } else if (tn === "ZodNullable") {
       required = false;
       nullable = true;
-      inner = (inner as any)._def.innerType;
+      inner = getInnerType(inner)!;
     } else if (tn === "ZodDefault") {
       required = false;
-      defaultValue = (inner as any)._def.defaultValue?.();
-      inner = (inner as any)._def.innerType;
+      defaultValue = getDefaultValue(inner);
+      inner = getInnerType(inner)!;
     } else {
       break;
     }
@@ -125,13 +135,13 @@ function unwrap(schema: z.ZodTypeAny): {
 // ---------------------------------------------------------------------------
 
 export function zodToFields(
-  schema: z.ZodTypeAny,
+  schema: z.ZodType,
   namePrefix = "",
 ): FieldDescriptor[] {
-  const tn: string = (schema as any)._def?.typeName ?? "";
+  const tn = getTypeName(schema);
 
   if (tn === "ZodObject") {
-    const shape: Record<string, z.ZodTypeAny> = (schema as any)._def.shape();
+    const shape: Record<string, z.ZodType> = getShape(schema);
     return Object.entries(shape).map(([fieldName, fieldSchema]) =>
       zodFieldToDescriptor(
         namePrefix ? `${namePrefix}.${fieldName}` : fieldName,
@@ -150,18 +160,17 @@ export function zodToFields(
 function zodFieldToDescriptor(
   name: string,
   rawName: string,
-  schema: z.ZodTypeAny,
+  schema: z.ZodType,
 ): FieldDescriptor {
   const { inner, required, nullable, defaultValue } = unwrap(schema);
-  const tn: string = (inner as any)._def?.typeName ?? "";
+  const tn = getTypeName(inner);
   const label = toLabel(rawName.split(".").pop() ?? rawName);
 
   switch (tn) {
     case "ZodString": {
-      const checks: { kind: string; value?: unknown }[] =
-        (inner as any)._def.checks ?? [];
-      const isEmail = checks.some((c) => c.kind === "email");
-      const isUrl = checks.some((c) => c.kind === "url");
+      const checks = getStringChecks(inner);
+      const isEmail = checks.includes("email");
+      const isUrl = checks.includes("url");
       return {
         name,
         label,
@@ -199,7 +208,7 @@ function zodFieldToDescriptor(
       };
 
     case "ZodEnum": {
-      const values: string[] = (inner as any)._def.values ?? [];
+      const values = getEnumValues(inner);
       return {
         name,
         label,
@@ -212,7 +221,7 @@ function zodFieldToDescriptor(
     }
 
     case "ZodNativeEnum": {
-      const enumObj = (inner as any)._def.values as Record<string, unknown>;
+      const enumObj = getNativeEnumValues(inner);
       const values = Object.values(enumObj).filter(
         (v) => typeof v === "string",
       ) as string[];
@@ -228,7 +237,7 @@ function zodFieldToDescriptor(
     }
 
     case "ZodLiteral": {
-      const value = String((inner as any)._def.value ?? "");
+      const value = String(getLiteralValue(inner) ?? "");
       return {
         name,
         label,

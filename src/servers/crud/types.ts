@@ -5,6 +5,7 @@
 import type { z } from "zod";
 import type { ConfiguredRepository } from "../../repositories/types";
 import type { FieldPath, RepositoryConfig } from "../../shared/types";
+import type { OpenAPISpecOptions } from "./openapi";
 
 // ---------------------------------------------------------------------------
 // Public option types
@@ -22,6 +23,100 @@ export type RepoModelType<TRepo> =
     : never;
 
 /**
+ * Extracts the auto-managed system keys (documentKey, pathKey, createdKey, updatedKey)
+ * from a `ConfiguredRepository`. These keys must never appear in create/update payloads.
+ * @internal
+ */
+export type RepoSystemKeys<TRepo> =
+  TRepo extends ConfiguredRepository<
+    RepositoryConfig<
+      any,
+      any,
+      any,
+      any,
+      any,
+      any,
+      infer TDocKey,
+      infer TPathKey,
+      infer TCreatedKey,
+      infer TUpdatedKey
+    >
+  >
+    ?
+        | (TDocKey extends string ? TDocKey : never)
+        | (TPathKey extends string ? TPathKey : never)
+        | (TCreatedKey extends string ? TCreatedKey : never)
+        | (TUpdatedKey extends string ? TUpdatedKey : never)
+    : never;
+
+/**
+ * `true` when `T` is `any`  (the `0 extends (1 & T)` trick).
+ * @internal
+ */
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
+/**
+ * Allowed roles for a field in `fieldsConfig`.
+ * - `"create"` — field is accepted in create requests / create form
+ * - `"mutable"` — field is accepted in update requests / edit form
+ * - `"filterable"` — field can be used in query filters / filter bar
+ */
+export type FieldRole = "create" | "mutable" | "filterable";
+
+/**
+ * Field paths on the model, **excluding** auto-managed system keys.
+ * Falls back to `string` when `TRepo` is unresolved (`any`) so that plain
+ * `createCrudServer({ repos: { … } })` usage doesn't produce `never[]` errors.
+ * Full autocomplete is available once `TRepo` is fully inferred.
+ * @internal
+ */
+export type UserFieldPath<TRepo> =
+  IsAny<TRepo> extends true
+    ? string
+    : IsAny<RepoModelType<TRepo>> extends true
+      ? string
+      : FieldPath<Omit<RepoModelType<TRepo>, RepoSystemKeys<TRepo>>>;
+
+/**
+ * All field paths on the model (including system keys), with `any` guard.
+ * Used for `filterableFields` where system-key fields are valid.
+ * @internal
+ */
+export type RepoFieldPath<TRepo> =
+  IsAny<TRepo> extends true
+    ? string
+    : IsAny<RepoModelType<TRepo>> extends true
+      ? string
+      : FieldPath<RepoModelType<TRepo>>;
+
+/**
+ * Extracts the relational-key names from a `ConfiguredRepository`.
+ * Falls back to `string` when `TRepo` is unresolved (`any`).
+ * @internal
+ */
+export type RepoRelationKeys<TRepo> =
+  IsAny<TRepo> extends true
+    ? string
+    : TRepo extends ConfiguredRepository<
+          RepositoryConfig<
+            any,
+            any,
+            any,
+            any,
+            any,
+            infer TRelKeys,
+            any,
+            any,
+            any,
+            any
+          >
+        >
+      ? IsAny<TRelKeys> extends true
+        ? string
+        : keyof TRelKeys & string
+      : string;
+
+/**
  * Configuration for a single repository in the CRUD server.
  *
  * @template TRepo - The `ConfiguredRepository` type; used to derive typed field names.
@@ -35,7 +130,7 @@ export interface CrudRepoConfig<
    * Zod schema — required when the repo was not created with `createRepositoryConfig(schema)`.
    * Used for request validation.
    */
-  schema?: z.ZodObject<z.ZodRawShape>;
+  schema?: z.ZodObject<any>;
   /** Firestore collection path (for routing) */
   path: string;
   /** Key used to identify documents (default: "docId") */
@@ -43,20 +138,29 @@ export interface CrudRepoConfig<
   /** Number of documents per page in list endpoint (default: 25) */
   pageSize?: number;
   /**
-   * Fields that can be used for filtering via query params.
-   * Defaults to all schema keys.
+   * Per-field role configuration.
+   * Each key is a model field (with autocomplete); the value is an array of roles.
+   * Object keys are inherently unique — no duplicate field entries possible.
+   *
+   * Roles:
+   * - `"create"` — field is accepted in create requests
+   * - `"mutable"` — field is accepted in update requests (PUT/PATCH)
+   * - `"filterable"` — field can be used in query filters
+   *
+   * If `fieldsConfig` is omitted, all non-system schema fields are allowed
+   * for all roles, and all fields (including system keys) are filterable.
+   *
+   * @example
+   * ```ts
+   * fieldsConfig: {
+   *   title:   ["create", "mutable", "filterable"],
+   *   content: ["create", "mutable"],
+   *   status:  ["create", "filterable"],
+   *   userId:  ["filterable"],
+   * }
+   * ```
    */
-  filterableFields?: FieldPath<RepoModelType<TRepo>>[];
-  /**
-   * Fields allowed in update requests — typed to the model keys.
-   * If unset, all schema fields are allowed.
-   */
-  mutableFields?: FieldPath<RepoModelType<TRepo>>[];
-  /**
-   * Fields allowed in create requests — typed to the model keys.
-   * If unset, all schema fields are allowed.
-   */
-  createFields?: FieldPath<RepoModelType<TRepo>>[];
+  fieldsConfig?: Partial<Record<RepoFieldPath<TRepo>, readonly FieldRole[]>>;
   /**
    * Whether DELETE endpoint is enabled.
    * Default: false — delete is disabled unless explicitly set to true.
@@ -67,7 +171,7 @@ export interface CrudRepoConfig<
    * When set, any key not in this list is silently dropped.
    * If not set, includes are disabled.
    */
-  allowedIncludes?: string[];
+  allowedIncludes?: readonly RepoRelationKeys<TRepo>[];
   /**
    * Custom validation function called before create/update.
    * Return an error message string to reject, or undefined to accept.
@@ -87,11 +191,16 @@ export interface CrudRepoEntry {
   repo: ConfiguredRepository<
     RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
   >;
-  schema: z.ZodObject<z.ZodRawShape>;
+  schema: z.ZodObject<any>;
+  /** Keys automatically managed by Firestore (docId, path, timestamps) — excluded from create/update payloads */
+  systemKeys: string[];
   documentKey: string;
   pageSize: number;
+  /** Resolved from fieldsConfig: fields with role "filterable" */
   filterableFields?: string[];
+  /** Resolved from fieldsConfig: fields with role "mutable" */
   mutableFields?: string[];
+  /** Resolved from fieldsConfig: fields with role "create" */
   createFields?: string[];
   allowDelete: boolean;
   allowedIncludes?: string[];
@@ -126,6 +235,10 @@ export type Middleware = (
 /**
  * Options for `createCrudServer`.
  *
+ * Made generic so TypeScript can infer the model type of each repo entry
+ * and provide autocomplete + type-checking on `filterableFields`, `mutableFields`,
+ * `createFields`, and `allowedIncludes`.
+ *
  * @template TRepos - Shape of the repos map (inferred automatically at the call site)
  */
 export interface CrudServerOptions<
@@ -143,6 +256,8 @@ export interface CrudServerOptions<
 
   /**
    * Repository entries keyed by a name (used as route prefix).
+   * TypeScript infers the model type from each `repo` field,
+   * so `fieldsConfig` keys and `allowedIncludes` are typed to that model.
    *
    * @example
    * ```ts
@@ -150,9 +265,12 @@ export interface CrudServerOptions<
    *   posts: {
    *     repo: repos.posts,
    *     path: "posts",
-   *     filterableFields: ["status", "userId"],
-   *     mutableFields: ["title", "content"],
-   *     createFields: ["title", "content", "status"],
+   *     fieldsConfig: {
+   *       title:   ["create", "mutable", "filterable"],
+   *       content: ["create", "mutable"],
+   *       status:  ["create", "filterable"],
+   *       userId:  ["filterable"],
+   *     },
    *     allowDelete: true,
    *   },
    * }
@@ -180,6 +298,13 @@ export interface CrudServerOptions<
    * Default: false (production-safe).
    */
   verbose?: boolean;
+
+  /**
+   * OpenAPI documentation options.
+   * Set to `false` to disable spec generation & doc endpoints entirely.
+   * When unset or an object, `/__spec.json` and `/__docs` routes are exposed.
+   */
+  openapi?: OpenAPISpecOptions | false;
 }
 
 // ---------------------------------------------------------------------------

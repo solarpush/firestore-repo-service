@@ -33,12 +33,15 @@
     "resolveJsonModule": true,
     // Resolve local sub-path exports from source (no build needed)
     "paths": {
-      "@lpdjs/firestore-repo-service/servers": ["../../servers/index.ts"],
+      "@lpdjs/firestore-repo-service/servers": ["../../src/servers/index.ts"],
       "@lpdjs/firestore-repo-service/servers/pagination": [
-        "../../servers/pagination/index.ts"
+        "../../src/servers/pagination/index.ts"
       ],
       "@lpdjs/firestore-repo-service/servers/admin": [
-        "../../servers/admin/index.ts"
+        "../../src/servers/admin/index.ts"
+      ],
+      "@lpdjs/firestore-repo-service/servers/crud": [
+        "../../src/servers/crud/index.ts"
       ]
     }
   },

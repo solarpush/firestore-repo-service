@@ -260,9 +260,14 @@ export const admin = onRequest(
       posts: {
         repo: repos.posts,
         path: "posts",
-        filterableFields: ["title", "status", "userId", "address", "views"],
-        mutableFields: ["status", "title", "content", "address", "views"], // edit form only
-        createFields: ["title", "content", "address", "views"], // create form only
+        fieldsConfig: {
+          title:   ["create", "mutable", "filterable"],
+          content: ["create", "mutable"],
+          status:  ["mutable", "filterable"],
+          address: ["create", "mutable", "filterable"],
+          views:   ["create", "mutable", "filterable"],
+          userId:  ["filterable"],
+        },
         relationalFields: [
           { key: "userId", column: "Author" },
           { key: "docId", column: "Comments" },
@@ -273,21 +278,24 @@ export const admin = onRequest(
         repo: repos.users,
         path: "users",
         allowDelete: true,
-        createFields: ["name", "email", "age", "isActive"],
-        mutableFields: ["name", "email", "age", "isActive"],
-        filterableFields: ["docId", "name", "email", "age", "isActive"],
+        fieldsConfig: {
+          name:     ["create", "mutable", "filterable"],
+          email:    ["create", "mutable", "filterable"],
+          age:      ["create", "mutable", "filterable"],
+          isActive: ["create", "mutable", "filterable"],
+          docId:    ["filterable"],
+        },
         relationalFields: [{ key: "docId", column: "Posts" }],
-        // no createFields/mutableFields → all schema fields shown in both forms
       },
       comments: {
         repo: repos.comments,
         path: "comments",
         allowDelete: true,
-        createFields: [],
-        mutableFields: [],
-        filterableFields: ["docId", "likes"],
+        fieldsConfig: {
+          docId: ["filterable"],
+          likes: ["filterable"],
+        },
         relationalFields: [],
-        // no createFields/mutableFields → all schema fields shown in both forms
       },
     },
   }),
@@ -298,11 +306,46 @@ const crudServer = createCrudServer({
     posts: {
       repo: repos.posts,
       path: "posts",
-      filterableFields: ["title", "status", "userId", "address", "views"],
-      mutableFields: ["status", "title", "content", "address", "views"], // edit form only
-      createFields: ["title", "content", "address", "views"], // create form only
+      fieldsConfig: {
+        title:   ["create", "mutable", "filterable"],
+        content: ["create", "mutable"],
+        status:  ["create", "filterable"],
+        address: ["create"],
+        views:   ["create"],
+        userId:  ["filterable"],
+      },
       allowDelete: true,
     },
+    users: {
+      repo: repos.users,
+      path: "users",
+      allowDelete: true,
+      fieldsConfig: {
+        name:     ["create", "mutable", "filterable"],
+        email:    ["create", "mutable", "filterable"],
+        age:      ["create", "mutable", "filterable"],
+        isActive: ["create", "mutable", "filterable"],
+        docId:    ["filterable"],
+      },
+    },
+    comments: {
+      repo: repos.comments,
+      path: "comments",
+      allowDelete: true,
+      fieldsConfig: {
+        postId:  ["create", "filterable"],
+        userId:  ["create"],
+        content: ["create", "mutable"],
+        likes:   ["mutable", "filterable"],
+        docId:   ["filterable"],
+      },
+    },
+  },
+  openapi: {
+    title: "Mon API",
+    version: "1.0.0",
+    servers: [{ url: "https://api.example.com" }],
+    auth: "bearer",
   },
 });
 export const crud = onRequest(crudServer);

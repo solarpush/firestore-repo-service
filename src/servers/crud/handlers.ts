@@ -48,22 +48,26 @@ function sendError(res: any, error: string, status = 400): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Pick only specified fields from a Zod schema.
+ * Pick only specified fields from a Zod schema, always excluding system-managed keys.
+ *
+ * - `fields` undefined or empty  → all schema fields minus systemKeys
+ * - `fields` with values          → only those fields, minus systemKeys
  */
 function pickSchemaFields(
-  schema: z.ZodObject<z.ZodRawShape>,
+  schema: z.ZodObject<any>,
   fields: string[] | undefined,
-): z.ZodObject<z.ZodRawShape> {
-  if (!fields || fields.length === 0) return schema;
-
+  systemKeys: string[] = [],
+): z.ZodObject<any> {
   const shape = schema.shape;
-  const picked: z.ZodRawShape = {};
+  const picked: Record<string, z.ZodType> = {};
 
-  for (const field of fields) {
-    // Handle dot-notation for nested fields (simplified: only pick top-level)
+  const source = fields && fields.length > 0 ? fields : Object.keys(shape);
+
+  for (const field of source) {
+    if (systemKeys.includes(field)) continue;
     const topLevel = field.split(".")[0];
     if (topLevel && shape[topLevel]) {
-      picked[topLevel] = shape[topLevel];
+      picked[topLevel] = shape[topLevel]!;
     }
   }
 
@@ -74,21 +78,22 @@ function pickSchemaFields(
  * Validate data against schema and return parsed result or error.
  */
 function validateData(
-  schema: z.ZodObject<z.ZodRawShape>,
+  schema: z.ZodObject<any>,
   data: unknown,
   fields: string[] | undefined,
   partial = false,
+  systemKeys: string[] = [],
 ):
   | { success: true; data: Record<string, unknown> }
   | { success: false; error: string } {
   try {
-    const targetSchema = pickSchemaFields(schema, fields);
+    const targetSchema = pickSchemaFields(schema, fields, systemKeys);
     const finalSchema = partial ? targetSchema.partial() : targetSchema;
     const parsed = finalSchema.parse(data);
     return { success: true, data: parsed as Record<string, unknown> };
   } catch (err) {
     if (err instanceof z.ZodError) {
-      const messages = err.errors.map(
+      const messages = err.issues.map(
         (e) => `${e.path.join(".")}: ${e.message}`,
       );
       return {
@@ -570,7 +575,13 @@ export function createCrudHandlers(
       const body = req.body ?? {};
 
       // Validate against schema
-      const validation = validateData(entry.schema, body, entry.createFields);
+      const validation = validateData(
+        entry.schema,
+        body,
+        entry.createFields,
+        false,
+        entry.systemKeys,
+      );
       if (!validation.success) {
         sendError(res, validation.error, 400);
         return;
@@ -623,6 +634,7 @@ export function createCrudHandlers(
         body,
         entry.mutableFields,
         partial,
+        entry.systemKeys,
       );
       if (!validation.success) {
         sendError(res, validation.error, 400);

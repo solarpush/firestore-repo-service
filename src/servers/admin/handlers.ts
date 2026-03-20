@@ -14,6 +14,7 @@
 import { z } from "zod";
 import type { ConfiguredRepository } from "../../repositories/types";
 import type { RepositoryConfig } from "../../shared/types";
+import { getInnerType, getShape, getTypeName } from "../../shared/zod-compat";
 import { renderForm, zodToFields, type FieldDescriptor } from "./form-gen";
 import type {
   ColumnMeta,
@@ -35,7 +36,7 @@ export interface AdminRepoEntry {
   repo: ConfiguredRepository<
     RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
   >;
-  schema: z.ZodObject<z.ZodRawShape>;
+  schema: z.ZodObject<any>;
   /** document key field name (default: "docId") */
   documentKey?: string;
   /** List of columns to display in the table (defaults to schema keys) */
@@ -79,13 +80,13 @@ function redirect(res: AnyRes, to: string): void {
  */
 function parseFormBody(
   raw: Record<string, string | string[] | undefined>,
-  schema: z.ZodObject<z.ZodRawShape>,
+  schema: z.ZodObject<any>,
 ): Record<string, unknown> {
   const shape = schema.shape;
   const result: Record<string, unknown> = {};
 
   for (const [key, zodField] of Object.entries(shape)) {
-    const tn = resolveTypeName(zodField as z.ZodTypeAny);
+    const tn = resolveTypeName(zodField as z.ZodType);
 
     // ── ZodObject: prefer dot-notation sub-keys over raw JSON textarea ──────
     if (tn === "ZodObject") {
@@ -104,21 +105,18 @@ function parseFormBody(
       }
       if (hasDotKeys) {
         // Unwrap to the inner ZodObject schema and recurse
-        let innerSchema: z.ZodTypeAny = zodField as z.ZodTypeAny;
+        let innerSchema: z.ZodType = zodField as z.ZodType;
         while (true) {
-          const itn: string = (innerSchema as any)._def?.typeName ?? "";
+          const itn = getTypeName(innerSchema);
           if (
             itn === "ZodOptional" ||
             itn === "ZodNullable" ||
             itn === "ZodDefault"
           ) {
-            innerSchema = (innerSchema as any)._def.innerType;
+            innerSchema = getInnerType(innerSchema)!;
           } else break;
         }
-        result[key] = parseFormBody(
-          subRaw,
-          innerSchema as z.ZodObject<z.ZodRawShape>,
-        );
+        result[key] = parseFormBody(subRaw, innerSchema as z.ZodObject<any>);
         continue;
       }
       // Fallback: try to JSON-parse the textarea value
@@ -232,13 +230,13 @@ function toDatetimeLocal(val: unknown): string | null {
 }
 
 /** Resolve the innermost Zod type name (unwrapping Optional/Nullable/Default) */
-function resolveTypeName(schema: z.ZodTypeAny): string {
-  let s: z.ZodTypeAny = schema;
+function resolveTypeName(schema: z.ZodType): string {
+  let s: z.ZodType = schema;
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const tn: string = (s as any)._def?.typeName ?? "";
+    const tn = getTypeName(s);
     if (tn === "ZodOptional" || tn === "ZodNullable" || tn === "ZodDefault") {
-      s = (s as any)._def.innerType;
+      s = getInnerType(s)!;
     } else {
       return tn;
     }
@@ -252,7 +250,7 @@ function resolveTypeName(schema: z.ZodTypeAny): string {
  */
 function prefillFromDoc(
   doc: Record<string, unknown>,
-  schema: z.ZodObject<z.ZodRawShape>,
+  schema: z.ZodObject<any>,
   prefix = "",
 ): Record<string, string> {
   const result: Record<string, string> = {};
@@ -267,18 +265,18 @@ function prefillFromDoc(
     if (val === undefined) continue;
 
     // Unwrap Optional/Nullable/Default to check inner type
-    let innerSchema: z.ZodTypeAny = schema.shape[key] as z.ZodTypeAny;
+    let innerSchema: z.ZodType = schema.shape[key] as z.ZodType;
     while (true) {
-      const itn: string = (innerSchema as any)._def?.typeName ?? "";
+      const itn = getTypeName(innerSchema);
       if (
         itn === "ZodOptional" ||
         itn === "ZodNullable" ||
         itn === "ZodDefault"
       ) {
-        innerSchema = (innerSchema as any)._def.innerType;
+        innerSchema = getInnerType(innerSchema)!;
       } else break;
     }
-    const innerTn: string = (innerSchema as any)._def?.typeName ?? "";
+    const innerTn = getTypeName(innerSchema);
 
     if (
       innerTn === "ZodObject" &&
@@ -289,7 +287,7 @@ function prefillFromDoc(
       // Recursively flatten nested object fields with dot-notation
       const nested = prefillFromDoc(
         val as Record<string, unknown>,
-        innerSchema as z.ZodObject<z.ZodRawShape>,
+        innerSchema as z.ZodObject<any>,
         fullKey,
       );
       Object.assign(result, nested);
@@ -393,13 +391,13 @@ function filtersToWhere(filters: FilterState[]): [string, WhereOp, unknown][] {
 /** Build ColumnMeta for displayable columns, recursing into ZodObject sub-fields (dot-notation). */
 function buildColumnMeta(
   columns: string[],
-  schema: z.ZodObject<z.ZodRawShape>,
+  schema: z.ZodObject<any>,
   prefix = "",
 ): ColumnMeta[] {
   const result: ColumnMeta[] = [];
   for (const col of columns) {
     const fullName = prefix ? `${prefix}.${col}` : col;
-    const field = schema.shape[col] as z.ZodTypeAny | undefined;
+    const field = schema.shape[col] as z.ZodType | undefined;
     if (!field) {
       result.push({ name: fullName, zodType: "ZodString" });
       continue;
@@ -407,23 +405,22 @@ function buildColumnMeta(
     const zodType = resolveTypeName(field);
     if (zodType === "ZodObject") {
       // Unwrap wrappers to reach the inner ZodObject
-      let inner: z.ZodTypeAny = field;
+      let inner: z.ZodType = field;
       while (true) {
-        const itn = (inner as any)._def?.typeName ?? "";
+        const itn = getTypeName(inner);
         if (
           itn === "ZodOptional" ||
           itn === "ZodNullable" ||
           itn === "ZodDefault"
         ) {
-          inner = (inner as any)._def.innerType;
+          inner = getInnerType(inner)!;
         } else break;
       }
-      const subShape: Record<string, unknown> =
-        (inner as any)._def?.shape?.() ?? {};
+      const subShape = getShape(inner);
       result.push(
         ...buildColumnMeta(
           Object.keys(subShape),
-          inner as z.ZodObject<z.ZodRawShape>,
+          inner as z.ZodObject<any>,
           fullName,
         ),
       );
@@ -443,25 +440,24 @@ function buildColumnMeta(
  * Returns null if the path cannot be resolved.
  */
 function resolveZodAtPath(
-  schema: z.ZodObject<z.ZodRawShape>,
+  schema: z.ZodObject<any>,
   path: string,
-): z.ZodTypeAny | null {
+): z.ZodType | null {
   const parts = path.split(".");
-  let s: z.ZodTypeAny = schema as z.ZodTypeAny;
+  let s: z.ZodType = schema as z.ZodType;
   for (const part of parts) {
     // Unwrap Optional / Nullable / Default wrappers
     while (true) {
-      const itn: string = (s as any)._def?.typeName ?? "";
+      const itn = getTypeName(s);
       if (
         itn === "ZodOptional" ||
         itn === "ZodNullable" ||
         itn === "ZodDefault"
       ) {
-        s = (s as any)._def.innerType;
+        s = getInnerType(s)!;
       } else break;
     }
-    const shape: Record<string, z.ZodTypeAny> =
-      (s as any)._def?.shape?.() ?? (s as any)._def?.shape ?? {};
+    const shape = getShape(s);
     if (!(part in shape)) return null;
     s = shape[part]!;
   }
@@ -475,9 +471,9 @@ function resolveZodAtPath(
  * Falls back to the full schema if fields is undefined/empty.
  */
 function getMutableSchema(
-  schema: z.ZodObject<z.ZodRawShape>,
+  schema: z.ZodObject<any>,
   fields: string[] | undefined,
-): z.ZodObject<z.ZodRawShape> {
+): z.ZodObject<any> {
   if (!fields || fields.length === 0) return schema;
 
   const topLevel: string[] = [];
@@ -496,7 +492,7 @@ function getMutableSchema(
     }
   }
 
-  const picked: z.ZodRawShape = {};
+  const picked: Record<string, z.ZodType> = {};
 
   // Direct top-level fields
   for (const f of topLevel) {
@@ -507,27 +503,24 @@ function getMutableSchema(
   for (const [parent, subFields] of dotGroups) {
     if (!(parent in schema.shape)) continue;
     // Unwrap to the inner ZodObject
-    let inner: z.ZodTypeAny = schema.shape[parent] as z.ZodTypeAny;
+    let inner: z.ZodType = schema.shape[parent] as z.ZodType;
     while (true) {
-      const itn: string = (inner as any)._def?.typeName ?? "";
+      const itn = getTypeName(inner);
       if (
         itn === "ZodOptional" ||
         itn === "ZodNullable" ||
         itn === "ZodDefault"
       ) {
-        inner = (inner as any)._def.innerType;
+        inner = getInnerType(inner)!;
       } else break;
     }
-    if ((inner as any)._def?.typeName !== "ZodObject") {
+    if (getTypeName(inner) !== "ZodObject") {
       // Not an object — include as-is
       picked[parent] = schema.shape[parent]!;
       continue;
     }
     // Recurse: build a partial sub-schema for the requested sub-fields
-    picked[parent] = getMutableSchema(
-      inner as z.ZodObject<z.ZodRawShape>,
-      subFields,
-    );
+    picked[parent] = getMutableSchema(inner as z.ZodObject<any>, subFields);
   }
 
   return z.object(picked);
@@ -764,11 +757,8 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       const fields = zodToFields(createSchema);
       const actionUrl = `${lb}/${entry.name}/create`;
       const formHtml = renderForm(fields, actionUrl, "POST", "Create document");
-      const errorMsg = validation.error.errors
-        .map(
-          (e: { path: (string | number)[]; message: string }) =>
-            `${e.path.join(".")}: ${e.message}`,
-        )
+      const errorMsg = validation.error.issues
+        .map((e) => `${e.path.join(".")}: ${e.message}`)
         .join(", ");
       sendHtml(
         res,
@@ -893,11 +883,8 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       const fields = applyPrefill(zodToFields(mutableSchema), prefilled);
       const actionUrl = `${lb}/${entry.name}/${encodeURIComponent(docId)}/edit`;
       const formHtml = renderForm(fields, actionUrl, "POST", "Save changes");
-      const errorMsg = validation.error.errors
-        .map(
-          (e: { path: (string | number)[]; message: string }) =>
-            `${e.path.join(".")}: ${e.message}`,
-        )
+      const errorMsg = validation.error.issues
+        .map((e) => `${e.path.join(".")}: ${e.message}`)
         .join(", ");
       sendHtml(
         res,

@@ -94,7 +94,7 @@
     "firebase-admin": "^11.0.0 || ^12.0.0 || ^13.0.0",
     "typescript": "^5.0.0",
     "firebase-functions": "^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0",
-    "zod": "^3"
+    "zod": "^4"
   },
   "peerDependenciesMeta": {
     "firebase-functions": {
@@ -110,7 +110,7 @@
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "wait-on": "^9.0.3",
-    "zod": "^3"
+    "zod": "^4"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.9",

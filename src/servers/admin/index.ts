@@ -39,6 +39,7 @@
 import type { z } from "zod";
 import type { ConfiguredRepository } from "../../repositories/types";
 import type { FieldPath, RepositoryConfig } from "../../shared/types";
+import type { FieldRole } from "../crud/types";
 import type { HttpRequest, HttpResponse } from "../http-types";
 import type { AdminRepoEntry, RepoRegistry } from "./handlers";
 import { createAdminHandlers } from "./handlers";
@@ -72,10 +73,12 @@ type RepoModelType<TRepo> =
  * @example
  * ```ts
  * posts: {
- *   repo: repos.posts,            // ConfiguredRepository inferred → PostModel
- *   filterableFields: ["status"],  // ✔ autocomplete + error if invalid key
- *   mutableFields: ["title"],
- *   createFields: ["title", "content"],
+ *   repo: repos.posts,
+ *   fieldsConfig: {
+ *     title:   ["create", "mutable", "filterable"],
+ *     content: ["create", "mutable"],
+ *     status:  ["create", "filterable"],
+ *   },
  *   allowDelete: true,
  * }
  * ```
@@ -89,7 +92,7 @@ export interface AdminRepoConfig<
    * Zod schema — optional when the repo was created with `createRepositoryConfig(schema)`.
    * Pass explicitly for repos created with the legacy `createRepositoryConfig<T>()` form.
    */
-  schema?: z.ZodObject<z.ZodRawShape>;
+  schema?: z.ZodObject<any>;
   /** Firestore collection path (for display only) */
   path: string;
   /** Key used to identify documents (default: "docId") */
@@ -99,22 +102,26 @@ export interface AdminRepoConfig<
   /** Number of documents per page in the list view (default: 25) */
   pageSize?: number;
   /**
-   * Fields shown in the filter bar — typed to the model keys.
-   * Defaults to all schema keys.
+   * Per-field role configuration.
+   * Each key is a model field (with autocomplete); the value is an array of roles.
+   *
+   * Roles:
+   * - `"create"` — field is shown in the create form
+   * - `"mutable"` — field is shown in the edit form
+   * - `"filterable"` — field is shown in the filter bar
+   *
+   * If omitted, all schema fields are shown in all contexts.
+   *
+   * @example
+   * ```ts
+   * fieldsConfig: {
+   *   title:   ["create", "mutable", "filterable"],
+   *   content: ["create", "mutable"],
+   *   status:  ["create", "filterable"],
+   * }
+   * ```
    */
-  filterableFields?: FieldPath<RepoModelType<TRepo>>[];
-  /**
-   * Fields shown in the **edit** form — typed to the model keys.
-   * Supports dot-notation for nested fields (e.g. `"address.city"`).
-   * If unset, all schema fields are shown.
-   */
-  mutableFields?: FieldPath<RepoModelType<TRepo>>[];
-  /**
-   * Fields shown in the **create** form — typed to the model keys.
-   * Supports dot-notation for nested fields (e.g. `"address.city"`).
-   * If unset, all schema fields are shown.
-   */
-  createFields?: FieldPath<RepoModelType<TRepo>>[];
+  fieldsConfig?: Partial<Record<FieldPath<RepoModelType<TRepo>>, readonly FieldRole[]>>;
   /**
    * Whether to show the delete button in the list view.
    * Default: false — delete is disabled unless explicitly set to true.
@@ -167,8 +174,7 @@ export interface BasicAuthConfig {
  * Options for `createAdminServer`.
  *
  * Made generic so TypeScript can infer the model type of each repo entry
- * and provide autocomplete + type-checking on `filterableFields`, `mutableFields`,
- * and `createFields`.
+ * and provide autocomplete + type-checking on `fieldsConfig`.
  *
  * @template TRepos - Shape of the repos map (inferred automatically at the call site)
  */
@@ -188,17 +194,18 @@ export interface AdminServerOptions<
   /**
    * Repository entries keyed by a display name.
    * TypeScript infers the model type from each `repo` field,
-   * so `filterableFields`, `mutableFields`, and `createFields` are
-   * typed to `keyof` that model.
+   * so `fieldsConfig` keys are typed to that model's field paths.
    *
    * @example
    * ```ts
    * repos: {
    *   posts: {
    *     repo: repos.posts,
-   *     filterableFields: ["status", "userId"],  // ✔ typed to PostModel keys
-   *     mutableFields:    ["title", "content"],
-   *     createFields:     ["title", "content", "status"],
+   *     fieldsConfig: {
+   *       title:   ["create", "mutable", "filterable"],
+   *       content: ["create", "mutable"],
+   *       status:  ["create", "filterable"],
+   *     },
    *   },
    * }
    * ```
@@ -332,9 +339,12 @@ function parseUrlEncoded(body: string): Record<string, string | string[]> {
  *         documentKey: "docId",           // Field used as document ID
  *         listColumns: ["title", "status", "createdAt"], // Columns in list
  *         pageSize: 25,                   // Items per page in list
- *         filterableFields: ["status", "userId", "title"], // Filter bar fields
- *         mutableFields: ["title", "content", "status"],   // Edit form fields
- *         createFields: ["title", "content"],              // Create form fields
+ *         fieldsConfig: {
+ *           title:   ["create", "mutable", "filterable"],
+ *           content: ["create", "mutable"],
+ *           status:  ["create", "mutable", "filterable"],
+ *           userId:  ["filterable"],
+ *         },
  *         allowDelete: true,              // Enable delete button
  *         relationalFields: [             // Relation navigation buttons
  *           { key: "userId", column: "Author" },    // Link to user
@@ -344,9 +354,11 @@ function parseUrlEncoded(body: string): Record<string, string | string[]> {
  *       users: {
  *         repo: repos.users,
  *         path: "users",
- *         filterableFields: ["email", "isActive"],
- *         mutableFields: ["name", "email", "isActive"],
- *         createFields: ["name", "email"],
+ *         fieldsConfig: {
+ *           name:     ["create", "mutable"],
+ *           email:    ["create", "mutable", "filterable"],
+ *           isActive: ["mutable", "filterable"],
+ *         },
  *         allowDelete: false,
  *         relationalFields: [
  *           { key: "docId", column: "Posts" },
@@ -394,6 +406,27 @@ export function createAdminServer<
           `Either use createRepositoryConfig(schema)(config) or pass schema: explicitly.`,
       );
     }
+    // Resolve fieldsConfig → separate arrays for runtime
+    let filterableFields: string[] | undefined;
+    let mutableFields: string[] | undefined;
+    let createFields: string[] | undefined;
+    if (cfg.fieldsConfig) {
+      const fc = cfg.fieldsConfig as Record<string, readonly string[]>;
+      filterableFields = [];
+      mutableFields = [];
+      createFields = [];
+      for (const [field, roles] of Object.entries(fc)) {
+        for (const role of roles) {
+          if (role === "filterable") filterableFields.push(field);
+          else if (role === "mutable") mutableFields.push(field);
+          else if (role === "create") createFields.push(field);
+        }
+      }
+      if (filterableFields.length === 0) filterableFields = undefined;
+      if (mutableFields.length === 0) mutableFields = undefined;
+      if (createFields.length === 0) createFields = undefined;
+    }
+
     const entry: AdminRepoEntry = {
       name,
       path: cfg.path,
@@ -402,9 +435,9 @@ export function createAdminServer<
       documentKey: cfg.documentKey ?? "docId",
       listColumns: cfg.listColumns,
       pageSize: cfg.pageSize,
-      filterableFields: cfg.filterableFields as string[] | undefined,
-      mutableFields: cfg.mutableFields as string[] | undefined,
-      createFields: cfg.createFields as string[] | undefined,
+      filterableFields,
+      mutableFields,
+      createFields,
       allowDelete: cfg.allowDelete ?? false,
       relationalMeta: (() => {
         if (!cfg.relationalFields || cfg.relationalFields.length === 0)

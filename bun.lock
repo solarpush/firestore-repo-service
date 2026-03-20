@@ -17,13 +17,13 @@
         "tsup": "^8.5.1",
         "typescript": "^5.9.3",
         "wait-on": "^9.0.3",
-        "zod": "^3",
+        "zod": "^4",
       },
       "peerDependencies": {
         "firebase-admin": "^11.0.0 || ^12.0.0 || ^13.0.0",
         "firebase-functions": "^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0",
-        "typescript": "^5.9.3",
-        "zod": "^3",
+        "typescript": "^5.0.0",
+        "zod": "^4",
       },
       "optionalPeers": [
         "firebase-functions",
@@ -697,7 +697,7 @@
 
     "yocto-queue": ["yocto-queue@0.1.0", "", {}, "sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q=="],
 
-    "zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
+    "zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
 
     "@google-cloud/storage/uuid": ["uuid@8.3.2", "", { "bin": { "uuid": "dist/bin/uuid" } }, "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg=="],
 

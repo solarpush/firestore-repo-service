@@ -5,7 +5,7 @@
 **Features:**
 - Dashboard listing all repositories
 - Document list with cursor-based pagination, sortable columns, rows-per-page selector
-- Filter bar generated from `filterableFields`
+- Filter bar generated from `fieldsConfig` (fields with `"filterable"` role)
 - Create / Edit forms generated from Zod schemas
 - Relational action columns (navigate to related repo)
 - HTTP Basic Auth or custom middleware guard
@@ -30,17 +30,24 @@ export const admin = onRequest(
       users: {
         repo: repos.users,
         path: "users",
-        filterableFields: ["docId", "name", "email", "age", "isActive"],
-        mutableFields:    ["name", "email", "age", "isActive"],
-        createFields:     ["name", "email", "age", "isActive"],
+        fieldsConfig: {
+          name:     ["create", "mutable", "filterable"],
+          email:    ["create", "mutable", "filterable"],
+          age:      ["create", "mutable", "filterable"],
+          isActive: ["create", "mutable", "filterable"],
+          docId:    ["filterable"],
+        },
         allowDelete: true,
       },
       posts: {
         repo: repos.posts,
         path: "posts",
-        filterableFields: ["status", "userId"],
-        mutableFields:    ["status", "title", "content"],
-        createFields:     ["title", "content", "status", "userId"],
+        fieldsConfig: {
+          title:   ["create", "mutable"],
+          content: ["create", "mutable"],
+          status:  ["create", "mutable", "filterable"],
+          userId:  ["create", "filterable"],
+        },
         relationalFields: [
           { key: "userId", column: "Author" },   // button → /users?fv_docId=<value>
         ],
@@ -61,19 +68,21 @@ export const admin = onRequest(
 | `documentKey`        | `string`                         | `"docId"` | Field used as document ID                           |
 | `listColumns`        | `string[]`                       | all keys  | Columns shown in the list view                      |
 | `pageSize`           | `number`                         | `25`      | Default rows per page                               |
-| `filterableFields`   | `FieldPath<Model>[]`             | all keys  | Fields shown in the filter bar                      |
-| `mutableFields`      | `FieldPath<Model>[]`             | all keys  | Fields shown in the **edit** form                   |
-| `createFields`       | `FieldPath<Model>[]`             | all keys  | Fields shown in the **create** form                 |
+| `fieldsConfig`       | `Record<FieldPath, FieldRole[]>` | all keys  | Per-field role config: `"create"`, `"mutable"`, `"filterable"` |
 | `allowDelete`        | `boolean`                        | `false`   | Show Delete button in the list                      |
 | `relationalFields`   | `{ key, column }[]`              | none      | Relational action button columns                    |
 
-## Filterable fields with dot-notation
+## fieldsConfig with dot-notation
 
 Fields support dot-notation for nested Zod objects:
 
 ```typescript
-filterableFields: ["status", "address.city", "address.street"],
-mutableFields:    ["title", "address.city", "address.street"],
+fieldsConfig: {
+  status:           ["filterable"],
+  "address.city":   ["create", "mutable", "filterable"],
+  "address.street": ["create", "mutable", "filterable"],
+  title:            ["create", "mutable"],
+}
 ```
 
 The filter bar builds the correct Firestore path (`address.city`) automatically.

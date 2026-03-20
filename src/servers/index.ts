@@ -37,7 +37,7 @@
  */
 
 // ── Admin ORM ───────────────────────────────────────────────────────────────
-export { createAdminServer, MiniRouter } from "./admin/index";
+export { MiniRouter, createAdminServer } from "./admin/index";
 export type {
   AdminRepoConfig,
   AdminRepoEntry,
@@ -56,8 +56,12 @@ export type {
   CrudRepoEntry,
   CrudRepoRegistry,
   CrudServerOptions,
+  FieldRole,
   ListResponseData,
   QueryRequestBody,
+  RepoFieldPath,
+  RepoRelationKeys,
+  UserFieldPath,
 } from "./crud/index";
 
 // ── Form generator (re-exported for custom use) ─────────────────────────────
@@ -66,8 +70,8 @@ export type { FieldDescriptor } from "./admin/form-gen";
 
 // ── Renderer (re-exported for custom pages) ─────────────────────────────────
 export {
-  ClientScript,
   CSS,
+  ClientScript,
   renderDashboard,
   renderFormPage,
   renderList,
