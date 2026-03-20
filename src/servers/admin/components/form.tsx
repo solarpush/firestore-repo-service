@@ -29,11 +29,9 @@ export function renderFormPageJsx(
 
   return renderHtml(
     <PageShell opts={{ title, breadcrumb: crumbs, basePath, flash }}>
-      <div class="max-w-2xl">
-        <div class="card bg-base-100 shadow border border-base-300">
-          <div class="card-body">
-            <div dangerouslySetInnerHTML={{ __html: formHtml }} />
-          </div>
+      <div class="card bg-base-100 border border-base-300">
+        <div class="card-body p-6">
+          <div dangerouslySetInnerHTML={{ __html: formHtml }} />
         </div>
       </div>
     </PageShell>,

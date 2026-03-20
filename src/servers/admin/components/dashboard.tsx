@@ -6,31 +6,29 @@ export function renderDashboardJsx(
 ): string {
   return renderHtml(
     <PageShell opts={{ title: "Repositories", basePath }}>
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {repos.length === 0 ? (
-          <p class="text-base-content/50 col-span-full text-center py-12">
-            No repositories configured.
+      {repos.length === 0 ? (
+        <div class="text-center py-20 text-base-content/50">
+          <p class="text-lg font-medium mb-1">No repositories configured</p>
+          <p class="text-sm">
+            Add a repository to your FRS config to get started.
           </p>
-        ) : (
-          repos.map((r) => (
+        </div>
+      ) : (
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {repos.map((r) => (
             <a
               key={r.name}
               href={`${basePath}/${r.name}`}
-              class="card bg-base-100 shadow hover:shadow-md transition-shadow border border-base-300 hover:border-primary no-underline"
+              class="card bg-base-100 border border-base-300 hover:shadow-md no-underline transition-shadow"
             >
-              <div class="card-body">
-                <h2 class="card-title text-base">{r.name}</h2>
-                <p class="text-sm text-base-content/50 font-mono">{r.path}</p>
-                <div class="card-actions justify-end mt-2">
-                  <span class="badge badge-primary badge-outline">
-                    Browse →
-                  </span>
-                </div>
+              <div class="card-body p-5">
+                <h2 class="card-title text-sm font-semibold">{r.name}</h2>
+                <p class="text-xs text-base-content/50 font-mono">{r.path}</p>
               </div>
             </a>
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
     </PageShell>,
   );
 }

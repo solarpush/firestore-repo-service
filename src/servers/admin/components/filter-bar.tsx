@@ -137,7 +137,7 @@ export function FilterBar({
 
   return (
     <details
-      class="collapse collapse-arrow bg-base-100 border border-base-300 rounded-box mb-4"
+      class="collapse collapse-arrow bg-base-100 border border-base-300 rounded-box mb-6 shadow-sm"
       open={hasActive ? true : undefined}
     >
       <summary class="collapse-title text-sm font-medium py-2 min-h-0">
@@ -148,19 +148,19 @@ export function FilterBar({
           </span>
         )}
       </summary>
-      <div class="collapse-content pb-4">
+      <div class="collapse-content pb-4 pt-2">
         <form method="get" action={action}>
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {filterable.map((col) => {
               const ops = opsForType(col.zodType);
               const active = activeMap[col.name];
               const currentOp: WhereOp = active?.op ?? ops[0]!.value;
               return (
-                <div key={col.name} class="flex flex-col gap-1">
+                <div key={col.name} class="flex flex-col gap-1.5">
                   <label class="text-xs font-semibold text-base-content/60 uppercase tracking-wide">
                     {col.name}
                   </label>
-                  <div class="flex gap-1">
+                  <div class="flex gap-1.5">
                     {ops.length > 1 ? (
                       <select
                         name={`fo_${col.name}`}
@@ -191,13 +191,13 @@ export function FilterBar({
             })}
           </div>
 
-          <div class="flex gap-2 mt-4">
+          <div class="flex gap-2 mt-4 pt-3 border-t border-base-200">
             <button type="submit" class="btn btn-sm btn-primary">
-              Apply filters
+              Apply
             </button>
             {hasActive && (
               <a href={action} class="btn btn-sm btn-ghost">
-                Clear all
+                Clear
               </a>
             )}
           </div>

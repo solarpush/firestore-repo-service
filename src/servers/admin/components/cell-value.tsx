@@ -1,10 +1,14 @@
 function CellDate({ val }: { val: Date }) {
-  return <span class="text-sm">{val.toLocaleString()}</span>;
+  return (
+    <span class="text-sm text-base-content/80 font-mono tabular-nums whitespace-nowrap">
+      {val.toLocaleString()}
+    </span>
+  );
 }
 
 export function CellValue({ val }: { val: unknown }) {
   if (val === null || val === undefined) {
-    return <span class="opacity-30">—</span>;
+    return <span class="opacity-30 italic text-xs">—</span>;
   }
 
   if (typeof val === "boolean") {
@@ -28,20 +32,24 @@ export function CellValue({ val }: { val: unknown }) {
     return <CellDate val={(val as any).toDate() as Date} />;
   }
 
+  if (typeof val === "number") {
+    return <span class="text-sm font-mono tabular-nums">{String(val)}</span>;
+  }
+
   if (Array.isArray(val)) {
-    if (val.length === 0) return <span class="opacity-30 text-xs">{"[]"}</span>;
+    if (val.length === 0)
+      return <span class="text-xs text-base-content/30">{"[]"}</span>;
     return (
       <ul class="list-none p-0 m-0 space-y-0.5 text-xs">
-        {val.slice(0, 5).map((item, i) => (
-          <li key={i} class="flex items-start gap-1">
-            <span class="text-base-content/40">·</span>
-            <span>
-              {typeof item === "object" ? JSON.stringify(item) : String(item)}
-            </span>
+        {val.slice(0, 8).map((item, i) => (
+          <li key={i} class="break-all">
+            {typeof item === "object" ? JSON.stringify(item) : String(item)}
           </li>
         ))}
-        {val.length > 5 && (
-          <li class="text-base-content/40">+{val.length - 5} more…</li>
+        {val.length > 8 && (
+          <li class="text-base-content/40 italic">
+            +{val.length - 8} more…
+          </li>
         )}
       </ul>
     );
@@ -50,22 +58,20 @@ export function CellValue({ val }: { val: unknown }) {
   if (typeof val === "object" && val !== null) {
     const entries = Object.entries(val as Record<string, unknown>);
     if (entries.length === 0)
-      return <span class="opacity-30 text-xs">{"{}"}</span>;
+      return <span class="text-xs text-base-content/30">{"{}"}</span>;
     return (
       <dl class="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-xs m-0">
-        {entries.slice(0, 5).map(([k, v]) => (
+        {entries.slice(0, 8).map(([k, v]) => (
           <>
-            <dt class="text-base-content/50 font-medium whitespace-nowrap">
+            <dt class="text-base-content/50 font-semibold whitespace-nowrap">
               {k}
             </dt>
-            <dd class="truncate max-w-[120px]" title={String(v)}>
-              {String(v ?? "")}
-            </dd>
+            <dd class="break-all">{String(v ?? "")}</dd>
           </>
         ))}
-        {entries.length > 5 && (
-          <dt class="col-span-2 text-base-content/40">
-            +{entries.length - 5} more…
+        {entries.length > 8 && (
+          <dt class="col-span-2 text-base-content/40 italic">
+            +{entries.length - 8} more…
           </dt>
         )}
       </dl>
@@ -73,12 +79,5 @@ export function CellValue({ val }: { val: unknown }) {
   }
 
   const str = String(val);
-  if (str.length > 60) {
-    return (
-      <span class="truncate max-w-[180px] block text-sm" title={str}>
-        {str.slice(0, 57)}…
-      </span>
-    );
-  }
-  return <span class="text-sm">{str}</span>;
+  return <span class="text-sm break-all">{str}</span>;
 }

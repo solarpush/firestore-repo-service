@@ -1,6 +1,6 @@
 import type { Child, FC, PropsWithChildren } from "hono/jsx";
 import { renderToString } from "hono/jsx/dom/server";
-import { ClientScript } from "./client-script.jsx";
+import { ClientScript } from "./client-script";
 import type { PageOptions } from "./types";
 
 /** Render a JSX element to a complete HTML string (includes <!DOCTYPE html>) */
@@ -32,22 +32,20 @@ export const PageShell: FC<PropsWithChildren<{ opts: PageOptions }>> = ({
         />
         <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4" />
       </head>
-      <body class="bg-base-200 min-h-screen">
+      <body class="bg-base-200/50 min-h-screen flex flex-col">
         {/* Navbar */}
-        <div class="navbar bg-primary text-primary-content shadow-sm sticky top-0 z-50">
+        <div class="navbar bg-neutral text-neutral-content shadow-sm sticky top-0 z-50 px-6">
           <div class="flex-1">
-            <a href={basePath} class="btn btn-ghost text-lg font-bold">
-              🔥 FRS Admin
+            <a
+              href={basePath}
+              class="font-bold text-lg tracking-tight hover:opacity-80 transition-opacity"
+            >
+              FRS Admin
             </a>
-          </div>
-          <div class="flex-none">
-            <span class="badge badge-outline badge-lg text-primary-content/70 border-primary-content/40">
-              firestore-repo-service
-            </span>
           </div>
         </div>
 
-        <main class="max-w-7xl mx-auto px-4 py-8">
+        <main class="px-6 py-8 w-full flex-1">
           {/* Breadcrumbs */}
           {breadcrumb && breadcrumb.length > 0 && (
             <div class="text-sm breadcrumbs mb-4">
@@ -58,7 +56,9 @@ export const PageShell: FC<PropsWithChildren<{ opts: PageOptions }>> = ({
                       <a href={c.href}>{c.label}</a>
                     </li>
                   ) : (
-                    <li key={i}>{c.label}</li>
+                    <li key={i} class="text-base-content/60">
+                      {c.label}
+                    </li>
                   ),
                 )}
               </ul>
@@ -71,7 +71,7 @@ export const PageShell: FC<PropsWithChildren<{ opts: PageOptions }>> = ({
           {flash && (
             <div
               role="alert"
-              class={`alert ${flash.type === "success" ? "alert-success" : "alert-error"} mb-4`}
+              class={`alert ${flash.type === "success" ? "alert-success" : "alert-error"} mb-6`}
             >
               <span>{flash.message}</span>
             </div>

@@ -122,20 +122,20 @@ export function renderListJsx(
       )}
 
       {/* Toolbar */}
-      <div class="flex justify-between items-center mb-4">
+      <div class="flex flex-wrap justify-between items-center mb-4 gap-3">
         <div class="flex items-center gap-3">
-          <div class="badge badge-neutral badge-lg">
-            {docs.length} document(s)
-          </div>
-          {/* Rows-per-page selector */}
-          <div class="flex items-center gap-1 text-sm text-base-content/60">
-            <span>Rows:</span>
+          <span class="text-sm text-base-content/60">
+            {docs.length} document{docs.length !== 1 && "s"}
+          </span>
+          {/* Rows-per-page */}
+          <div class="flex items-center gap-1.5 text-sm text-base-content/60">
+            <span>Rows</span>
             <div class="join">
               {[10, 25, 50, 100].map((ps) => (
                 <a
                   key={ps}
                   href={pageSizeHref(ps, activeFilters, sortState)}
-                  class={`join-item btn btn-xs ${currentPageSize === ps ? "btn-active" : "btn-outline"}`}
+                  class={`join-item btn btn-xs ${currentPageSize === ps ? "btn-active btn-primary" : "btn-outline"}`}
                 >
                   {ps}
                 </a>
@@ -144,7 +144,7 @@ export function renderListJsx(
           </div>
         </div>
         <a href={createUrl} class="btn btn-primary btn-sm">
-          + New document
+          + New
         </a>
       </div>
 
@@ -157,9 +157,10 @@ export function renderListJsx(
           class="table table-sm w-full"
           data-frs-table
           data-frs-repo={repoName}
+          data-frs-colcount={columns.length}
         >
           <thead>
-            <tr>
+            <tr class="bg-base-200/50">
               {[...columns].map((c, i) => {
                 const isSorted = sortState?.field === c;
                 const arrow = isSorted
@@ -179,7 +180,7 @@ export function renderListJsx(
                         activeFilters,
                         currentPageSize,
                       )}
-                      class={`hover:text-base-content transition-colors${isSorted ? " text-primary" : ""}`}
+                      class={`hover:text-base-content inline-flex items-center gap-0.5${isSorted ? " text-primary font-bold" : ""}`}
                     >
                       {c}
                       {arrow}
@@ -195,7 +196,9 @@ export function renderListJsx(
                   {m.column}
                 </th>
               ))}
-              <th class="text-xs font-semibold text-base-content/60 uppercase tracking-wide" />
+              <th class="text-xs font-semibold text-base-content/60 uppercase tracking-wide text-right">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -205,7 +208,7 @@ export function renderListJsx(
                   colspan={columns.length + relationalMeta.length + 1}
                   class="text-center py-16 text-base-content/40"
                 >
-                  No documents found.
+                  No documents found
                 </td>
               </tr>
             ) : (
@@ -230,7 +233,7 @@ export function renderListJsx(
                         <td key={`rel-${mi}`} class="align-middle py-2">
                           <a
                             href={href}
-                            class="btn btn-xs btn-ghost btn-outline gap-1"
+                            class="btn btn-xs btn-ghost btn-outline"
                           >
                             {m.column}
                           </a>
@@ -239,7 +242,10 @@ export function renderListJsx(
                     })}
                     <td class="align-middle text-right whitespace-nowrap py-2">
                       <div class="flex gap-1 justify-end">
-                        <a href={editUrl} class="btn btn-xs btn-outline">
+                        <a
+                          href={editUrl}
+                          class="btn btn-xs btn-outline"
+                        >
                           Edit
                         </a>
                         {allowDelete && (
@@ -267,44 +273,46 @@ export function renderListJsx(
       </div>
 
       {/* Pagination */}
-      <div class="flex justify-between items-center mt-4">
-        {pagination.hasPrev ? (
-          <a
-            href={paginationHref(
-              activeFilters,
-              pagination.prevCursor,
-              "prev",
-              sortState,
-              currentPageSize,
-            )}
-            class="btn btn-sm btn-outline"
-          >
-            ← Previous
-          </a>
-        ) : (
-          <button class="btn btn-sm btn-outline btn-disabled" disabled>
-            ← Previous
-          </button>
-        )}
-        {pagination.hasNext ? (
-          <a
-            href={paginationHref(
-              activeFilters,
-              pagination.nextCursor,
-              "next",
-              sortState,
-              currentPageSize,
-            )}
-            class="btn btn-sm btn-outline"
-          >
-            Next →
-          </a>
-        ) : (
-          <button class="btn btn-sm btn-outline btn-disabled" disabled>
-            Next →
-          </button>
-        )}
-      </div>
+      {(pagination.hasPrev || pagination.hasNext) && (
+        <div class="flex justify-center items-center mt-6 gap-2">
+          {pagination.hasPrev ? (
+            <a
+              href={paginationHref(
+                activeFilters,
+                pagination.prevCursor,
+                "prev",
+                sortState,
+                currentPageSize,
+              )}
+              class="btn btn-sm btn-outline"
+            >
+              ← Previous
+            </a>
+          ) : (
+            <button class="btn btn-sm btn-outline" disabled>
+              ← Previous
+            </button>
+          )}
+          {pagination.hasNext ? (
+            <a
+              href={paginationHref(
+                activeFilters,
+                pagination.nextCursor,
+                "next",
+                sortState,
+                currentPageSize,
+              )}
+              class="btn btn-sm btn-outline"
+            >
+              Next →
+            </a>
+          ) : (
+            <button class="btn btn-sm btn-outline" disabled>
+              Next →
+            </button>
+          )}
+        </div>
+      )}
     </PageShell>,
   );
 }
