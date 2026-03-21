@@ -15,6 +15,28 @@ import type { RepositoryConfig } from "../shared/types";
 import type { ConfiguredRepository } from "./types";
 
 /**
+ * Extract parent-key parameter names from a refCb function.
+ * For `(db, postId, docId) => …` this returns `["postId"]` (everything
+ * between the first param – the Firestore `db` – and the last param – the
+ * document's own ID).
+ * Returns an empty array when the function has ≤ 2 params (db + docId).
+ * @internal
+ */
+function extractParentKeys(refCb: unknown): string[] {
+  if (typeof refCb !== "function") return [];
+  const src = refCb.toString();
+  const match = src.match(/^\s*(?:function\s*\w*\s*)?\(([^)]*)\)/);
+  if (!match?.[1]) return [];
+  const params = match[1]
+    .split(",")
+    .map((p) => p.trim().replace(/\s*[:=].*$/, "").trim())
+    .filter(Boolean);
+  // (db, docId) → 0 parents; (db, parentId, docId) → 1 parent; etc.
+  if (params.length <= 2) return [];
+  return params.slice(1, -1);
+}
+
+/**
  * Creates a configured repository instance with all methods
  */
 export function createRepository<
@@ -98,5 +120,13 @@ export function createRepository<
     ].filter((k): k is string => typeof k === "string"),
     // Expose pathKey name so server handlers can extract path args from documents
     _pathKey: (config.pathKey as string | undefined) ?? null,
+    // Whether this is a collectionGroup repository
+    _isGroup: !!config.isGroup,
+    // Parent key field names auto-detected from refCb signature
+    _parentKeys: config.isGroup
+      ? extractParentKeys(config.refCb)
+      : [],
+    // Expose createdKey so server handlers can inject it when using set() for creates
+    _createdKey: (config.createdKey as string | undefined) ?? null,
   } as unknown as ConfiguredRepository<T>;
 }

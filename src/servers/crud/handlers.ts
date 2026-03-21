@@ -44,6 +44,22 @@ function sendError(res: any, error: string, status = 400): void {
 }
 
 // ---------------------------------------------------------------------------
+// ID generation
+// ---------------------------------------------------------------------------
+
+const _idChars =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+/** Generate a random 20-char alphanumeric ID matching Firestore's native format. */
+function generateFirestoreId(): string {
+  let id = "";
+  for (let i = 0; i < 20; i++) {
+    id += _idChars.charAt(Math.floor(Math.random() * _idChars.length));
+  }
+  return id;
+}
+
+// ---------------------------------------------------------------------------
 // Zod schema helpers
 // ---------------------------------------------------------------------------
 
@@ -630,7 +646,30 @@ export function createCrudHandlers(
       }
 
       // Create document
-      const created = await entry.repo.create(validation.data as any);
+      let created: any;
+      if (entry.isGroup && entry.parentKeys && entry.parentKeys.length > 0) {
+        // Collection-group repos cannot use create(); use set() with parent path args.
+        const data: Record<string, any> = { ...validation.data };
+        // set() doesn't auto-set createdKey, so inject it here
+        if (entry.createdKey) {
+          data[entry.createdKey] = new Date();
+        }
+        const missingKeys = entry.parentKeys.filter((k) => !data[k]);
+        if (missingKeys.length > 0) {
+          sendError(
+            res,
+            `Missing parent key(s) for subcollection create: ${missingKeys.join(", ")}`,
+            400,
+          );
+          return;
+        }
+        const parentIds = entry.parentKeys.map((k) => data[k] as string);
+        const docId =
+          data[entry.documentKey] || generateFirestoreId();
+        created = await entry.repo.set(...parentIds, docId, data);
+      } else {
+        created = await entry.repo.create(validation.data as any);
+      }
 
       sendSuccess(res, created, undefined, 201);
     } catch (err) {

@@ -427,6 +427,18 @@ export function createAdminServer<
       if (createFields.length === 0) createFields = undefined;
     }
 
+    // For collection-group repos, ensure parentKeys are included in createFields
+    // so the form/validation allows the user to provide them.
+    const parentKeys = (() => {
+      const pk = (cfg.repo as any)._parentKeys as string[] | undefined;
+      return pk && pk.length > 0 ? pk : undefined;
+    })();
+    if (parentKeys && createFields) {
+      for (const pk of parentKeys) {
+        if (!createFields.includes(pk)) createFields.push(pk);
+      }
+    }
+
     const entry: AdminRepoEntry = {
       name,
       path: cfg.path,
@@ -434,6 +446,9 @@ export function createAdminServer<
       schema: resolvedSchema,
       documentKey: cfg.documentKey ?? "docId",
       pathKey: (cfg.repo as any)._pathKey ?? undefined,
+      isGroup: !!(cfg.repo as any)._isGroup,
+      parentKeys,
+      createdKey: (cfg.repo as any)._createdKey ?? undefined,
       listColumns: cfg.listColumns,
       pageSize: cfg.pageSize,
       filterableFields,

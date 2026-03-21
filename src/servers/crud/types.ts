@@ -197,6 +197,12 @@ export interface CrudRepoEntry {
   documentKey: string;
   /** Field name that stores the full Firestore document path (e.g. "documentPath") */
   pathKey?: string;
+  /** Whether this repo is a collection group (subcollection) */
+  isGroup?: boolean;
+  /** Parent key field names needed to build a subcollection document ref (auto-detected from refCb) */
+  parentKeys?: string[];
+  /** Field name for the creation timestamp (auto-set on create) */
+  createdKey?: string;
   pageSize: number;
   /** Resolved from fieldsConfig: fields with role "filterable" */
   filterableFields?: string[];

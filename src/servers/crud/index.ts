@@ -290,6 +290,18 @@ export function createCrudServer<
       if (createFields.length === 0) createFields = undefined;
     }
 
+    // For collection-group repos, ensure parentKeys are included in createFields
+    // so the validation accepts them in the request body.
+    const parentKeys = (() => {
+      const pk = (cfg.repo as any)._parentKeys as string[] | undefined;
+      return pk && pk.length > 0 ? pk : undefined;
+    })();
+    if (parentKeys && createFields) {
+      for (const pk of parentKeys) {
+        if (!createFields.includes(pk)) createFields.push(pk);
+      }
+    }
+
     const entry: CrudRepoEntry = {
       name,
       path: cfg.path,
@@ -298,6 +310,9 @@ export function createCrudServer<
       systemKeys: (cfg.repo as any)._systemKeys ?? [cfg.documentKey ?? "docId"],
       documentKey: cfg.documentKey ?? "docId",
       pathKey: (cfg.repo as any)._pathKey ?? undefined,
+      isGroup: !!(cfg.repo as any)._isGroup,
+      parentKeys,
+      createdKey: (cfg.repo as any)._createdKey ?? undefined,
       pageSize: cfg.pageSize ?? 25,
       filterableFields,
       mutableFields,

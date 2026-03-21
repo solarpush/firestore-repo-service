@@ -41,6 +41,12 @@ export interface AdminRepoEntry {
   documentKey?: string;
   /** Field name that stores the full Firestore document path (e.g. "documentPath") */
   pathKey?: string;
+  /** Whether this repo is a collection group (subcollection) */
+  isGroup?: boolean;
+  /** Parent key field names needed to build a subcollection document ref (auto-detected from refCb) */
+  parentKeys?: string[];
+  /** Field name for the creation timestamp (auto-set on create) */
+  createdKey?: string;
   /** List of columns to display in the table (defaults to schema keys) */
   listColumns?: string[];
   /** Page size for list view (default: 25) */
@@ -65,6 +71,18 @@ export type RepoRegistry = Record<string, AdminRepoEntry>;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const _idChars =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+/** Generate a random 20-char alphanumeric ID matching Firestore's native format. */
+function generateFirestoreId(): string {
+  let id = "";
+  for (let i = 0; i < 20; i++) {
+    id += _idChars.charAt(Math.floor(Math.random() * _idChars.length));
+  }
+  return id;
+}
 
 /**
  * Extract Firestore document path args from a document's stored path.
@@ -827,7 +845,26 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     }
 
     try {
-      await entry.repo.create(validation.data);
+      if (entry.isGroup && entry.parentKeys && entry.parentKeys.length > 0) {
+        // Collection-group repos cannot use create(); use set() with parent path args.
+        const data: Record<string, any> = { ...validation.data };
+        // set() doesn't auto-set createdKey, so inject it here
+        if (entry.createdKey) {
+          data[entry.createdKey] = new Date();
+        }
+        const missingKeys = entry.parentKeys.filter((k) => !data[k]);
+        if (missingKeys.length > 0) {
+          throw new Error(
+            `Missing parent key(s) for subcollection create: ${missingKeys.join(", ")}`,
+          );
+        }
+        const parentIds = entry.parentKeys.map((k) => data[k] as string);
+        const docKey = entry.documentKey ?? "docId";
+        const docId = data[docKey] || generateFirestoreId();
+        await entry.repo.set(...parentIds, docId, data);
+      } else {
+        await entry.repo.create(validation.data);
+      }
       redirect(res, `${lb}/${entry.name}?flash=created`);
     } catch (err) {
       const createSchema2 = getMutableSchema(entry.schema, entry.createFields);
