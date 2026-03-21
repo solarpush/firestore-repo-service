@@ -312,7 +312,7 @@ export function createCrudHandlers(
     const segments = fullPath.split("/").filter(Boolean);
     const args: string[] = [];
     for (let i = 1; i < segments.length; i += 2) {
-      args.push(segments[i]);
+      args.push(segments[i]!);
     }
     return args.length > 0 ? args : undefined;
   }

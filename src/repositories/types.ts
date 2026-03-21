@@ -213,6 +213,9 @@ export type GenerateQueryMethods<
 export type ConfiguredRepository<
   T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>,
 > = {
+  /** @internal Phantom property to expose the model type for generic extraction */
+  readonly _modelType: T["type"];
+
   ref: CollectionReference | Query;
 
   get: GenerateGetMethods<T> & {

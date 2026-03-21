@@ -380,7 +380,7 @@ export class RepositoryMapping<T extends Record<string, any>> {
 export function createRepositoryMapping<T extends Record<string, any>>(
   db: Firestore,
   mapping: T,
-): RepositoryMapping<T> & { [K in keyof T]: ConfiguredRepository<T[K]> } {
+): { [K in keyof T]: ConfiguredRepository<T[K]> } {
   const instance = new RepositoryMapping(db, mapping);
 
   // Create a Proxy to dynamically generate getters

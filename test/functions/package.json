@@ -11,7 +11,8 @@
         "typescript": "^5.0.0"
     },
     "dependencies": {
-        "@lpdjs/firestore-repo-service": "file:../.."
+        "@lpdjs/firestore-repo-service": "file:../..",
+        "@google-cloud/bigquery": "^8"
     },
     "devDependencies": {
         "@types/bun": "latest",

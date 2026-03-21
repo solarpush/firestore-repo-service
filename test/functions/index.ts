@@ -1,3 +1,4 @@
+import { BigQuery } from "@google-cloud/bigquery";
 import {
   buildRepositoryRelations,
   createAdminServer,
@@ -5,6 +6,8 @@ import {
   createRepositoryConfig,
   createRepositoryMapping,
 } from "@lpdjs/firestore-repo-service";
+import { createFirestoreSync } from "@lpdjs/firestore-repo-service/sync";
+import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
 import { initializeApp } from "firebase-admin/app";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
 import { onRequest } from "firebase-functions/https";
@@ -292,7 +295,7 @@ export const admin = onRequest(
         path: "comments",
         allowDelete: true,
         fieldsConfig: {
-          docId: ["create","filterable"],
+          docId: ["create", "filterable"],
           likes: ["filterable"],
           content: ["create", "mutable"],
         },
@@ -525,3 +528,22 @@ export const testCrud = onRequest(async (req, res) => {
     });
   }
 });
+// Firestore → BigQuery sync
+const sync = createFirestoreSync(repos, {
+  adapter: new BigQueryAdapter({
+    bigquery: new BigQuery({ projectId: "my-project" }),
+    datasetId: "firestore_sync",
+  }),
+  topicPrefix: "firestore-sync",
+  autoMigrate: true,
+  repos: {
+    users: {
+      exclude: ["documentPath"],
+      columnMap: { docId: "user_id" },
+      tableName: "users",
+    },
+    posts: { columnMap: { docId: "post_id" } },
+    comments: { columnMap: { docId: "comment_id" } },
+  },
+});
+module.exports = { ...module.exports, ...sync.functions };
