@@ -303,7 +303,7 @@ const adminHandler = createAdminServer({
 export const admin = onRequest(adminHandler.httpsOptions!, adminHandler);
 const crudServer = createCrudServer({
   httpsOptions: { invoker: "public" },
-  basePath: "/",
+  basePath: "/crud",
   repos: {
     posts: {
       repo: repos.posts,
@@ -380,7 +380,7 @@ export const sync = createFirestoreSync(repos, {
       username: "admin",
       password: "password",
     },
-    basePath: "/",
+    basePath: "/sync-functions-syncAdmin",
     featuresFlag: {
       viewQueue: true,
       manualSync: true,

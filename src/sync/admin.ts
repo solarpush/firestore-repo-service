@@ -64,7 +64,7 @@ interface RepoInfo {
  *
  * In production, the Firebase proxy strips the prefix so `basePath` is enough.
  */
-function getLinkBase(base: string): string {
+function getLinkBase(req: any, base: string): string {
   if (process.env["FUNCTIONS_EMULATOR"] === "true") {
     const project =
       process.env["GCLOUD_PROJECT"] ??
@@ -76,6 +76,15 @@ function getLinkBase(base: string): string {
     const target = (process.env["FUNCTION_TARGET"] ?? "").replace(/\./g, "-");
     return `/${project}/${region}/${target}${base}`;
   }
+
+  // Cloud Functions v2: K_SERVICE = function name = URL path prefix.
+  // Only add it when accessed via cloudfunctions.net (not custom domains).
+  const service = process.env["K_SERVICE"];
+  const host: string = req.hostname ?? req.headers?.["host"] ?? "";
+  if (service && host.includes("cloudfunctions.net")) {
+    return `/${service}${base}`;
+  }
+
   return base;
 }
 
@@ -158,8 +167,6 @@ export function createSyncAdminServer(
 ): (req: any, res: any) => Promise<void> {
   const basePath = (config.basePath ?? "/").replace(/\/$/, "") || "";
   const features = config.featuresFlag ?? {};
-  // Compute once — env vars don't change during the process lifetime
-  const lb = getLinkBase(basePath);
 
   // Pre-compute repo info
   const repoInfos: RepoInfo[] = [];
@@ -207,7 +214,8 @@ export function createSyncAdminServer(
   }
 
   // -- Dashboard ----------------------------------------------------------
-  router.get(`${basePath}/`, (_req, res) => {
+  router.get(`${basePath}/`, (req, res) => {
+    const lb = getLinkBase(req, basePath);
     const rows = repoInfos
       .map((r) => {
         const links: string[] = [];
@@ -251,13 +259,15 @@ export function createSyncAdminServer(
     );
     sendHtml(res, html);
   });
-  router.get(`${basePath}`, (_req, res) => {
+  router.get(`${basePath}`, (req, res) => {
+    const lb = getLinkBase(req, basePath);
     res.status(302).set("Location", `${lb}/`).send("");
   });
 
   // -- Health Check -------------------------------------------------------
   if (features.healthCheck) {
     router.get(`${basePath}/:repoName/health`, async (req: Req, res) => {
+      const lb = getLinkBase(req, basePath);
       const info = repoInfos.find((r) => r.name === req.params.repoName);
       if (!info) {
         sendHtml(res, page("Not Found", lb, `<p>Unknown repo: ${req.params.repoName}</p>`), 404);
@@ -365,6 +375,7 @@ export function createSyncAdminServer(
   if (features.manualSync) {
     // GET  — confirmation page
     router.get(`${basePath}/:repoName/force-sync`, (req: Req, res) => {
+      const lb = getLinkBase(req, basePath);
       const info = repoInfos.find((r) => r.name === req.params.repoName);
       if (!info) {
         sendHtml(res, page("Not Found", lb, `<p>Unknown repo: ${req.params.repoName}</p>`), 404);
@@ -388,6 +399,7 @@ export function createSyncAdminServer(
 
     // POST — execute
     router.post(`${basePath}/:repoName/force-sync`, async (req: Req, res) => {
+      const lb = getLinkBase(req, basePath);
       const info = repoInfos.find((r) => r.name === req.params.repoName);
       if (!info) {
         sendJson(res, { error: `Unknown repo: ${req.params.repoName}` }, 404);
@@ -488,6 +500,7 @@ export function createSyncAdminServer(
   // -- View Queues --------------------------------------------------------
   if (features.viewQueue) {
     router.get(`${basePath}/queues`, (req, res) => {
+      const lb = getLinkBase(req, basePath);
       const queueData: Array<{
         repo: string;
         table: string;
@@ -532,6 +545,7 @@ export function createSyncAdminServer(
   // -- Config Check -------------------------------------------------------
   if (features.configCheck) {
     router.get(`${basePath}/config-check`, async (req, res) => {
+      const lb = getLinkBase(req, basePath);
       const project =
         process.env["GCLOUD_PROJECT"] ??
         process.env["GOOGLE_CLOUD_PROJECT"] ??

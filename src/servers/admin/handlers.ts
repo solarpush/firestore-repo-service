@@ -613,7 +613,7 @@ function getMutableSchema(
  * Firebase proxy strips the prefix before reaching the handler, so links
  * are relative to "/" and `staticBasePath` is used as-is.
  */
-function getLinkBase(_req: AnyReq, staticBasePath: string): string {
+function getLinkBase(req: AnyReq, staticBasePath: string): string {
   const base = staticBasePath === "/" ? "" : staticBasePath.replace(/\/$/, "");
 
   if (process.env["FUNCTIONS_EMULATOR"] === "true") {
@@ -628,7 +628,15 @@ function getLinkBase(_req: AnyReq, staticBasePath: string): string {
     return `/${project}/${region}/${target}${base}`;
   }
 
-  // Production: Firebase proxy strips the /{project}/{region}/{fn} prefix
+  // Cloud Functions v2: K_SERVICE = function name = URL path prefix.
+  // Only add it when accessed via cloudfunctions.net (not custom domains).
+  const service = process.env["K_SERVICE"];
+  const host: string =
+    (req as any).hostname ?? (req.headers as any)?.["host"] ?? "";
+  if (service && host.includes("cloudfunctions.net")) {
+    return `/${service}${base}`;
+  }
+
   return base;
 }
 

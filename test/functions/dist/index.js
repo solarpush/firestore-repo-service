@@ -1,9 +1,42 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.crud = exports.admin = exports.server = void 0;
+exports.sync = exports.crud = exports.admin = exports.server = void 0;
 const firestore_repo_service_1 = require("@lpdjs/firestore-repo-service");
 const app_1 = require("firebase-admin/app");
 const firestore_1 = require("firebase-admin/firestore");
@@ -211,14 +244,15 @@ exports.server = (0, https_1.onRequest)(async (req, res) => {
         res.status(500).json({ error: String(error) });
     }
 });
-exports.admin = (0, https_1.onRequest)((0, firestore_repo_service_1.createAdminServer)({
+const adminHandler = (0, firestore_repo_service_1.createAdminServer)({
+    httpsOptions: { invoker: "public" },
     auth: {
         type: "basic",
         realm: "Admin Area",
         username: "admin",
         password: "password",
     },
-    basePath: "/",
+    basePath: "/admin",
     repos: {
         posts: {
             repo: repos.posts,
@@ -262,9 +296,11 @@ exports.admin = (0, https_1.onRequest)((0, firestore_repo_service_1.createAdminS
             relationalFields: [],
         },
     },
-}));
+});
+exports.admin = (0, https_1.onRequest)(adminHandler.httpsOptions, adminHandler);
 const crudServer = (0, firestore_repo_service_1.createCrudServer)({
-    basePath: "/",
+    httpsOptions: { invoker: "public" },
+    basePath: "/crud",
     repos: {
         posts: {
             repo: repos.posts,
@@ -313,46 +349,50 @@ const crudServer = (0, firestore_repo_service_1.createCrudServer)({
         auth: "bearer",
     },
 });
-exports.crud = (0, https_1.onRequest)(crudServer);
-// // Firestore → BigQuery sync
-// import { PubSub } from "@google-cloud/pubsub";
-// import * as firestoreTriggers from "firebase-functions/v2/firestore";
-// import * as pubsubHandler from "firebase-functions/v2/pubsub";
-//  const sync = createFirestoreSync(repos, {
-//   deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
-//   adapter: new BigQueryAdapter({
-//     bigquery: new BigQuery({ projectId: "firestore-repo-services" }),
-//     datasetId: "firestore_sync",
-//   }),
-//   topicPrefix: "firestore-sync",
-//   autoMigrate: true,
-//   admin: {
-//     onRequest,
-//     auth: {
-//       type: "basic",
-//       realm: "Admin Area",
-//       username: "admin",
-//       password: "password",
-//     },
-//     basePath: "/",
-//     featuresFlag: {
-//       viewQueue: true,
-//       manualSync: true,
-//       healthCheck: true,
-//       configCheck: true,
-//     },
-//   },
-//   repos: {
-//     users: {
-//       exclude: ["documentPath"],
-//       columnMap: { docId: "user_id" },
-//       tableName: "users",
-//     },
-//     posts: { columnMap: { docId: "post_id" } },
-//     comments: {
-//       columnMap: { docId: "comment_id" },
-//       triggerPath: "posts/{postId}/comments/{docId}",
-//     },
-//   },
-// });
+exports.crud = (0, https_1.onRequest)(crudServer.httpsOptions, crudServer);
+// Firestore → BigQuery sync
+const bigquery_1 = require("@google-cloud/bigquery");
+const pubsub_1 = require("@google-cloud/pubsub");
+const sync_1 = require("@lpdjs/firestore-repo-service/sync");
+const bigquery_2 = require("@lpdjs/firestore-repo-service/sync/bigquery");
+const firestoreTriggers = __importStar(require("firebase-functions/v2/firestore"));
+const pubsubHandler = __importStar(require("firebase-functions/v2/pubsub"));
+exports.sync = (0, sync_1.createFirestoreSync)(repos, {
+    deps: { firestoreTriggers, pubsubHandler, pubsub: new pubsub_1.PubSub() },
+    adapter: new bigquery_2.BigQueryAdapter({
+        bigquery: new bigquery_1.BigQuery({ projectId: "firestore-repo-services" }),
+        datasetId: "firestore_sync",
+    }),
+    topicPrefix: "firestore-sync",
+    autoMigrate: true,
+    admin: {
+        onRequest: https_1.onRequest,
+        httpsOptions: { invoker: "public" },
+        auth: {
+            type: "basic",
+            realm: "Admin Area",
+            username: "admin",
+            password: "password",
+        },
+        basePath: "/sync-functions-syncAdmin",
+        featuresFlag: {
+            viewQueue: true,
+            manualSync: true,
+            healthCheck: true,
+            configCheck: true,
+        },
+    },
+    repos: {
+        users: {
+            exclude: ["documentPath"],
+            columnMap: { docId: "user_id" },
+            tableName: "users",
+        },
+        posts: { columnMap: { docId: "post_id" } },
+        comments: {
+            columnMap: { docId: "comment_id" },
+            triggerPath: "posts/{postId}/comments/{docId}",
+        },
+    },
+});
 //# sourceMappingURL=index.js.map
