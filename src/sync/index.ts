@@ -26,6 +26,9 @@ export type {
   FirestoreTriggersDep,
   PubSubHandlerDep,
   PubSubClientDep,
+  SyncAdminConfig,
+  SyncAdminBasicAuth,
+  SyncAdminFeaturesFlag,
 } from "./types";
 
 export { zodTypeToLogical, zodSchemaToColumns } from "./schema-mapper";
@@ -38,3 +41,4 @@ export { autoMigrate } from "./migration";
 export type { MigrateResult } from "./migration";
 export { createSyncTriggers } from "./triggers";
 export { createFirestoreSync } from "./create-sync";
+export { createSyncAdminServer } from "./admin";

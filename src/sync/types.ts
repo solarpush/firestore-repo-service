@@ -262,6 +262,53 @@ export interface GenerateDDLConfig<M = Record<string, any>> {
   repos?: TypedRepoSyncConfigs<M>;
 }
 
+// ---------------------------------------------------------------------------
+// Sync admin config
+// ---------------------------------------------------------------------------
+
+/**
+ * HTTP Basic Auth configuration for the sync admin.
+ */
+export interface SyncAdminBasicAuth {
+  type: "basic";
+  /** Realm displayed in the browser login dialog */
+  realm?: string;
+  username: string;
+  password: string;
+}
+
+/**
+ * Feature flags controlling which sync admin endpoints are enabled.
+ */
+export interface SyncAdminFeaturesFlag {
+  /** Show pending queue state (default: false) */
+  viewQueue?: boolean;
+  /** Allow force-syncing an entire collection (default: false) */
+  manualSync?: boolean;
+  /** Schema health check: expected vs actual SQL columns (default: false) */
+  healthCheck?: boolean;
+}
+
+/**
+ * Configuration for the optional sync admin HTTP endpoint.
+ * When provided in `FirestoreSyncConfig.admin`, an `onRequest` Cloud Function
+ * handler is created and added to `sync.functions`.
+ */
+export interface SyncAdminConfig {
+  /** Authentication guard — HTTP Basic Auth or custom middleware function */
+  auth?: SyncAdminBasicAuth | ((req: any, res: any, next: () => void) => void | Promise<void>);
+  /** Base URL path (default: "/sync-admin") */
+  basePath?: string;
+  /** Feature flags controlling which endpoints are enabled */
+  featuresFlag?: SyncAdminFeaturesFlag;
+  /**
+   * `onRequest` from `firebase-functions/https` (or `firebase-functions/v2/https`).
+   * When provided, the admin handler is automatically wrapped as a Cloud Function.
+   * If omitted, the raw `(req, res) => void` handler is exposed instead.
+   */
+  onRequest?: (handler: (req: any, res: any) => void | Promise<void>) => any;
+}
+
 /** Options for `createFirestoreSync()` — the unified wrapper. */
 export interface FirestoreSyncConfig<M = Record<string, any>> {
   /** External dependencies — all Firebase/PubSub modules */
@@ -276,6 +323,12 @@ export interface FirestoreSyncConfig<M = Record<string, any>> {
   flushIntervalMs?: number;
   /** Auto-create/migrate tables on first event (default: false) */
   autoMigrate?: boolean;
+  /**
+   * Optional sync admin endpoint. When provided, a `syncAdmin` handler is
+   * added to `sync.functions` exposing health-check, force-sync, and queue
+   * inspection endpoints behind authentication.
+   */
+  admin?: SyncAdminConfig;
   /** Per-repo overrides (shared between triggers and worker) */
   repos?: TypedRepoSyncConfigs<M>;
 }

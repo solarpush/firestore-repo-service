@@ -542,6 +542,20 @@ export const sync = createFirestoreSync(repos, {
   }),
   topicPrefix: "firestore-sync",
   autoMigrate: true,
+  admin: {
+    auth: {
+      type: "basic",
+      realm: "Admin Area",
+      username: "admin",
+      password: "password",
+    },
+    basePath: "/",
+    featuresFlag: {
+      viewQueue: true,
+      manualSync: true,
+      healthCheck: true,
+    },
+  },
   repos: {
     users: {
       exclude: ["documentPath"],
@@ -555,3 +569,4 @@ export const sync = createFirestoreSync(repos, {
     },
   },
 });
+export const adminSync = onRequest(sync.functions.syncAdmin);

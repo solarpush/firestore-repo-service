@@ -12,22 +12,31 @@
  *   adapter,
  *   topicPrefix: "firestore-sync",
  *   autoMigrate: true,
+ *   admin: {
+ *     auth: { type: "basic", username: "admin", password: "secret" },
+ *     featuresFlag: { healthCheck: true, manualSync: true, viewQueue: true },
+ *   },
  *   repos: {
  *     users: { exclude: ["documentPath"], columnMap: { docId: "user_id" } },
  *     posts: { columnMap: { docId: "post_id" } },
  *   },
  * });
  *
- * // ESM
+ * // Triggers + PubSub handlers
  * export const { users_onCreate, users_onUpdate, users_onDelete, sync_users } = sync.functions;
- * // CJS
- * module.exports = { ...module.exports, ...sync.functions };
+ *
+ * // Admin endpoint — wrap with onRequest yourself
+ * export const syncAdmin = onRequest(sync.adminHandler!);
+ *
+ * // Or pass onRequest in admin config to auto-add to sync.functions:
+ * // admin: { onRequest, ... } → export const { syncAdmin } = sync.functions;
  * ```
  */
 
 import { createSyncTriggers } from "./triggers";
 import { createSyncWorker } from "./worker";
-import type { FirestoreSyncConfig, SyncEvent } from "./types";
+import { createSyncAdminServer } from "./admin";
+import type { FirestoreSyncConfig, RepoSyncConfig, SyncEvent } from "./types";
 import type { SyncQueue } from "./queue";
 
 const DEFAULT_TOPIC_PREFIX = "firestore-sync";
@@ -43,6 +52,7 @@ export function createFirestoreSync<M extends Record<string, any>>(
     batchSize,
     flushIntervalMs,
     autoMigrate,
+    admin: adminConfig,
     repos: repoConfigs,
   } = config;
 
@@ -71,9 +81,36 @@ export function createFirestoreSync<M extends Record<string, any>>(
     );
   }
 
+  // Optional admin endpoint
+  let adminHandler: ((req: any, res: any) => Promise<void>) | null = null;
+  if (adminConfig) {
+    adminHandler = createSyncAdminServer(
+      repoMapping,
+      adapter,
+      worker.queues as Map<string, SyncQueue>,
+      worker.handleMessage as (event: SyncEvent) => Promise<void>,
+      adminConfig,
+      (repoConfigs ?? {}) as Record<string, RepoSyncConfig<string> | undefined>,
+    );
+    // If onRequest is provided, wrap it as a Cloud Function automatically.
+    // Otherwise expose the raw handler so the user can wrap it.
+    handlers["syncAdmin"] = adminConfig.onRequest
+      ? adminConfig.onRequest(adminHandler)
+      : adminHandler;
+  }
+
   const result = {
-    /** All Cloud Functions (triggers + handlers) — spread into exports */
+    /** All Cloud Functions (triggers + handlers + optional admin) — spread into exports */
     functions: { ...triggers, ...handlers } as Record<string, any>,
+    /**
+     * Raw admin HTTP handler — wrap with `onRequest()` yourself if you
+     * didn't pass `onRequest` in the admin config.
+     * @example
+     * ```ts
+     * export const syncAdmin = onRequest(sync.adminHandler!);
+     * ```
+     */
+    adminHandler: adminHandler as ((req: any, res: any) => Promise<void>) | null,
     /** Process a SyncEvent directly (for testing) */
     handleMessage: worker.handleMessage as (event: SyncEvent) => Promise<void>,
     /** Internal queue map (for testing) */
@@ -84,7 +121,7 @@ export function createFirestoreSync<M extends Record<string, any>>(
 
   // Hide non-function properties from Firebase's recursive discovery.
   // Only `functions` is enumerable — the rest is accessible but invisible to Object.keys().
-  for (const key of ["handleMessage", "queues", "shutdown"] as const) {
+  for (const key of ["adminHandler", "handleMessage", "queues", "shutdown"] as const) {
     Object.defineProperty(result, key, { enumerable: false });
   }
 
