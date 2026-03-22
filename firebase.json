@@ -10,7 +10,6 @@
             "firebase-debug.*.log",
             ".cache",
             "*.ts",
-            "!*.d.ts",
             "tsconfig.json"
         ],
         "predeploy": [
