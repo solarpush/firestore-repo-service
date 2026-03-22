@@ -81,9 +81,9 @@
     "test:run": "bun run test/run-tests.ts",
     "test:start": "bun run test/run-tests.ts --start",
     "test:emulator": "bun run test/emulator-test.ts",
-    "emulator": "firebase emulators:start --project demo-no-project",
-    "emulator:fire": "firebase emulators:start --only firestore --project demo-no-project",
-    "emulator:func": "firebase emulators:start --only firestore,functions --project demo-no-project",
+    "emulator": "firebase emulators:start --project firestore-repo-services",
+    "emulator:fire": "firebase emulators:start --only firestore --project firestore-repo-services",
+    "emulator:func": "firebase emulators:start --only firestore,functions --project firestore-repo-services",
     "lint": "tsc --noEmit"
   },
   "keywords": [

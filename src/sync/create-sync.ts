@@ -91,6 +91,8 @@ export function createFirestoreSync<M extends Record<string, any>>(
       worker.handleMessage as (event: SyncEvent) => Promise<void>,
       adminConfig,
       (repoConfigs ?? {}) as Record<string, RepoSyncConfig<string> | undefined>,
+      deps.pubsub,
+      topicPrefix,
     );
     // If onRequest is provided, wrap it as a Cloud Function automatically.
     // Otherwise expose the raw handler so the user can wrap it.

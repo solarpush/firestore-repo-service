@@ -122,4 +122,4 @@ Le fichier `repo.test.ts` teste toutes les fonctionnalités avec 34+ tests :
 
 ## Aucun projet Firebase nécessaire
 
-L'émulateur fonctionne sans projet Firebase réel. Il utilise `projectId: "demo-no-project"` qui est suffisant pour les tests locaux.
+L'émulateur fonctionne sans projet Firebase réel. Il utilise `projectId: "firestore-repo-services"` qui est suffisant pour les tests locaux.

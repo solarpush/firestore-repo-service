@@ -287,6 +287,8 @@ export interface SyncAdminFeaturesFlag {
   manualSync?: boolean;
   /** Schema health check: expected vs actual SQL columns (default: false) */
   healthCheck?: boolean;
+  /** GCP config check: verify APIs, topics, tables, and IAM (default: false) */
+  configCheck?: boolean;
 }
 
 /**

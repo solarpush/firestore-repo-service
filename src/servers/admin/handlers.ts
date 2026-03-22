@@ -622,7 +622,9 @@ function getLinkBase(_req: AnyReq, staticBasePath: string): string {
       process.env["GOOGLE_CLOUD_PROJECT"] ??
       "demo-project";
     const region = process.env["FUNCTION_REGION"] ?? "us-central1";
-    const target = process.env["FUNCTION_TARGET"] ?? "";
+    // FUNCTION_TARGET uses dots (e.g. "sync.functions.syncAdmin") but the
+    // emulator URL uses hyphens ("sync-functions-syncAdmin").
+    const target = (process.env["FUNCTION_TARGET"] ?? "").replace(/\./g, "-");
     return `/${project}/${region}/${target}${base}`;
   }
 

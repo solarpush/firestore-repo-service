@@ -15,13 +15,13 @@ import z from "zod";
 // IMPORTANT: Configurer les variables d'environnement AVANT d'initialiser
 process.env.FIRESTORE_EMULATOR_HOST = "localhost:8080";
 // Supprimer le warning de métadonnées GCP
-process.env.GOOGLE_CLOUD_PROJECT = "demo-no-project";
-process.env.GCLOUD_PROJECT = "demo-no-project";
+process.env.GOOGLE_CLOUD_PROJECT = "firestore-repo-services";
+process.env.GCLOUD_PROJECT = "firestore-repo-services";
 
 // Initialize Firebase Admin avec l'émulateur
-// IMPORTANT: Utiliser le même projectId que l'émulateur (demo-no-project)
+// IMPORTANT: Utiliser le même projectId que l'émulateur (firestore-repo-services)
 initializeApp({
-  projectId: "demo-no-project",
+  projectId: "firestore-repo-services",
 });
 
 const db = getFirestore();
@@ -349,7 +349,7 @@ const crudServer = createCrudServer({
     title: "Mon API",
     version: "1.0.0",
     servers: [
-      { url: "http://127.0.0.1:5001/demo-no-project/us-central1/crud" },
+      { url: "http://127.0.0.1:5001/firestore-repo-services/us-central1/crud" },
     ],
     auth: "bearer",
   },
@@ -360,7 +360,7 @@ export const crud = onRequest(crudServer);
  * Test endpoint for CRUD server - runs all operations and returns results.
  */
 export const testCrud = onRequest(async (req, res) => {
-  const baseUrl = `http://localhost:5001/demo-no-project/us-central1/crud`;
+  const baseUrl = `http://localhost:5001/firestore-repo-services/us-central1/crud`;
   const results: Record<string, unknown> = {};
 
   try {
@@ -537,12 +537,13 @@ import * as pubsubHandler from "firebase-functions/v2/pubsub";
 export const sync = createFirestoreSync(repos, {
   deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
   adapter: new BigQueryAdapter({
-    bigquery: new BigQuery({ projectId: "my-project" }),
+    bigquery: new BigQuery({ projectId: "firestore-repo-services" }),
     datasetId: "firestore_sync",
   }),
   topicPrefix: "firestore-sync",
   autoMigrate: true,
   admin: {
+    onRequest,
     auth: {
       type: "basic",
       realm: "Admin Area",
@@ -554,6 +555,7 @@ export const sync = createFirestoreSync(repos, {
       viewQueue: true,
       manualSync: true,
       healthCheck: true,
+      configCheck: true,
     },
   },
   repos: {
@@ -569,4 +571,3 @@ export const sync = createFirestoreSync(repos, {
     },
   },
 });
-export const adminSync = onRequest(sync.functions.syncAdmin);
