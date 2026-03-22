@@ -22,6 +22,10 @@ export type {
   SyncWorkerConfig,
   GenerateDDLConfig,
   FirestoreSyncConfig,
+  SyncDeps,
+  FirestoreTriggersDep,
+  PubSubHandlerDep,
+  PubSubClientDep,
 } from "./types";
 
 export { zodTypeToLogical, zodSchemaToColumns } from "./schema-mapper";

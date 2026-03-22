@@ -215,6 +215,8 @@ export type ConfiguredRepository<
 > = {
   /** @internal Phantom property to expose the model type for generic extraction */
   readonly _modelType: T["type"];
+  /** @internal Whether this is a collectionGroup repository */
+  readonly _isGroup: T["isGroup"];
 
   ref: CollectionReference | Query;
 

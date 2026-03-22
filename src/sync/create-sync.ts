@@ -3,7 +3,12 @@
  *
  * @example
  * ```typescript
+ * import * as firestoreTriggers from "firebase-functions/v2/firestore";
+ * import * as pubsubHandler from "firebase-functions/v2/pubsub";
+ * import { PubSub } from "@google-cloud/pubsub";
+ *
  * const sync = createFirestoreSync(repos, {
+ *   deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
  *   adapter,
  *   topicPrefix: "firestore-sync",
  *   autoMigrate: true,
@@ -13,6 +18,9 @@
  *   },
  * });
  *
+ * // ESM
+ * export const { users_onCreate, users_onUpdate, users_onDelete, sync_users } = sync.functions;
+ * // CJS
  * module.exports = { ...module.exports, ...sync.functions };
  * ```
  */
@@ -29,6 +37,7 @@ export function createFirestoreSync<M extends Record<string, any>>(
   config: FirestoreSyncConfig<NoInfer<M>>,
 ) {
   const {
+    deps,
     adapter,
     topicPrefix = DEFAULT_TOPIC_PREFIX,
     batchSize,
@@ -39,12 +48,14 @@ export function createFirestoreSync<M extends Record<string, any>>(
 
   // Create triggers (Firestore → PubSub)
   const triggers = createSyncTriggers(repoMapping, {
+    deps: { firestoreTriggers: deps.firestoreTriggers, pubsub: deps.pubsub },
     topicPrefix,
     repos: repoConfigs,
   });
 
   // Create worker (PubSub → SQL)
   const worker = createSyncWorker(repoMapping, {
+    deps: { pubsubHandler: deps.pubsubHandler, pubsub: deps.pubsub },
     adapter,
     batchSize,
     flushIntervalMs,
@@ -60,13 +71,9 @@ export function createFirestoreSync<M extends Record<string, any>>(
     );
   }
 
-  return {
-    /** All Cloud Functions (triggers + handlers) — spread into module.exports */
+  const result = {
+    /** All Cloud Functions (triggers + handlers) — spread into exports */
     functions: { ...triggers, ...handlers } as Record<string, any>,
-    /** Only the Firestore triggers */
-    triggers,
-    /** Only the PubSub worker handlers */
-    handlers,
     /** Process a SyncEvent directly (for testing) */
     handleMessage: worker.handleMessage as (event: SyncEvent) => Promise<void>,
     /** Internal queue map (for testing) */
@@ -74,4 +81,12 @@ export function createFirestoreSync<M extends Record<string, any>>(
     /** Flush all queues and stop timers */
     shutdown: worker.shutdown as () => Promise<void>,
   };
+
+  // Hide non-function properties from Firebase's recursive discovery.
+  // Only `functions` is enumerable — the rest is accessible but invisible to Object.keys().
+  for (const key of ["handleMessage", "queues", "shutdown"] as const) {
+    Object.defineProperty(result, key, { enumerable: false });
+  }
+
+  return result;
 }

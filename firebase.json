@@ -2,7 +2,7 @@
     "functions": {
         "source": "test/functions",
         "codebase": "default",
-        "runtime": "nodejs20",
+        "runtime": "nodejs22",
         "ignore": [
             "node_modules",
             ".git",
@@ -19,6 +19,10 @@
         "firestore": {
             "host": "127.0.0.1",
             "port": 8080
+        },
+        "pubsub": {
+            "host": "127.0.0.1",
+            "port": 8085
         },
         "ui": {
             "enabled": true,

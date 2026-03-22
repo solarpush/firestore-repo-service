@@ -151,6 +151,13 @@ export interface RepoSyncConfig<F extends string = string> {
   exclude?: F[];
   /** Field name overrides: Zod field → SQL column name */
   columnMap?: Partial<Record<F, string>>;
+  /**
+   * Explicit Firestore document path pattern for triggers.
+   * **Required** for collection-group repos (`isGroup: true`) because their
+   * path cannot be auto-detected.
+   * @example "posts/{postId}/comments/{docId}"
+   */
+  triggerPath?: string;
 }
 
 /**
@@ -166,10 +173,58 @@ export type ExtractRepoFields<R> =
         ? string & keyof T
         : string;
 
-/** Typed per-repo sync config map: each repo gets its own field names. */
+/** Keys of repos where `_isGroup` is `true`. */
+type GroupRepoKeys<M> = {
+  [K in string & keyof M]: M[K] extends { _isGroup: true } ? K : never;
+}[string & keyof M];
+
+/** Keys of repos where `_isGroup` is NOT `true`. */
+type NonGroupRepoKeys<M> = Exclude<string & keyof M, GroupRepoKeys<M>>;
+
+/**
+ * Typed per-repo sync config map.
+ * - Collection-group repos (`isGroup: true`): entry is **required** and
+ *   `triggerPath` is mandatory.
+ * - Regular repos: entry is optional, all fields optional.
+ */
 export type TypedRepoSyncConfigs<M> = {
-  [K in string & keyof M]?: RepoSyncConfig<ExtractRepoFields<M[K]>>;
+  [K in GroupRepoKeys<M>]: RepoSyncConfig<ExtractRepoFields<M[K]>> & {
+    triggerPath: string;
+  };
+} & {
+  [K in NonGroupRepoKeys<M>]?: RepoSyncConfig<ExtractRepoFields<M[K]>>;
 };
+
+// ---------------------------------------------------------------------------
+// External dependencies (injected by the consumer)
+// ---------------------------------------------------------------------------
+
+/** Firestore trigger constructors from `firebase-functions/v2/firestore`. */
+export interface FirestoreTriggersDep {
+  onDocumentCreated: Function;
+  onDocumentUpdated: Function;
+  onDocumentDeleted: Function;
+}
+
+/** PubSub handler from `firebase-functions/v2/pubsub`. */
+export interface PubSubHandlerDep {
+  onMessagePublished: Function;
+}
+
+/** PubSub client instance (e.g. `new PubSub()`). */
+export interface PubSubClientDep {
+  topic(name: string): { publishMessage(msg: any): Promise<any> };
+}
+
+/** All external deps needed by the sync module. */
+export interface SyncDeps {
+  /** `firebase-functions/v2/firestore` — trigger constructors */
+  firestoreTriggers: FirestoreTriggersDep;
+  /** `firebase-functions/v2/pubsub` — PubSub handler */
+  pubsubHandler: PubSubHandlerDep;
+  /** A PubSub client instance (`new PubSub()` from `@google-cloud/pubsub`) */
+  pubsub: PubSubClientDep;
+}
 
 // ---------------------------------------------------------------------------
 // Top-level configs
@@ -177,6 +232,8 @@ export type TypedRepoSyncConfigs<M> = {
 
 /** Options for `createSyncTriggers()`. */
 export interface SyncTriggersConfig<M = Record<string, any>> {
+  /** External dependencies — Firestore triggers + PubSub */
+  deps: Pick<SyncDeps, "firestoreTriggers" | "pubsub">;
   /** PubSub topic name prefix (topics will be `{prefix}-{repoName}`) */
   topicPrefix?: string;
   /** Per-repo overrides */
@@ -185,6 +242,8 @@ export interface SyncTriggersConfig<M = Record<string, any>> {
 
 /** Options for `createSyncWorker()`. */
 export interface SyncWorkerConfig<M = Record<string, any>> {
+  /** External dependencies — PubSub handler + client */
+  deps: Pick<SyncDeps, "pubsubHandler" | "pubsub">;
   /** SQL adapter to flush data to */
   adapter: SqlAdapter;
   /** Max rows per flush batch (default: 100) */
@@ -205,6 +264,8 @@ export interface GenerateDDLConfig<M = Record<string, any>> {
 
 /** Options for `createFirestoreSync()` — the unified wrapper. */
 export interface FirestoreSyncConfig<M = Record<string, any>> {
+  /** External dependencies — all Firebase/PubSub modules */
+  deps: SyncDeps;
   /** SQL adapter to flush data to */
   adapter: SqlAdapter;
   /** PubSub topic name prefix (topics will be `{prefix}-{repoName}`) */

@@ -528,8 +528,14 @@ export const testCrud = onRequest(async (req, res) => {
     });
   }
 });
+
 // Firestore → BigQuery sync
-const sync = createFirestoreSync(repos, {
+import { PubSub } from "@google-cloud/pubsub";
+import * as firestoreTriggers from "firebase-functions/v2/firestore";
+import * as pubsubHandler from "firebase-functions/v2/pubsub";
+
+export const sync = createFirestoreSync(repos, {
+  deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
   adapter: new BigQueryAdapter({
     bigquery: new BigQuery({ projectId: "my-project" }),
     datasetId: "firestore_sync",
@@ -543,7 +549,9 @@ const sync = createFirestoreSync(repos, {
       tableName: "users",
     },
     posts: { columnMap: { docId: "post_id" } },
-    comments: { columnMap: { docId: "comment_id" } },
+    comments: {
+      columnMap: { docId: "comment_id" },
+      triggerPath: "posts/{postId}/comments/{docId}",
+    },
   },
 });
-module.exports = { ...module.exports, ...sync.functions };

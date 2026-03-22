@@ -81,8 +81,9 @@
     "test:run": "bun run test/run-tests.ts",
     "test:start": "bun run test/run-tests.ts --start",
     "test:emulator": "bun run test/emulator-test.ts",
-    "emulator": "firebase emulators:start --only firestore --project demo-no-project",
-    "emulatorf": "firebase emulators:start --only firestore,functions --project demo-no-project",
+    "emulator": "firebase emulators:start --project demo-no-project",
+    "emulator:fire": "firebase emulators:start --only firestore --project demo-no-project",
+    "emulator:func": "firebase emulators:start --only firestore,functions --project demo-no-project",
     "lint": "tsc --noEmit"
   },
   "keywords": [
@@ -117,12 +118,12 @@
   },
   "homepage": "https://frs.lpdjs.fr",
   "peerDependencies": {
-    "firebase-admin": "^11.0.0 || ^12.0.0 || ^13.0.0",
-    "typescript": "^5.0.0",
-    "firebase-functions": "^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0",
-    "zod": "^4",
     "@google-cloud/bigquery": "^7.0.0 || ^8.0.0",
-    "@google-cloud/pubsub": "^4.0.0 || ^5.0.0"
+    "@google-cloud/pubsub": "^4.0.0 || ^5.0.0",
+    "firebase-admin": "^11.0.0 || ^12.0.0 || ^13.0.0",
+    "firebase-functions": "^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0",
+    "typescript": "^5.0.0",
+    "zod": "^4"
   },
   "peerDependenciesMeta": {
     "firebase-functions": {
@@ -136,18 +137,20 @@
     }
   },
   "devDependencies": {
+    "@google-cloud/bigquery": "^8.1.1",
+    "@google-cloud/pubsub": "^5.3.0",
     "@types/bun": "latest",
     "@types/express": "latest",
     "concurrently": "^9.2.1",
-    "firebase-admin": "^13.6.0",
-    "firebase-functions": "^7.0.1",
+    "firebase-admin": "^13.7.0",
+    "firebase-functions": "^7.2.2",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
-    "wait-on": "^9.0.3",
-    "zod": "^4"
+    "wait-on": "^9.0.4",
+    "zod": "^4.3.6"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.9",
-    "hono": "^4.12.2"
+    "@hono/node-server": "^1.19.11",
+    "hono": "^4.12.8"
   }
 }

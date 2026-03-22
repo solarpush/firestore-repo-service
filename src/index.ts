@@ -383,13 +383,25 @@ export function createRepositoryMapping<T extends Record<string, any>>(
 ): { [K in keyof T]: ConfiguredRepository<T[K]> } {
   const instance = new RepositoryMapping(db, mapping);
 
-  // Create a Proxy to dynamically generate getters
+  const mappingKeys = Object.keys(mapping);
+
+  // Proxy exposes only the mapping keys as own properties,
+  // hiding internal class fields (db, repositoryCache, etc.)
   return new Proxy(instance, {
     get(target, prop) {
       if (typeof prop === "string" && prop in mapping) {
         return target.getRepository(prop as keyof T);
       }
       return (target as any)[prop];
+    },
+    ownKeys() {
+      return mappingKeys;
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      if (typeof prop === "string" && prop in mapping) {
+        return { configurable: true, enumerable: true, writable: false };
+      }
+      return undefined;
     },
   }) as any;
 }

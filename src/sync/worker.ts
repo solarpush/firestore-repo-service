@@ -3,39 +3,14 @@
  * messages from PubSub, routes them to per-repo {@link SyncQueue}s, and
  * flushes batches to the configured {@link SqlAdapter}.
  *
- * Optionally runs auto-migration on first event per repo.
+ * Dependencies (`firebase-functions`, `@google-cloud/pubsub`) are injected
+ * via the `deps` config property.
  */
 
 import { z } from "zod";
 import { zodSchemaToColumns } from "./schema-mapper";
 import { SyncQueue } from "./queue";
 import type { RepoSyncConfig, SqlAdapter, SyncEvent, SyncWorkerConfig } from "./types";
-
-// ---------------------------------------------------------------------------
-// Lazy imports for optional deps
-// ---------------------------------------------------------------------------
-
-function getPubSubModule(): any {
-  try {
-    return require("@google-cloud/pubsub");
-  } catch {
-    throw new Error(
-      "@google-cloud/pubsub is required for the sync worker. " +
-        "Install it: npm install @google-cloud/pubsub",
-    );
-  }
-}
-
-function getFirebaseFunctions(): any {
-  try {
-    return require("firebase-functions/v2/pubsub");
-  } catch {
-    throw new Error(
-      "firebase-functions v2 is required for the sync worker. " +
-        "Install it: npm install firebase-functions",
-    );
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Migration tracking
@@ -65,12 +40,10 @@ async function ensureMigrated(
   if (!exists) {
     await adapter.createTable({ tableName, columns });
   } else {
-    // Additive migration: add columns that don't exist yet
     const existing = new Set(await adapter.getTableColumns(tableName));
     const newCols = columns.filter((c) => !existing.has(c.name));
     if (newCols.length > 0) {
       const ddl = adapter.dialect.addColumnsDDL(tableName, newCols);
-      // Execute each ALTER statement
       for (const stmt of ddl.split("\n").filter(Boolean)) {
         await (adapter as any).bigquery?.query?.({ query: stmt }) ??
           Promise.resolve();
@@ -90,7 +63,8 @@ async function ensureMigrated(
  * to a SQL database.
  *
  * Returns an object with:
- * - `handler` — the Cloud Function to export
+ * - `createHandler` — creates a Cloud Function for a PubSub topic
+ * - `handleMessage` — process a SyncEvent directly (for testing)
  * - `queues` — internal SyncQueue map (for testing / manual flush)
  * - `shutdown()` — flush all queues and stop timers
  */
@@ -99,6 +73,7 @@ export function createSyncWorker<M extends Record<string, any>>(
   config: SyncWorkerConfig<NoInfer<M>>,
 ) {
   const {
+    deps,
     adapter,
     batchSize = 100,
     flushIntervalMs = 5_000,
@@ -117,17 +92,12 @@ export function createSyncWorker<M extends Record<string, any>>(
     const tableName = repoCfg?.tableName ?? repoName;
 
     // On flush failure → re-publish to PubSub dead-letter
-    let pubsub: any = null;
     const onFlushError = async (
       events: SyncEvent[],
       _error: unknown,
     ): Promise<void> => {
       try {
-        if (!pubsub) {
-          const { PubSub } = getPubSubModule();
-          pubsub = new PubSub();
-        }
-        const dlTopic = pubsub.topic(`${repoName}-sync-dlq`);
+        const dlTopic = deps.pubsub.topic(`${repoName}-sync-dlq`);
         for (const evt of events) {
           await dlTopic.publishMessage({ json: evt });
         }
@@ -165,7 +135,6 @@ export function createSyncWorker<M extends Record<string, any>>(
       (repo as any).documentKey ??
       "docId";
 
-    // Auto-migrate if enabled
     if (autoMigrate) {
       const schema: z.ZodObject<any> | undefined =
         (repo as any).schema ?? undefined;
@@ -188,10 +157,9 @@ export function createSyncWorker<M extends Record<string, any>>(
     queue.enqueue(syncEvent);
   }
 
-  // Cloud Function v2 PubSub handler
+  // Cloud Function v2 PubSub handler (sync — deps are already available)
   function createHandler(topicName: string) {
-    const { onMessagePublished } = getFirebaseFunctions();
-    return onMessagePublished(topicName, async (event: any) => {
+    return deps.pubsubHandler.onMessagePublished(topicName, async (event: any) => {
       const data: SyncEvent = event.data?.message?.json ?? event.data?.json;
       if (!data) {
         console.warn("[SyncWorker] Received empty PubSub message");
