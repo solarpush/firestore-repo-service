@@ -1,7 +1,7 @@
 {
   "name": "@lpdjs/firestore-repo-service",
-  "version": "1.0.0",
-  "description": "⚡ Type-safe Firestore ORM with auto-generated repositories, advanced queries, and zero boilerplate, includes pagination, transaction and relations support.",
+  "version": "2.0.1",
+  "description": "⚡ Type-safe Firestore ORM with auto-generated repositories, advanced queries, relations with typed select, pagination with include, batch/bulk operations, aggregations and transactions.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -16,6 +16,45 @@
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
       }
+    },
+    "./sync": {
+      "require": {
+        "types": "./dist/sync/index.d.cts",
+        "default": "./dist/sync/index.cjs"
+      },
+      "import": {
+        "types": "./dist/sync/index.d.ts",
+        "default": "./dist/sync/index.js"
+      }
+    },
+    "./sync/bigquery": {
+      "require": {
+        "types": "./dist/sync/bigquery.d.cts",
+        "default": "./dist/sync/bigquery.cjs"
+      },
+      "import": {
+        "types": "./dist/sync/bigquery.d.ts",
+        "default": "./dist/sync/bigquery.js"
+      }
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "servers": [
+        "./dist/servers/index.d.ts"
+      ],
+      "servers/admin": [
+        "./dist/servers/admin/index.d.ts"
+      ],
+      "servers/crud": [
+        "./dist/servers/crud/index.d.ts"
+      ],
+      "sync": [
+        "./dist/sync/index.d.ts"
+      ],
+      "sync/bigquery": [
+        "./dist/sync/bigquery.d.ts"
+      ]
     }
   },
   "files": [
@@ -35,40 +74,84 @@
   },
   "scripts": {
     "build": "tsup",
+    "build:docs": "bun run --cwd docs/static docs:build",
     "prepublishOnly": "bun run build",
-    "test": "bun test",
+    "test": "bun test test/repo.test.ts",
+    "test:watch": "concurrently --kill-others -n emu,test -c cyan,yellow \"bun run emulator\" \"wait-on tcp:8080 && bun test test/repo.test.ts --watch\"",
+    "test:run": "bun run test/run-tests.ts",
+    "test:start": "bun run test/run-tests.ts --start",
     "test:emulator": "bun run test/emulator-test.ts",
-    "emulator": "firebase emulators:start --only firestore",
+    "deploy": "firebase deploy --only functions --project firestore-repo-services",
+    "emulator": "firebase emulators:start --project firestore-repo-services",
+    "emulator:fire": "firebase emulators:start --only firestore --project firestore-repo-services",
+    "emulator:func": "firebase emulators:start --only firestore,functions --project firestore-repo-services",
     "lint": "tsc --noEmit"
   },
   "keywords": [
     "firestore",
     "firebase",
+    "firebase-admin",
     "repository",
     "orm",
     "typescript",
     "type-safe",
     "crud",
-    "database"
+    "database",
+    "query-builder",
+    "pagination",
+    "relations",
+    "populate",
+    "batch",
+    "bulk",
+    "transactions",
+    "aggregations",
+    "subcollections",
+    "collection-group"
   ],
   "author": "LPDJS",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/solarpush/firestore-repo-service.git"
+    "url": "git+https://github.com/solarpush/firestore-repo-service.git"
   },
   "bugs": {
     "url": "https://github.com/solarpush/firestore-repo-service/issues"
   },
   "homepage": "https://frs.lpdjs.fr",
   "peerDependencies": {
+    "@google-cloud/bigquery": "^7.0.0 || ^8.0.0",
+    "@google-cloud/pubsub": "^4.0.0 || ^5.0.0",
     "firebase-admin": "^11.0.0 || ^12.0.0 || ^13.0.0",
-    "typescript": "^5.0.0"
+    "firebase-functions": "^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0",
+    "typescript": "^5.0.0",
+    "zod": "^4"
+  },
+  "peerDependenciesMeta": {
+    "firebase-functions": {
+      "optional": true
+    },
+    "@google-cloud/bigquery": {
+      "optional": true
+    },
+    "@google-cloud/pubsub": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@google-cloud/bigquery": "^8.1.1",
+    "@google-cloud/pubsub": "^5.3.0",
     "@types/bun": "latest",
-    "firebase-admin": "^13.6.0",
+    "@types/express": "latest",
+    "concurrently": "^9.2.1",
+    "firebase-admin": "^13.7.0",
+    "firebase-functions": "^7.2.2",
     "tsup": "^8.5.1",
-    "typescript": "^5.0.0"
+    "typescript": "^5.9.3",
+    "wait-on": "^9.0.4",
+    "zod": "^4.3.6"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.11",
+    "hono": "^4.12.8"
   }
 }

@@ -20,6 +20,10 @@ Un service de repository type-safe pour Firestore avec génération automatique 
 - 🔢 **Agrégations** : Count, sum, average avec support serveur
 - ✏️ **CRUD complet** : Create, set, update, delete avec types préservés
 - 🔄 **Transactions** : Opérations transactionnelles type-safe
+- 🔗 **Relations** : Populate avec select typé (champs projetés)
+- 📄 **Pagination** : Curseurs, include avec relations, select
+- 🔄 **Firestore → SQL Sync** : Réplication vers BigQuery via Pub/Sub avec admin UI
+- 🖥️ **Serveur Admin** : UI admin auto-générée avec formulaires Zod, filtrage, navigation de relations
 
 ## 📦 Installation
 
@@ -110,9 +114,9 @@ if (post) {
   console.log(postWithUser.populated.users?.name); // Type-safe!
 }
 
-// Recherche avec options
+// Recherche avec options (tuples where)
 const filteredUsers = await repos.users.query.byName("John", {
-  where: [{ field: "age", operator: ">=", value: 18 }],
+  where: [["age", ">=", 18]],
   orderBy: [{ field: "createdAt", direction: "desc" }],
   limit: 10,
 });
@@ -199,9 +203,9 @@ Recherche **plusieurs documents** par une clé de requête.
 const activeUsers = await repos.users.query.byIsActive(true);
 const usersByName = await repos.users.query.byName("John");
 
-// Avec options
+// Avec options (syntaxe tuple pour where)
 const results = await repos.users.query.byIsActive(true, {
-  where: [{ field: "age", operator: ">=", value: 18 }],
+  where: [["age", ">=", 18]],
   orderBy: [{ field: "name", direction: "asc" }],
   limit: 50,
 });
@@ -209,8 +213,8 @@ const results = await repos.users.query.byIsActive(true, {
 // Requête générique
 const users = await repos.users.query.by({
   where: [
-    { field: "isActive", operator: "==", value: true },
-    { field: "age", operator: ">=", value: 18 },
+    ["isActive", "==", true],
+    ["age", ">=", 18],
   ],
   orderBy: [{ field: "createdAt", direction: "desc" }],
   limit: 10,
@@ -218,18 +222,18 @@ const users = await repos.users.query.by({
 
 // Conditions OR
 const posts = await repos.posts.query.by({
-  orWhere: [
-    [{ field: "status", operator: "==", value: "published" }],
-    [{ field: "status", operator: "==", value: "draft" }],
-  ],
+  orWhere: [[["status", "==", "published"]], [["status", "==", "draft"]]],
 });
 ```
 
 ### Options de requête
 
 ```typescript
+// WhereClause en tuple : [field, operator, value]
+type WhereClause<T> = [keyof T, WhereFilterOp, any];
+
 interface QueryOptions<T> {
-  where?: WhereClause<T>[]; // Conditions AND
+  where?: WhereClause<T>[]; // Conditions AND - tuples [field, op, value]
   orWhere?: WhereClause<T>[][]; // Conditions OR
   orderBy?: {
     field: keyof T;
@@ -237,6 +241,7 @@ interface QueryOptions<T> {
   }[];
   limit?: number; // Nombre max de résultats
   offset?: number; // Pagination (skip)
+  select?: (keyof T)[]; // Champs à récupérer (projection)
   startAt?: DocumentSnapshot | any[]; // Cursor pagination - start at
   startAfter?: DocumentSnapshot | any[]; // Cursor pagination - start after
   endAt?: DocumentSnapshot | any[]; // Cursor pagination - end at
@@ -329,9 +334,14 @@ const allUsers = await repos.users.query.getAll();
 
 // Avec des options de filtrage et tri
 const filteredUsers = await repos.users.query.getAll({
-  where: [{ field: "isActive", operator: "==", value: true }],
+  where: [["isActive", "==", true]],
   orderBy: [{ field: "createdAt", direction: "desc" }],
   limit: 100,
+});
+
+// Avec projection (select)
+const userNames = await repos.users.query.getAll({
+  select: ["docId", "name", "email"],
 });
 ```
 
@@ -341,7 +351,7 @@ const filteredUsers = await repos.users.query.getAll({
 // Écouter les changements en temps réel
 const unsubscribe = repos.users.query.onSnapshot(
   {
-    where: [{ field: "isActive", operator: "==", value: true }],
+    where: [["isActive", "==", true]],
     orderBy: [{ field: "name", direction: "asc" }],
   },
   (users) => {
@@ -463,24 +473,19 @@ import { count, sum, average } from "@lpdjs/firestore-repo-service";
 
 // Compter les documents
 const activeCount = await repos.users.aggregate.count({
-  where: [{ field: "isActive", operator: "==", value: true }],
+  where: [["isActive", "==", true]],
 });
 
-// Agrégations personnalisées (count, sum, average)
-const stats = await repos.users.aggregate.query(
-  {
-    totalUsers: count(),
-    totalAge: sum("age"),
-    averageAge: average("age"),
-  },
-  {
-    where: [{ field: "isActive", operator: "==", value: true }],
-  }
-);
+// Somme d'un champ
+const totalViews = await repos.posts.aggregate.sum("views");
 
-console.log(stats.totalUsers); // nombre total
-console.log(stats.totalAge); // somme des âges
-console.log(stats.averageAge); // moyenne des âges
+// Moyenne d'un champ
+const avgAge = await repos.users.aggregate.average("age");
+
+// Avec filtres
+const publishedViews = await repos.posts.aggregate.sum("views", {
+  where: [["status", "==", "published"]],
+});
 ```
 
 ### Accès à la collection Firestore
@@ -535,12 +540,12 @@ const rating = await repos.eventRatings.update(
 const users = await repos.users.query.by({
   orWhere: [
     [
-      { field: "status", operator: "==", value: "active" },
-      { field: "age", operator: ">=", value: 18 },
+      ["status", "==", "active"],
+      ["age", ">=", 18],
     ],
     [
-      { field: "status", operator: "==", value: "pending" },
-      { field: "verified", operator: "==", value: true },
+      ["status", "==", "pending"],
+      ["verified", "==", true],
     ],
   ],
   orderBy: [{ field: "createdAt", direction: "desc" }],
@@ -548,16 +553,162 @@ const users = await repos.users.query.by({
 });
 ```
 
+### Populate avec select (projection)
+
+```typescript
+// Populate avec tous les champs
+const postWithUser = await repos.posts.populate(post, "userId");
+console.log(postWithUser.populated.users?.name);
+
+// Populate avec select (seulement certains champs)
+const userWithPosts = await repos.users.populate(
+  { docId: user.docId },
+  {
+    relation: "docId",
+    select: ["docId", "title", "status"], // Type-safe: keyof PostModel
+  }
+);
+
+// Populate plusieurs relations
+const postWithAll = await repos.posts.populate(post, ["userId", "categoryId"]);
+```
+
+### Pagination avec include
+
+```typescript
+// Paginer avec relations incluses
+const page = await repos.posts.query.paginate({
+  pageSize: 10,
+  orderBy: [{ field: "createdAt", direction: "desc" }],
+  include: ["userId"], // Inclut l'auteur automatiquement
+});
+
+// Avec select sur les relations
+const pageWithSelect = await repos.posts.query.paginate({
+  pageSize: 10,
+  include: [{ relation: "userId", select: ["docId", "name", "email"] }],
+});
+
+// Accès aux données peuplées
+for (const post of page.data) {
+  console.log(post.title);
+  console.log(post.populated.users?.name); // Type-safe!
+}
+```
+
+## 🔄 Firestore → SQL Sync
+
+Répliquez automatiquement vos collections Firestore vers BigQuery (ou toute base SQL) via Cloud Pub/Sub.
+
+### Architecture
+
+```
+Firestore Triggers → Cloud Pub/Sub → Worker → BigQuery
+```
+
+### Démarrage rapide
+
+```typescript
+import { createFirestoreSync } from "@lpdjs/firestore-repo-service/sync";
+import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
+import { BigQuery } from "@google-cloud/bigquery";
+import { PubSub } from "@google-cloud/pubsub";
+import * as firestoreTriggers from "firebase-functions/v2/firestore";
+import * as pubsubHandler from "firebase-functions/v2/pubsub";
+import { onRequest } from "firebase-functions/v2/https";
+
+const sync = createFirestoreSync(repos, {
+  deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
+  adapter: new BigQueryAdapter({
+    bigquery: new BigQuery({ projectId: "my-project" }),
+    datasetId: "firestore_sync",
+  }),
+  topicPrefix: "firestore-sync",
+  autoMigrate: true,
+  admin: {
+    auth: { type: "basic", username: "admin", password: "secret" },
+    featuresFlag: {
+      healthCheck: true,
+      manualSync: true,
+      viewQueue: true,
+      configCheck: true,
+    },
+  },
+  repos: {
+    users: { tableName: "users", columnMap: { docId: "user_id" } },
+    posts: { columnMap: { docId: "post_id" } },
+    // Collection groups nécessitent triggerPath
+    comments: { triggerPath: "posts/{postId}/comments/{docId}" },
+  },
+});
+
+// Export des Cloud Functions
+export const {
+  users_onCreate, users_onUpdate, users_onDelete, sync_users,
+  posts_onCreate, posts_onUpdate, posts_onDelete, sync_posts,
+  comments_onCreate, comments_onUpdate, comments_onDelete, sync_comments,
+} = sync.functions;
+
+// Admin (optionnel)
+export const syncAdmin = onRequest(sync.adminHandler!);
+```
+
+### Sync Admin
+
+L'endpoint admin fournit :
+
+- **Health Check** : Compare le schéma attendu (Zod) vs les colonnes BigQuery réelles
+- **Force Sync** : Re-synchronise tous les documents d'une collection
+- **View Queues** : Inspecte les éléments en attente
+- **Config Check** : Vérifie APIs GCP, topics, tables — avec commandes `gcloud` pour corriger
+
+### Adaptateur personnalisé
+
+Implémentez l'interface `SqlAdapter` pour d'autres bases de données :
+
+```typescript
+import type { SqlAdapter } from "@lpdjs/firestore-repo-service/sync";
+
+class MyAdapter implements SqlAdapter {
+  // tableExists, getTableColumns, createTable, insertRows,
+  // upsertRows, deleteRows, executeRaw
+}
+```
+
+📚 **Documentation complète** : [frs.lpdjs.fr/guide/sync](https://frs.lpdjs.fr/guide/sync)
+
 ## 🔧 Types exportés
 
 ```typescript
-// Types utiles
 import type {
+  // Core types
   WhereClause,
   QueryOptions,
-  RepositoryKey,
-  RepositoryModelType,
+  RepositoryConfig,
+  RelationConfig,
+
+  // Populate/Include types (avec typage keyof)
+  PopulateOptions,
+  PopulateOptionsTyped,
+  IncludeConfig,
+  IncludeConfigTyped,
+
+  // Pagination
+  PaginationOptions,
+  PaginationResult,
+  PaginationWithIncludeOptions,
+  PaginationWithIncludeOptionsTyped,
 } from "@lpdjs/firestore-repo-service";
+
+// Sync types
+import type {
+  FirestoreSyncConfig,
+  SqlAdapter,
+  SqlColumn,
+  SqlTableDef,
+  RepoSyncConfig,
+  SyncAdminConfig,
+} from "@lpdjs/firestore-repo-service/sync";
 ```
 
 ## 🧪 Tests avec l'émulateur
@@ -565,14 +716,16 @@ import type {
 Pour tester rapidement sans projet Firebase :
 
 ```bash
-# 1. Installer Firebase CLI (si nécessaire)
+# Installer Firebase CLI (si nécessaire)
 npm install -g firebase-tools
 
-# 2. Démarrer l'émulateur (terminal 1)
-bun run emulator
+# Option 1 : Mode automatique (recommandé)
+bun run test:watch
+# → Lance l'émulateur + tests en mode watch automatiquement
 
-# 3. Lancer les tests (terminal 2)
-bun run test:emulator
+# Option 2 : Mode manuel (deux terminaux)
+bun run emulator    # Terminal 1
+bun run test        # Terminal 2
 ```
 
 L'émulateur Firestore démarre sur `localhost:8080` avec une UI sur `http://localhost:4000`.

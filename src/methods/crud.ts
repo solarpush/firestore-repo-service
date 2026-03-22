@@ -1,26 +1,125 @@
 import type { CollectionReference } from "firebase-admin/firestore";
 
 /**
- * Creates CRUD methods (create, set, update, delete)
+ * Creates CRUD methods (create, set, update, delete).
+ *
+ * @template T - The document type
+ * @param actualCollection - The collection reference (null for collection groups)
+ * @param documentRef - Function to create document references
+ * @param documentKey - The field name used as document ID
+ * @param pathKey - Optional field name to store the document path
+ * @param createdKey - Optional field name for creation timestamp
+ * @param updatedKey - Optional field name for update timestamp
+ * @returns Object containing CRUD methods
+ *
+ * @example
+ * ```typescript
+ * // CREATE - Add a new document
+ * // Auto-generates docId if not provided, sets createdAt/updatedAt
+ * const newUser = await repos.users.create({
+ *   name: "John Doe",
+ *   email: "john@example.com",
+ *   age: 28
+ * });
+ * console.log(newUser.docId); // Auto-generated ID
+ *
+ * // Create with custom docId
+ * const customUser = await repos.users.create({
+ *   docId: "custom-id-123",
+ *   name: "Jane Doe",
+ *   email: "jane@example.com"
+ * });
+ *
+ * // SET - Create or replace a document by ID
+ * // For regular collections:
+ * const user = await repos.users.set("user-123", {
+ *   name: "Updated Name",
+ *   email: "new@example.com"
+ * });
+ *
+ * // For subcollections (e.g., posts/{postId}/comments/{commentId}):
+ * const comment = await repos.comments.set("post-123", "comment-456", {
+ *   content: "Great post!",
+ *   likes: 0
+ * });
+ *
+ * // Set with merge option (default: true)
+ * await repos.users.set("user-123", { name: "Only Name" }, { merge: true });
+ *
+ * // UPDATE - Partially update an existing document
+ * const updatedUser = await repos.users.update("user-123", {
+ *   name: "New Name"
+ * });
+ *
+ * // Update subcollection document:
+ * await repos.comments.update("post-123", "comment-456", {
+ *   likes: 10
+ * });
+ *
+ * // DELETE - Remove a document
+ * await repos.users.delete("user-123");
+ *
+ * // Delete subcollection document:
+ * await repos.comments.delete("post-123", "comment-456");
+ * ```
  */
-export function createCrudMethods(
+export function createCrudMethods<T>(
   actualCollection: CollectionReference | null,
-  documentRef: (...args: any[]) => any
+  documentRef: (...args: any[]) => any,
+  documentKey: string,
+  pathKey?: string,
+  createdKey?: string,
+  updatedKey?: string,
 ) {
-  // Create - adds a new document with auto-generated ID
-  const create = async (data: any): Promise<any> => {
+  const now = () => new Date();
+
+  // Create - adds a new document, optionally with a provided document key
+  const create = async (data: any): Promise<T> => {
     if (!actualCollection) {
       throw new Error(
-        "Cannot use create() on collection groups. Use set() with a specific document ID instead."
+        "Cannot use create() on collection groups. Use set() with a specific document ID instead.",
       );
     }
-    const docRef = await actualCollection.add(data);
+
+    let docRef;
+    let docId: string;
+
+    // Auto-set createdKey and updatedKey
+    const enrichedData = { ...data };
+    if (createdKey) {
+      enrichedData[createdKey] = now();
+    }
+    if (updatedKey) {
+      enrichedData[updatedKey] = now();
+    }
+
+    // If documentKey is provided in data, use set() with that ID
+    if (data[documentKey]) {
+      docId = data[documentKey];
+      docRef = actualCollection.doc(docId);
+      // Also set pathKey if defined
+      const dataWithPath = pathKey
+        ? { ...enrichedData, [pathKey]: docRef.path }
+        : enrichedData;
+      await docRef.set(dataWithPath);
+    } else {
+      // Otherwise, use add() to auto-generate ID
+      docRef = await actualCollection.add(enrichedData);
+      docId = docRef.id;
+      // Update the document to include the documentKey and optionally pathKey
+      const updates: Record<string, string> = { [documentKey]: docId };
+      if (pathKey) {
+        updates[pathKey] = docRef.path;
+      }
+      await docRef.update(updates);
+    }
+
     const createdDoc = await docRef.get();
-    return { ...createdDoc.data(), docId: docRef.id };
+    return createdDoc.data() as T;
   };
 
   // Set - creates or replaces a document
-  const set = async (...args: any[]): Promise<any> => {
+  const set = async (...args: any[]): Promise<T> => {
     const lastArg = args[args.length - 1];
     const hasOptions =
       typeof lastArg === "object" && lastArg !== null && "merge" in lastArg;
@@ -29,23 +128,47 @@ export function createCrudMethods(
     const pathArgs = hasOptions ? args.slice(0, -2) : args.slice(0, -1);
     const mergeOption = hasOptions ? lastArg : { merge: true };
 
+    const enrichedData = { ...data };
+
+    // Auto-set updatedKey
+    if (updatedKey) {
+      enrichedData[updatedKey] = now();
+    }
+
     const docRef = documentRef(...pathArgs);
-    await docRef.set(data, mergeOption);
+
+    // Inject documentKey (last segment of the path args) and pathKey — same
+    // behaviour as create() and batch.set() so the fields are always present.
+    const docIdValue = pathArgs[pathArgs.length - 1];
+    if (documentKey && docIdValue != null) {
+      enrichedData[documentKey] = docIdValue;
+    }
+    if (pathKey) {
+      enrichedData[pathKey] = docRef.path;
+    }
+
+    await docRef.set(enrichedData, mergeOption);
 
     const setDocument = await docRef.get();
-    return { ...setDocument.data(), docId: docRef.id };
+    return setDocument.data() as T;
   };
 
   // Update - updates a document and returns the merged object
-  const update = async (...args: any[]): Promise<any> => {
+  const update = async (...args: any[]): Promise<T> => {
     const data = args.pop();
     const pathArgs = args;
 
+    // Auto-set updatedKey
+    const enrichedData = { ...data };
+    if (updatedKey) {
+      enrichedData[updatedKey] = now();
+    }
+
     const docRef = documentRef(...pathArgs);
-    await docRef.update(data);
+    await docRef.update(enrichedData);
 
     const updatedDoc = await docRef.get();
-    return { ...updatedDoc.data(), docId: docRef.id };
+    return updatedDoc.data() as T;
   };
 
   // Delete - removes a document

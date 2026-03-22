@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 
 import type { Firestore } from "firebase-admin/firestore";
+import type { z } from "zod";
 
 // ============================================
 // Re-exports from modules
@@ -10,89 +11,148 @@ import type { Firestore } from "firebase-admin/firestore";
 export type {
   ExtractDocumentRefSignature,
   ExtractUpdateSignature,
+  FieldPath,
+  GetOptions,
   GetResult,
   QueryOptions,
   RelationalKeys,
   RelationConfig,
   RepositoryConfig,
   WhereClause,
-} from "./src/shared/types";
+} from "./shared/types";
 
 // Pagination
 export {
   applyQueryOptions as applyPaginationQueryOptions,
   createPaginationIterator,
   executePaginatedQuery,
-} from "./src/pagination";
-export type { PaginationOptions, PaginationResult } from "./src/pagination";
+} from "./pagination";
+export type { PaginationOptions, PaginationResult } from "./pagination";
+
+// Query pagination with include
+export type {
+  IncludeConfig,
+  PaginationWithIncludeOptions,
+} from "./methods/query";
+
+// Populate options
+export type { PopulateOptions } from "./methods/relations";
 
 // Query builder
-export { buildAndExecuteQuery } from "./src/query-builder";
+export { buildAndExecuteQuery } from "./query-builder";
 
 // Repository types
 export type {
   ConfiguredRepository,
   GenerateGetMethods,
   GenerateQueryMethods,
-} from "./src/repositories/types";
+  IncludeConfigTyped,
+  PaginationWithIncludeOptionsTyped,
+  PopulateOptionsTyped,
+} from "./repositories/types";
 
 // ============================================
 // Imports for internal use
 // ============================================
 
-import { createRepository } from "./src/repositories/factory";
-import type { ConfiguredRepository } from "./src/repositories/types";
-import type { RelationConfig, RepositoryConfig } from "./src/shared/types";
+import { createRepository } from "./repositories/factory";
+import type { ConfiguredRepository } from "./repositories/types";
+import type { RelationConfig, RepositoryConfig } from "./shared/types";
 
 // ============================================
 // Repository Configuration Helper
 // ============================================
 
 /**
- * Helper to create a typed repository configuration with literal type preservation
- * Uses currying pattern to allow type parameter inference
- * @template T - The data model type
- * @returns Builder function that accepts repository configuration with withRelations method
+ * Helper to create a typed repository configuration with literal type preservation.
+ * Uses currying pattern to allow type parameter inference.
+ *
+ * **IMPORTANT:** A Zod schema is required. The model type is automatically
+ * inferred from the schema via `z.infer<TSchema>`.
+ *
+ * @template TSchema - Zod schema that defines the model structure
+ * @param schema - The Zod schema for validation and type inference
+ * @returns Builder function that accepts repository configuration
+ *
  * @example
  * ```typescript
+ * const userSchema = z.object({
+ *   docId: z.string(),
+ *   email: z.string().email(),
+ *   name: z.string(),
+ *   isActive: z.boolean(),
+ * });
+ *
+ * const postSchema = z.object({
+ *   docId: z.string(),
+ *   userId: z.string(),
+ *   title: z.string(),
+ *   content: z.string(),
+ *   status: z.enum(["draft", "published"]),
+ * });
+ *
  * const mapping = {
- *   users: createRepositoryConfig<UserModel>()({
+ *   users: createRepositoryConfig(userSchema)({
  *     path: "users",
+ *     isGroup: false,
  *     foreignKeys: ["docId", "email"] as const,
  *     queryKeys: ["isActive"] as const,
+ *     documentKey: "docId",
  *     refCb: (db, docId: string) => db.collection("users").doc(docId),
  *   }),
- *   posts: createRepositoryConfig<PostModel>()({
+ *   posts: createRepositoryConfig(postSchema)({
  *     path: "posts",
+ *     isGroup: false,
  *     foreignKeys: ["docId", "userId"] as const,
  *     queryKeys: ["status"] as const,
+ *     documentKey: "docId",
  *     refCb: (db, docId: string) => db.collection("posts").doc(docId),
- *   }).withRelations<typeof mapping>()({
- *     userId: { repo: "users", key: "docId", type: "one" as const }
- *   })
+ *   }),
  * };
+ *
+ * const repos = createRepositoryMapping(db, mapping);
  * ```
  */
-export function createRepositoryConfig<T>() {
-  return <
-    const TForeignKeys extends readonly (keyof T)[],
-    const TQueryKeys extends readonly (keyof T)[],
-    const TIsGroup extends boolean,
-    TRefCb = undefined
-  >(config: {
-    path: string;
-    isGroup: TIsGroup;
-    foreignKeys: TForeignKeys;
-    queryKeys: TQueryKeys;
-    refCb: TRefCb;
-  }): RepositoryConfig<T, TForeignKeys, TQueryKeys, TIsGroup, TRefCb, {}> => {
-    return {
-      ...config,
-      type: null as any as T,
-      documentRef: null as any,
-      update: null as any,
-    } as any;
-  };
+export function createRepositoryConfig<TSchema extends z.ZodObject<any>>(
+  schema: TSchema,
+): <
+  const TForeignKeys extends readonly (keyof z.infer<TSchema>)[],
+  const TQueryKeys extends readonly (keyof z.infer<TSchema>)[],
+  const TIsGroup extends boolean,
+  const TDocumentKey extends keyof z.infer<TSchema>,
+  const TPathKey extends keyof z.infer<TSchema> | undefined = undefined,
+  const TCreatedKey extends keyof z.infer<TSchema> | undefined = undefined,
+  const TUpdatedKey extends keyof z.infer<TSchema> | undefined = undefined,
+  TRefCb = undefined,
+>(config: {
+  path: string;
+  isGroup: TIsGroup;
+  foreignKeys: TForeignKeys;
+  queryKeys: TQueryKeys;
+  documentKey: TDocumentKey;
+  pathKey?: TPathKey;
+  createdKey?: TCreatedKey;
+  updatedKey?: TUpdatedKey;
+  refCb: TRefCb;
+}) => RepositoryConfig<
+  z.infer<TSchema>,
+  TForeignKeys,
+  TQueryKeys,
+  TIsGroup,
+  TRefCb,
+  {},
+  TDocumentKey,
+  TPathKey,
+  TCreatedKey,
+  TUpdatedKey
+> & { schema: TSchema } {
+  return (config: any): any => ({
+    ...config,
+    schema,
+    type: null as any,
+    documentRef: null as any,
+    update: null as any,
+  });
 }
 
 /**
@@ -144,6 +204,10 @@ export function buildRepositoryRelations<
       any,
       any,
       any,
+      any,
+      any,
+      any,
+      any,
       any
     >
       ? {
@@ -151,6 +215,10 @@ export function buildRepositoryRelations<
             [R in keyof TMapping]: TMapping[R] extends RepositoryConfig<
               infer TTargetModel,
               infer TForeignKeys,
+              any,
+              any,
+              any,
+              any,
               any,
               any,
               any,
@@ -165,10 +233,10 @@ export function buildRepositoryRelations<
           }[keyof TMapping];
         }
       : never;
-  }
+  },
 >(
   mapping: TMapping,
-  relations: TRelations
+  relations: TRelations,
 ): {
   [K in keyof TMapping]: K extends keyof TRelations
     ? TMapping[K] extends RepositoryConfig<
@@ -177,7 +245,11 @@ export function buildRepositoryRelations<
         infer TQueryKeys,
         infer TIsGroup,
         infer TRefCb,
-        any
+        any,
+        infer TDocumentKey,
+        infer TPathKey,
+        infer TCreatedKey,
+        infer TUpdatedKey
       >
       ? RepositoryConfig<
           T,
@@ -190,7 +262,11 @@ export function buildRepositoryRelations<
               TMapping,
               TRelations[K][RK]
             >;
-          }
+          },
+          TDocumentKey,
+          TPathKey,
+          TCreatedKey,
+          TUpdatedKey
         >
       : TMapping[K]
     : TMapping[K];
@@ -245,7 +321,7 @@ export class RepositoryMapping<T extends Record<string, any>> {
       this.allRepositories[key] = createRepository(
         this.db,
         this.mapping[key],
-        {}
+        {},
       );
     }
 
@@ -254,7 +330,7 @@ export class RepositoryMapping<T extends Record<string, any>> {
       this.allRepositories[key] = createRepository(
         this.db,
         this.mapping[key],
-        this.allRepositories
+        this.allRepositories,
       );
     }
   }
@@ -303,11 +379,14 @@ export class RepositoryMapping<T extends Record<string, any>> {
  */
 export function createRepositoryMapping<T extends Record<string, any>>(
   db: Firestore,
-  mapping: T
-): RepositoryMapping<T> & { [K in keyof T]: ConfiguredRepository<T[K]> } {
+  mapping: T,
+): { [K in keyof T]: ConfiguredRepository<T[K]> } {
   const instance = new RepositoryMapping(db, mapping);
 
-  // Create a Proxy to dynamically generate getters
+  const mappingKeys = Object.keys(mapping);
+
+  // Proxy exposes only the mapping keys as own properties,
+  // hiding internal class fields (db, repositoryCache, etc.)
   return new Proxy(instance, {
     get(target, prop) {
       if (typeof prop === "string" && prop in mapping) {
@@ -315,5 +394,38 @@ export function createRepositoryMapping<T extends Record<string, any>>(
       }
       return (target as any)[prop];
     },
+    ownKeys() {
+      return mappingKeys;
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      if (typeof prop === "string" && prop in mapping) {
+        return { configurable: true, enumerable: true, writable: false };
+      }
+      return undefined;
+    },
   }) as any;
 }
+
+// ============================================
+// Servers (admin ORM & CRUD API)
+// ============================================
+export {
+  createAdminServer,
+  createCrudServer,
+  MiniRouter,
+} from "./servers/index";
+export type {
+  AdminRepoConfig,
+  AdminRepoEntry,
+  AdminServerOptions,
+  ApiResponse,
+  BasicAuthConfig,
+  CrudRepoConfig,
+  CrudServerOptions,
+  FieldRole,
+  ListResponseData,
+  QueryRequestBody,
+  RepoFieldPath,
+  RepoRelationKeys,
+  UserFieldPath,
+} from "./servers/index";

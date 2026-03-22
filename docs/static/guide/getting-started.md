@@ -3,35 +3,51 @@
 ## Installation
 
 ```bash
-npm install @lpdjs/firestore-repo-service firebase
+npm install @lpdjs/firestore-repo-service firebase-admin
 # or
-yarn add @lpdjs/firestore-repo-service firebase
-# or
-bun add @lpdjs/firestore-repo-service firebase
+bun add @lpdjs/firestore-repo-service firebase-admin
 ```
 
 ## Quick Start
 
-### 1. Define your models
+### 1. Define your models with Zod (recommended)
+
+Using Zod gives you automatic schema inference — no need to declare the model interface separately.
 
 ```typescript
-interface UserModel {
-  docId: string;
-  email: string;
-  name: string;
-  age: number;
-  isActive: boolean;
-}
+import z from "zod";
 
-interface PostModel {
-  docId: string;
-  userId: string;
-  title: string;
-  status: "draft" | "published";
-}
+const userSchema = z.object({
+  docId:          z.string(),
+  documentPath:   z.string(),
+  email:          z.string(),
+  name:           z.string().nullable(),
+  age:            z.number(),
+  isActive:       z.boolean().nullable(),
+  createdAt:      z.date(),
+  updatedAt:      z.date(),
+});
+
+const postSchema = z.object({
+  docId:         z.string(),
+  documentPath:  z.string(),
+  userId:        z.string(),
+  title:         z.string(),
+  content:       z.string(),
+  status:        z.enum(["draft", "published"]),
+  createdAt:     z.date(),
+  updatedAt:     z.date(),
+});
 ```
 
-### 2. Create your mapping
+::: tip Without Zod
+Pass the TypeScript interface as generic and omit the schema argument:
+```typescript
+const users = createRepositoryConfig<UserModel>()({ /* config */ });
+```
+:::
+
+### 2. Create your repository mapping
 
 ```typescript
 import {
@@ -39,66 +55,81 @@ import {
   buildRepositoryRelations,
   createRepositoryMapping,
 } from "@lpdjs/firestore-repo-service";
-import { doc } from "firebase/firestore";
-import type { Firestore } from "firebase/firestore";
+import { initializeApp }           from "firebase-admin/app";
+import { getFirestore, Firestore } from "firebase-admin/firestore";
 
-// 1. Define base configuration
+initializeApp();
+const db = getFirestore();
+
+// Step 1 — base config
 const repositoryMapping = {
-  users: createRepositoryConfig<UserModel>()({
-    path: "users",
-    isGroup: false,
+  users: createRepositoryConfig(userSchema)({
+    path:        "users",
+    isGroup:     false,
     foreignKeys: ["docId", "email"] as const,
-    queryKeys: ["name", "isActive"] as const,
-    refCb: (db: Firestore, docId: string) => doc(db, "users", docId),
+    queryKeys:   ["name", "isActive"] as const,
+    documentKey: "docId",
+    pathKey:     "documentPath",
+    createdKey:  "createdAt",
+    updatedKey:  "updatedAt",
+    refCb: (db: Firestore, docId: string) => db.collection("users").doc(docId),
   }),
 
-  posts: createRepositoryConfig<PostModel>()({
-    path: "posts",
-    isGroup: false,
+  posts: createRepositoryConfig(postSchema)({
+    path:        "posts",
+    isGroup:     false,
     foreignKeys: ["docId", "userId"] as const,
-    queryKeys: ["status"] as const,
-    refCb: (db: Firestore, docId: string) => doc(db, "posts", docId),
+    queryKeys:   ["status", "userId"] as const,
+    documentKey: "docId",
+    pathKey:     "documentPath",
+    createdKey:  "createdAt",
+    updatedKey:  "updatedAt",
+    refCb: (db: Firestore, docId: string) => db.collection("posts").doc(docId),
   }),
 };
 
-// 2. Add relations (Optional)
+// Step 2 — relations (optional)
 const mappingWithRelations = buildRepositoryRelations(repositoryMapping, {
-  posts: {
-    userId: { repo: "users", key: "docId", type: "one" as const },
-  },
+  users: { docId:  { repo: "posts",  key: "userId", type: "many" as const } },
+  posts: { userId: { repo: "users",  key: "docId",  type: "one"  as const } },
 });
 
-// 3. Create the service
+// Step 3 — create the service
 export const repos = createRepositoryMapping(db, mappingWithRelations);
 ```
 
 ### 3. Use the repositories
 
 ```typescript
-// Get a single document
-const user = await repos.users.get.byDocId("user123");
-const userByEmail = await repos.users.get.byEmail("john@example.com");
-
-// Query documents
-const activeUsers = await repos.users.query.byIsActive(true);
-
-// Relations (Populate)
-const post = await repos.posts.get.byDocId("post123");
-if (post) {
-  const postWithUser = await repos.posts.populate(post, "userId");
-  console.log(postWithUser.populated.users?.name); // Type-safe!
-}
-
-// Query with options
-const filteredUsers = await repos.users.query.byName("John", {
-  where: [{ field: "age", operator: ">=", value: 18 }],
-  orderBy: [{ field: "createdAt", direction: "desc" }],
-  limit: 10,
+// Create
+const user = await repos.users.create({
+  name: "Alice", email: "alice@example.com", age: 28, isActive: true,
 });
+console.log(user.docId);        // auto-injected
+console.log(user.documentPath); // auto-injected
 
-// Update a document
-const updated = await repos.users.update("user123", {
-  name: "John Updated",
-  age: 31,
+// Read
+const found   = await repos.users.get.byDocId(user.docId);
+const byEmail = await repos.users.get.byEmail("alice@example.com");
+
+// Query
+const active = await repos.users.query.byIsActive(true);
+
+// Update
+await repos.users.update(user.docId, { age: 29 });
+
+// Delete
+await repos.users.delete(user.docId);
+
+// Paginate
+const page = await repos.posts.query.paginate({
+  pageSize: 10,
+  orderBy:  [{ field: "createdAt", direction: "desc" }],
 });
+console.log(page.data, page.hasNextPage);
+
+// Populate a relation
+const post = await repos.posts.get.byDocId("post_1");
+const withAuthor = await repos.posts.populate(post!, "userId");
+console.log(withAuthor.populated.userId); // UserModel | null
 ```

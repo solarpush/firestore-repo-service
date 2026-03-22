@@ -11,6 +11,10 @@
     "outDir": "./dist",
     "rootDir": "./",
 
+    // JSX (Hono)
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
+
     // Output settings
     "removeComments": false,
     "importHelpers": true,
@@ -30,8 +34,11 @@
     "noPropertyAccessFromIndexSignature": false,
 
     // Allow importing .ts files in examples
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+
+    // Allow *.raw.js imports with a sibling .d.ts (e.g. client-script.raw.js.d.ts)
+    "allowArbitraryExtensions": true
   },
-  "include": ["index.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "dist", "example.ts", "**/*.test.ts"]
 }

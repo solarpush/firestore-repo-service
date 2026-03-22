@@ -1,122 +1,144 @@
 # Advanced Usage
 
-## Batch Operations
+## CRUD `set()`
 
-For atomic operations (max 500 operations).
+Creates or replaces a document with a specific ID.
+`documentKey` and `pathKey` are automatically injected (same as `create()`).
 
 ```typescript
-const batch = repos.users.batch.create();
-
-batch.set(repos.users.documentRef("user1"), {
-  name: "User One",
-  email: "user1@example.com",
+const post = await repos.posts.set("my-post-id", {
+  title: "Hello",
+  status: "draft",
+  userId: "user_1",
+  // docId / documentPath are injected automatically
 });
+console.log(post.docId);        // "my-post-id"
+console.log(post.documentPath); // "posts/my-post-id"
 
-batch.update(repos.users.documentRef("user2"), {
-  age: 25,
-});
+// With merge option
+await repos.posts.set("my-post-id", { title: "Updated" }, { merge: true });
+```
 
-batch.delete(repos.users.documentRef("user3"));
+## Batch Operations
+
+Atomic write up to 500 operations.
+
+```typescript
+const batch = repos.posts.batch.create();
+
+batch.set("post-1", { title: "Post 1", userId: "u1", status: "draft" });
+batch.set("post-2", { title: "Post 2", userId: "u1", status: "published" });
+batch.update("post-3", { status: "published" });
+batch.delete("post-old");
+
+await batch.commit();
+```
+
+### Sub-collection batch
+
+Pass parent IDs before the document ID:
+
+```typescript
+const batch = repos.comments.batch.create();
+
+batch.set(postId, "comment-1", { postId, userId, content: "Hello!", likes: 0 });
+batch.set(postId, "comment-2", { postId, userId, content: "World!", likes: 0 });
 
 await batch.commit();
 ```
 
 ## Bulk Operations
 
-For processing large amounts of data (automatically split into batches of 500).
+Auto-split into batches of 500 for large datasets.
 
 ```typescript
-// Bulk Set
+const db = getFirestore();
+
+// Bulk set
 await repos.users.bulk.set([
-  {
-    docRef: repos.users.documentRef("user1"),
-    data: { name: "User 1", email: "user1@example.com" },
-    merge: true,
-  },
-  {
-    docRef: repos.users.documentRef("user2"),
-    data: { name: "User 2", email: "user2@example.com" },
-  },
-  // ... up to thousands of documents
+  { docRef: db.collection("users").doc("u1"), data: { name: "Alice" }, merge: true },
+  { docRef: db.collection("users").doc("u2"), data: { name: "Bob" } },
+  // ... thousands of documents
 ]);
 
-// Bulk Update
+// Bulk update
 await repos.users.bulk.update([
-  { docRef: repos.users.documentRef("user1"), data: { age: 30 } },
-  { docRef: repos.users.documentRef("user2"), data: { age: 25 } },
+  { docRef: db.collection("users").doc("u1"), data: { age: 30 } },
 ]);
 
-// Bulk Delete
+// Bulk delete
 await repos.users.bulk.delete([
-  repos.users.documentRef("user1"),
-  repos.users.documentRef("user2"),
+  db.collection("users").doc("u1"),
+  db.collection("users").doc("u2"),
 ]);
-```
-
-## Real-time Listeners (onSnapshot)
-
-```typescript
-// Listen for real-time changes
-const unsubscribe = repos.users.query.onSnapshot(
-  {
-    where: [{ field: "isActive", operator: "==", value: true }],
-    orderBy: [{ field: "name", direction: "asc" }],
-  },
-  (users) => {
-    console.log("Updated data:", users);
-  },
-  (error) => {
-    console.error("Error:", error);
-  }
-);
-
-// Stop listening
-unsubscribe();
-```
-
-## Cursor Pagination
-
-Cursor-based pagination is more efficient than `offset` for large collections.
-
-```typescript
-// First page
-const firstPage = await repos.users.query.by({
-  orderBy: [{ field: "createdAt", direction: "desc" }],
-  limit: 10,
-});
-
-// Next page using the last document
-const lastDoc = firstPage[firstPage.length - 1];
-const nextPage = await repos.users.query.by({
-  orderBy: [{ field: "createdAt", direction: "desc" }],
-  startAfter: lastDoc, // or use an array of values
-  limit: 10,
-});
 ```
 
 ## Aggregations
 
+Server-side — no documents transferred.
+
 ```typescript
-import { count, sum, average } from "@lpdjs/firestore-repo-service";
-
-// Count documents
-const activeCount = await repos.users.aggregate.count({
-  where: [{ field: "isActive", operator: "==", value: true }],
+const total   = await repos.users.aggregate.count();
+const active  = await repos.users.aggregate.count({ where: [["isActive", "==", true]] });
+const ageSum  = await repos.users.aggregate.sum("age");
+const ageAvg  = await repos.users.aggregate.average("age", {
+  where: [["isActive", "==", true]],
 });
+```
 
-// Custom aggregations (count, sum, average)
-const stats = await repos.users.aggregate.query(
-  {
-    totalUsers: count(),
-    totalAge: sum("age"),
-    averageAge: average("age"),
-  },
-  {
-    where: [{ field: "isActive", operator: "==", value: true }],
-  }
+## Transactions
+
+```typescript
+await repos.users.transaction.run(async (tx) => {
+  const user = await tx.get("user_1");
+  if (!user) throw new Error("not found");
+  await tx.update("user_1", { age: user.age + 1 });
+});
+```
+
+## Real-time listener
+
+```typescript
+const unsub = repos.users.query.onSnapshot(
+  { where: [["isActive", "==", true]], orderBy: [{ field: "name" }] },
+  (users) => console.log("live:", users),
+  (err)   => console.error(err),
 );
 
-console.log(stats.totalUsers); // total count
-console.log(stats.totalAge); // sum of ages
-console.log(stats.averageAge); // average age
+// Later:
+unsub();
+```
+
+## OR queries — advanced patterns
+
+```typescript
+// Simple OR (one clause per entry)
+await repos.posts.query.by({
+  where:   [["isPublic", "==", true]],       // applied to every OR branch
+  orWhere: [
+    ["userId",   "==", "user-A"],
+    ["authorId", "==", "user-A"],
+  ],
+});
+
+// Compound OR: (A AND B) OR (C AND D)
+await repos.posts.query.by({
+  orWhereGroups: [
+    [["status", "==", "published"], ["views", ">", 1000]],
+    [["status", "==", "featured"],  ["pinned", "==", true]],
+  ],
+});
+```
+
+## `in` operator with >30 values
+
+Automatically split into multiple queries:
+
+```typescript
+const ids = Array.from({ length: 90 }, (_, i) => `id-${i}`);
+
+// Generates 3 Firestore queries (30+30+30) merged in memory
+const docs = await repos.users.query.by({
+  where: [["docId", "in", ids]],
+});
 ```

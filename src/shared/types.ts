@@ -30,16 +30,84 @@ export type ExtractUpdateSignature<T, TType> = T extends (
   : never;
 
 /**
- * Type for a where condition with strict value typing based on the field
+ * Check if a type is a plain object (not Date, Array, Function, etc.)
+ * @internal
+ */
+type IsPlainObject<T> = T extends Date
+  ? false
+  : T extends Array<any>
+    ? false
+    : T extends Function
+      ? false
+      : T extends object
+        ? true
+        : false;
+
+/**
+ * Recursively generates dot-notation paths for nested plain objects only
+ * Stops at primitives, Date, Array, Function, etc.
+ * @template T - The object type to traverse
+ * @template Prefix - Current path prefix
+ * @template Depth - Recursion depth limit
+ * @example
+ * type User = { address: { city: string; zip: number }; createdAt: Date }
+ * // NestedPaths<User> = "address" | "address.city" | "address.zip" | "createdAt"
+ */
+type NestedPaths<
+  T,
+  Prefix extends string = "",
+  Depth extends number[] = [],
+> = Depth["length"] extends 5
+  ? Prefix
+  : {
+      [K in keyof T & string]: IsPlainObject<T[K]> extends true
+        ? Prefix extends ""
+          ? K | NestedPaths<T[K], K, [...Depth, 1]>
+          :
+              | `${Prefix}.${K}`
+              | NestedPaths<T[K], `${Prefix}.${K}`, [...Depth, 1]>
+        : Prefix extends ""
+          ? K
+          : `${Prefix}.${K}`;
+    }[keyof T & string];
+
+/**
+ * Gets the type at a dot-notation path
+ * @template T - The object type
+ * @template Path - The dot-notation path string
+ * @example
+ * type User = { address: { city: string } }
+ * // PathValue<User, "address.city"> = string
+ */
+type PathValue<
+  T,
+  Path extends string,
+> = Path extends `${infer Key}.${infer Rest}`
+  ? Key extends keyof T
+    ? PathValue<T[Key], Rest>
+    : never
+  : Path extends keyof T
+    ? T[Path]
+    : never;
+
+/**
+ * All possible field paths including nested paths
  * @template T - Data model type
  */
+export type FieldPath<T> = NestedPaths<T>;
+
+/**
+ * Type for a where condition as a tuple [field, operator, value]
+ * Supports dot-notation for nested fields with proper value typing
+ * @template T - Data model type
+ * @example
+ * // For type User = { name: string; address: { city: string } }
+ * // Valid: ["name", "==", "John"]
+ * // Valid: ["address.city", "==", "Paris"]
+ */
 export type WhereClause<T = any> = {
-  [K in keyof T]: {
-    field: K;
-    operator: WhereFilterOp;
-    value: T[K] | T[K][];
-  };
-}[keyof T];
+  [P in FieldPath<T>]: [P, WhereFilterOp, PathValue<T, P> | PathValue<T, P>[]];
+}[FieldPath<T>];
 
 /**
  * Query options for filtering, sorting and paginating results
@@ -47,14 +115,52 @@ export type WhereClause<T = any> = {
  */
 export interface QueryOptions<T = any> {
   where?: WhereClause<T>[];
-  orWhere?: WhereClause<T>[][];
-  orderBy?: { field: keyof T; direction?: "asc" | "desc" }[];
+  /**
+   * Simple OR: each clause is independently OR'd with the others.
+   * Under the hood, generates one Firestore query per clause and merges results.
+   * Base `where` conditions are applied to every OR branch.
+   *
+   * @example
+   * ```ts
+   * // Posts where status==draft OR status==published
+   * orWhere: [["status", "==", "draft"], ["status", "==", "published"]]
+   * ```
+   */
+  orWhere?: WhereClause<T>[];
+  /**
+   * Advanced OR: each element is a GROUP of AND conditions.
+   * Groups are OR'd together. Base `where` conditions are applied to every group.
+   *
+   * @example
+   * ```ts
+   * // (status==published AND views>100) OR (status==draft AND userId=="abc")
+   * orWhereGroups: [
+   *   [["status", "==", "published"], ["views", ">", 100]],
+   *   [["status", "==", "draft"],     ["userId", "==", "abc"]],
+   * ]
+   * ```
+   */
+  orWhereGroups?: WhereClause<T>[][];
+  orderBy?: { field: FieldPath<T>; direction?: "asc" | "desc" }[];
   limit?: number;
   offset?: number;
   startAt?: DocumentSnapshot | any[];
   startAfter?: DocumentSnapshot | any[];
   endAt?: DocumentSnapshot | any[];
   endBefore?: DocumentSnapshot | any[];
+  /** Fields to select (Firestore select) - reduces network transfer */
+  select?: (keyof T | FieldPath<T>)[];
+}
+
+/**
+ * Options for get.by* methods
+ * @template T - Data model type
+ */
+export interface GetOptions<T = any> {
+  /** Fields to select (Firestore .select) — reduces network transfer */
+  select?: (keyof T | string)[];
+  /** Return the raw DocumentSnapshot alongside data */
+  returnDoc?: boolean;
 }
 
 /**
@@ -76,7 +182,7 @@ export interface RelationConfig<
   TRepoKey extends string = string,
   TForeignKey extends string = string,
   TType extends "one" | "many" = "one" | "many",
-  TTargetModel = any
+  TTargetModel = any,
 > {
   repo: TRepoKey;
   key: TForeignKey;
@@ -103,6 +209,8 @@ export type RelationalKeys<T = any, TMapping = any> = {
           any,
           any,
           any,
+          any,
+          any,
           any
         >
           ? {
@@ -123,6 +231,10 @@ export type RelationalKeys<T = any, TMapping = any> = {
  * @template TIsGroup - Whether this is a collection group query
  * @template TRefCb - Callback function signature for creating document references
  * @template TRelationalKeys - Relational keys mapping to other repositories
+ * @template TDocumentKey - The field name to store the document ID
+ * @template TPathKey - The field name to store the document path (optional)
+ * @template TCreatedKey - The field name to store the creation timestamp (optional)
+ * @template TUpdatedKey - The field name to store the update timestamp (optional)
  */
 export interface RepositoryConfig<
   T,
@@ -130,13 +242,24 @@ export interface RepositoryConfig<
   TQueryKeys extends readonly (keyof T)[],
   TIsGroup extends boolean = boolean,
   TRefCb = any,
-  TRelationalKeys = {}
+  TRelationalKeys = {},
+  TDocumentKey extends keyof T = keyof T,
+  TPathKey extends keyof T | undefined = undefined,
+  TCreatedKey extends keyof T | undefined = undefined,
+  TUpdatedKey extends keyof T | undefined = undefined,
 > {
   path: string;
   isGroup: TIsGroup;
   foreignKeys: TForeignKeys;
   queryKeys: TQueryKeys;
+  documentKey: TDocumentKey;
+  pathKey?: TPathKey;
+  createdKey?: TCreatedKey;
+  updatedKey?: TUpdatedKey;
   type: T;
+  /** Zod schema attached when using createRepositoryConfig(schema)(config). Used by the admin server. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  schema?: import("zod").ZodObject<any>;
   refCb?: TRefCb;
   relationalKeys?: TRelationalKeys;
   documentRef: TRefCb extends undefined

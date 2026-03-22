@@ -13,12 +13,12 @@ function chunkArray<T>(array: T[], size: number): T[][] {
 }
 
 /**
- * Apply basic query options (orderBy, limit, offset, cursors)
+ * Apply basic query options (orderBy, limit, offset, select, cursors)
  */
 function applyBasicQueryOptions<T>(q: Query, options: QueryOptions<T>): Query {
   if (options.orderBy) {
     options.orderBy.forEach((o) => {
-      q = q.orderBy(String(o.field), o.direction || "asc");
+      q = q.orderBy(String(o.field), o.direction ?? "asc");
     });
   }
 
@@ -28,6 +28,10 @@ function applyBasicQueryOptions<T>(q: Query, options: QueryOptions<T>): Query {
 
   if (options.offset) {
     q = q.offset(options.offset);
+  }
+
+  if (options.select && options.select.length > 0) {
+    q = q.select(...options.select.map((f) => String(f)));
   }
 
   // Cursor-based pagination
@@ -62,7 +66,7 @@ function applyBasicQueryOptions<T>(q: Query, options: QueryOptions<T>): Query {
  * Check if a where clause needs splitting (in or array-contains-any with > 30 values)
  */
 function needsSplitting<T>(clause: WhereClause<T>): boolean {
-  const { operator, value } = clause;
+  const [, operator, value] = clause;
   return (
     (operator === "in" || operator === "array-contains-any") &&
     Array.isArray(value) &&
@@ -74,7 +78,7 @@ function needsSplitting<T>(clause: WhereClause<T>): boolean {
  * Split a where clause into multiple clauses (for in/array-contains-any)
  */
 function splitWhereClause<T>(clause: WhereClause<T>): WhereClause<T>[] {
-  const { field, operator, value } = clause;
+  const [field, operator, value] = clause;
 
   if (!needsSplitting(clause)) {
     return [clause];
@@ -82,11 +86,7 @@ function splitWhereClause<T>(clause: WhereClause<T>): WhereClause<T>[] {
 
   // Split array into chunks of 30
   const chunks = chunkArray(value as any[], 30);
-  return chunks.map((chunk) => ({
-    field,
-    operator,
-    value: chunk,
-  }));
+  return chunks.map((chunk) => [field, operator, chunk] as WhereClause<T>);
 }
 
 /**
@@ -94,12 +94,12 @@ function splitWhereClause<T>(clause: WhereClause<T>): WhereClause<T>[] {
  */
 function applyWhereClausesToQuery<T>(
   baseQuery: Query,
-  whereClauses: WhereClause<T>[]
+  whereClauses: WhereClause<T>[],
 ): Query {
   let q = baseQuery;
 
-  for (const clause of whereClauses) {
-    q = q.where(String(clause.field), clause.operator, clause.value);
+  for (const [field, operator, value] of whereClauses) {
+    q = q.where(String(field), operator, value);
   }
 
   return q;
@@ -109,7 +109,7 @@ function applyWhereClausesToQuery<T>(
  * Execute multiple queries in parallel and merge results
  */
 async function executeAndMergeQueries(
-  queries: Query[]
+  queries: Query[],
 ): Promise<QuerySnapshot> {
   const snapshots = await Promise.all(queries.map((q) => q.get()));
 
@@ -144,74 +144,70 @@ async function executeAndMergeQueries(
  */
 export async function buildAndExecuteQuery<T>(
   baseQuery: Query,
-  options: QueryOptions<T>
+  options: QueryOptions<T>,
 ): Promise<QuerySnapshot> {
-  // Case 1: Simple AND query with where
-  if (options.where && !options.orWhere) {
-    // Check if any clause needs splitting
-    const needsSplit = options.where.some(needsSplitting);
+  const hasOrWhere = options.orWhere && options.orWhere.length > 0;
+  const hasOrWhereGroups =
+    options.orWhereGroups && options.orWhereGroups.length > 0;
 
+  // Case 1: Pure AND query
+  if (!hasOrWhere && !hasOrWhereGroups) {
+    if (!options.where || options.where.length === 0) {
+      const q = applyBasicQueryOptions(baseQuery, options);
+      return q.get();
+    }
+    const needsSplit = options.where.some(needsSplitting);
     if (!needsSplit) {
-      // Simple case: no splitting needed
       let q = applyWhereClausesToQuery(baseQuery, options.where);
       q = applyBasicQueryOptions(q, options);
       return q.get();
     }
-
-    // Split clauses that need it
     const splitClauses: WhereClause<T>[][] =
       options.where.map(splitWhereClause);
-
-    // Generate all combinations (Cartesian product)
     const combinations = cartesianProduct(splitClauses);
-
-    // Create queries for each combination
     const queries = combinations.map((combination) => {
       let q = applyWhereClausesToQuery(baseQuery, combination);
       q = applyBasicQueryOptions(q, options);
       return q;
     });
-
     return executeAndMergeQueries(queries);
   }
 
-  // Case 2: OR query with orWhere
-  if (options.orWhere) {
-    const allQueries: Query[] = [];
+  // Case 2: OR query — convert orWhere/orWhereGroups into OR groups,
+  // then prepend base where conditions to every group.
+  const baseClauses: WhereClause<T>[] = options.where ?? [];
 
-    for (const orGroup of options.orWhere) {
-      // Check if any clause in this OR group needs splitting
-      const needsSplit = orGroup.some(needsSplitting);
+  // Normalise: orWhere entries are single-clause groups;
+  // orWhereGroups entries are multi-clause groups.
+  const rawGroups: WhereClause<T>[][] = [
+    ...(options.orWhere?.map((clause) => [clause]) ?? []),
+    ...(options.orWhereGroups ?? []),
+  ];
 
-      if (!needsSplit) {
-        // Simple case for this OR group
-        let q = applyWhereClausesToQuery(baseQuery, orGroup);
+  const allQueries: Query[] = [];
+
+  for (const orGroup of rawGroups) {
+    // Merge base AND conditions into each OR group
+    const fullGroup: WhereClause<T>[] = [...baseClauses, ...orGroup];
+    const needsSplit = fullGroup.some(needsSplitting);
+
+    if (!needsSplit) {
+      let q = applyWhereClausesToQuery(baseQuery, fullGroup);
+      q = applyBasicQueryOptions(q, options);
+      allQueries.push(q);
+    } else {
+      const splitClauses = fullGroup.map(splitWhereClause);
+      const combinations = cartesianProduct(splitClauses);
+      const groupQueries = combinations.map((combination) => {
+        let q = applyWhereClausesToQuery(baseQuery, combination);
         q = applyBasicQueryOptions(q, options);
-        allQueries.push(q);
-      } else {
-        // Split clauses that need it
-        const splitClauses = orGroup.map(splitWhereClause);
-
-        // Generate all combinations for this OR group
-        const combinations = cartesianProduct(splitClauses);
-
-        // Create queries for each combination
-        const groupQueries = combinations.map((combination) => {
-          let q = applyWhereClausesToQuery(baseQuery, combination);
-          q = applyBasicQueryOptions(q, options);
-          return q;
-        });
-
-        allQueries.push(...groupQueries);
-      }
+        return q;
+      });
+      allQueries.push(...groupQueries);
     }
-
-    return executeAndMergeQueries(allQueries);
   }
 
-  // Case 3: No where clauses, just apply basic options
-  const q = applyBasicQueryOptions(baseQuery, options);
-  return q.get();
+  return executeAndMergeQueries(allQueries);
 }
 
 /**

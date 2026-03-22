@@ -12,24 +12,55 @@ npm install -g firebase-tools
 
 ## Lancer les tests
 
-### 1. Démarrer l'émulateur (dans un terminal)
+### Option 1 : Mode automatique (recommandé)
+
+Lance l'émulateur et les tests automatiquement :
+
+```bash
+bun run test:watch
+```
+
+Cette commande :
+
+- 🚀 Démarre l'émulateur Firestore automatiquement
+- ⏳ Attend que l'émulateur soit prêt (port 8080)
+- 🧪 Lance les tests en mode watch
+- 🔄 Relance les tests à chaque modification
+
+### Option 2 : Mode manuel (deux terminaux)
+
+**Terminal 1 - Démarrer l'émulateur :**
 
 ```bash
 bun run emulator
-# ou
-firebase emulators:start --only firestore
+# ou avec les functions
+bun run emulatorf
 ```
 
-L'émulateur démarrera sur :
-
-- Firestore : `localhost:8080`
-- UI : `http://localhost:4000`
-
-### 2. Lancer les tests (dans un autre terminal)
+**Terminal 2 - Lancer les tests :**
 
 ```bash
-bun run test:emulator
+# Tests une fois
+bun run test
+
+# Tests en mode watch
+bun test test/repo.test.ts --watch
 ```
+
+## Endpoints de l'émulateur
+
+- **Firestore** : `localhost:8080`
+- **UI** : `http://localhost:4000`
+- **Functions** (si activé) : `localhost:5001`
+
+## Scripts disponibles
+
+| Commande             | Description                                 |
+| -------------------- | ------------------------------------------- |
+| `bun run test`       | Lance les tests une fois (émulateur requis) |
+| `bun run test:watch` | Lance l'émulateur + tests en mode watch     |
+| `bun run emulator`   | Démarre l'émulateur Firestore seul          |
+| `bun run emulatorf`  | Démarre l'émulateur avec Functions          |
 
 ## Configuration
 
@@ -41,6 +72,9 @@ La configuration de l'émulateur se trouve dans `firebase.json` :
     "firestore": {
       "port": 8080
     },
+    "functions": {
+      "port": 5001
+    },
     "ui": {
       "enabled": true,
       "port": 4000
@@ -51,17 +85,41 @@ La configuration de l'émulateur se trouve dans `firebase.json` :
 
 ## Tests disponibles
 
-Le fichier `emulator-test.ts` teste toutes les fonctionnalités :
+Le fichier `repo.test.ts` teste toutes les fonctionnalités avec 34+ tests :
+
+### CRUD Operations
 
 - ✅ Create (documents avec ID auto-généré)
-- ✅ Get (par ID, par email)
+- ✅ Set (créer/remplacer avec ID spécifique)
 - ✅ Update (mise à jour partielle)
-- ✅ Query (recherche avec filtres)
-- ✅ GetAll (récupérer tous les documents)
-- ✅ OnSnapshot (listeners en temps réel)
-- ✅ Aggregate (count avec filtres)
 - ✅ Delete (suppression de documents)
+
+### Get Operations
+
+- ✅ Get by foreign key (docId, email, etc.)
+- ✅ Get with DocumentSnapshot
+- ✅ Get by list of values
+- ✅ GetAll (récupérer tous les documents)
+
+### Query Operations
+
+- ✅ Query by query keys
+- ✅ Query avec filtres where
+- ✅ Query avec orderBy
+- ✅ Query avec limit
+- ✅ Query avec OR conditions
+
+### Advanced Operations
+
+- ✅ Batch operations (set, update, delete)
+- ✅ Bulk operations (pour grands volumes)
+- ✅ Subcollections support
+- ✅ Relations & Populate
+- ✅ Populate avec select (champs spécifiques)
+- ✅ Aggregations (count, sum, average)
+- ✅ Transactions
+- ✅ Collection Groups
 
 ## Aucun projet Firebase nécessaire
 
-L'émulateur fonctionne sans projet Firebase réel. Il utilise `projectId: "demo-project"` qui est suffisant pour les tests locaux.
+L'émulateur fonctionne sans projet Firebase réel. Il utilise `projectId: "firestore-repo-services"` qui est suffisant pour les tests locaux.
