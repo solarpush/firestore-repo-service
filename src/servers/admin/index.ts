@@ -226,6 +226,18 @@ export interface AdminServerOptions<
    * Additional middleware functions executed after auth, before route handlers.
    */
   middleware?: Middleware[];
+
+  /**
+   * Options forwarded to `onRequest()` from `firebase-functions/v2/https`.
+   * Stored on the returned handler as `.httpsOptions` for easy access.
+   *
+   * @example
+   * ```ts
+   * const handler = createAdminServer({ httpsOptions: { invoker: "public" }, ... });
+   * export const admin = onRequest(handler.httpsOptions!, handler);
+   * ```
+   */
+  httpsOptions?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -383,13 +395,14 @@ export function createAdminServer<
 >(
   options: AdminServerOptions<TRepos>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): (req: any, res: any) => Promise<void> {
+): ((req: any, res: any) => Promise<void>) & { httpsOptions?: Record<string, unknown> } {
   const {
     basePath = "/",
     repos,
     parseBody = true,
     auth,
     middleware: extraMiddleware = [],
+    httpsOptions,
   } = options;
 
   // Normalise basePath: no trailing slash
@@ -551,9 +564,11 @@ export function createAdminServer<
   router.post(`${base}/:repoName/:id/delete`, handlers.handleDelete as any);
 
   // ── Request handler ─────────────────────────────────────────────────────
-  return async (req: HttpRequest, res: HttpResponse): Promise<void> => {
+  const handler = async (req: HttpRequest, res: HttpResponse): Promise<void> => {
     await router.handle(req as any, res as any);
   };
+  if (httpsOptions) (handler as any).httpsOptions = httpsOptions;
+  return handler as ((req: any, res: any) => Promise<void>) & { httpsOptions?: Record<string, unknown> };
 }
 
 // Re-exports for convenience

@@ -244,7 +244,7 @@ export function createCrudServer<
   TRepos extends Record<string, ConfiguredRepository<any>>,
 >(
   options: CrudServerOptions<TRepos>,
-): (req: any, res: any) => Promise<void> {
+): ((req: any, res: any) => Promise<void>) & { spec: () => OpenAPIDocument; httpsOptions?: Record<string, unknown> } {
   const {
     basePath = "/",
     repos,
@@ -252,6 +252,7 @@ export function createCrudServer<
     auth,
     middleware: extraMiddleware = [],
     verbose = false,
+    httpsOptions,
   } = options;
 
   // Normalise basePath: no trailing slash
@@ -484,10 +485,13 @@ export function createCrudServer<
 
   // Attach spec getter so users can call server.spec() programmatically
   (handler as any).spec = getSpec;
+  if (httpsOptions) (handler as any).httpsOptions = httpsOptions;
 
   return handler as ((req: any, res: any) => Promise<void>) & {
     /** Return the generated OpenAPI 3.1 document. */
     spec: () => OpenAPIDocument;
+    /** Options to forward to `onRequest()` from firebase-functions. */
+    httpsOptions?: Record<string, unknown>;
   };
 }
 

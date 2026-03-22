@@ -16,8 +16,8 @@
 import { onRequest } from "firebase-functions/https";
 import { createAdminServer } from "@lpdjs/firestore-repo-service/servers/admin";
 
-export const admin = onRequest(
-  createAdminServer({
+const adminHandler = createAdminServer({
+    httpsOptions: { invoker: "public" },
     basePath: "/admin",
     auth: {
       type:     "basic",
@@ -53,8 +53,9 @@ export const admin = onRequest(
         allowDelete: false,
       },
     },
-  }),
-);
+  });
+
+export const admin = onRequest(adminHandler.httpsOptions!, adminHandler);
 ```
 
 ## Options AdminRepoConfig
@@ -118,6 +119,23 @@ auth: async (req, res, next) => {
   next();
 }
 ```
+
+## Firebase HttpsOptions
+
+Passez n'importe quelle option `HttpsOptions` (invoker, region, memory, etc.) via `httpsOptions`.
+Les options sont attachées au handler retourné pour un usage facile avec `onRequest()` :
+
+```typescript
+const handler = createAdminServer({
+  httpsOptions: { invoker: "public", memory: "512MiB" },
+  // ...
+});
+
+export const admin = onRequest(handler.httpsOptions!, handler);
+```
+
+Options disponibles : `invoker`, `region`, `memory`, `timeoutSeconds`, `minInstances`,
+`maxInstances`, `concurrency`, `cors`, `serviceAccount`, `secrets`, etc.
 
 ## Serveur de pagination API
 

@@ -160,7 +160,7 @@ export const server = onRequest(async (req, res) => {
         status: (i % 2 === 0 ? "published" : "draft") as "draft" | "published",
         title: `Post ${i}`,
         userId: user.docId,
-        views: i * Math.floor(Math.random() * 100), 
+        views: i * Math.floor(Math.random() * 100),
       };
       postBatch.set(postId, postData);
     }
@@ -247,61 +247,62 @@ export const server = onRequest(async (req, res) => {
     res.status(500).json({ error: String(error) });
   }
 });
-export const admin = onRequest(
-  createAdminServer({
-    auth: {
-      type: "basic",
-      realm: "Admin Area",
-      username: "admin",
-      password: "password",
+const adminHandler = createAdminServer({
+  httpsOptions: { invoker: "public" },
+  auth: {
+    type: "basic",
+    realm: "Admin Area",
+    username: "admin",
+    password: "password",
+  },
+  basePath: "/",
+  repos: {
+    posts: {
+      repo: repos.posts,
+      path: "posts",
+      fieldsConfig: {
+        title: ["create", "mutable", "filterable"],
+        content: ["create", "mutable"],
+        status: ["mutable", "filterable"],
+        address: ["create", "mutable", "filterable"],
+        views: ["create", "mutable", "filterable"],
+        userId: ["filterable"],
+      },
+      relationalFields: [
+        { key: "userId", column: "Author" },
+        { key: "docId", column: "Comments" },
+      ],
+      allowDelete: true,
     },
-    basePath: "/",
-    repos: {
-      posts: {
-        repo: repos.posts,
-        path: "posts",
-        fieldsConfig: {
-          title: ["create", "mutable", "filterable"],
-          content: ["create", "mutable"],
-          status: ["mutable", "filterable"],
-          address: ["create", "mutable", "filterable"],
-          views: ["create", "mutable", "filterable"],
-          userId: ["filterable"],
-        },
-        relationalFields: [
-          { key: "userId", column: "Author" },
-          { key: "docId", column: "Comments" },
-        ],
-        allowDelete: true,
+    users: {
+      repo: repos.users,
+      path: "users",
+      allowDelete: false,
+      fieldsConfig: {
+        name: ["create", "mutable", "filterable"],
+        email: ["create", "mutable", "filterable"],
+        age: ["create", "mutable", "filterable"],
+        isActive: ["create", "mutable", "filterable"],
+        docId: ["filterable"],
       },
-      users: {
-        repo: repos.users,
-        path: "users",
-        allowDelete: false,
-        fieldsConfig: {
-          name: ["create", "mutable", "filterable"],
-          email: ["create", "mutable", "filterable"],
-          age: ["create", "mutable", "filterable"],
-          isActive: ["create", "mutable", "filterable"],
-          docId: ["filterable"],
-        },
-        relationalFields: [{ key: "docId", column: "Posts" }],
-      },
-      comments: {
-        repo: repos.comments,
-        path: "comments",
-        allowDelete: true,
-        fieldsConfig: {
-          docId: ["create", "filterable"],
-          likes: ["filterable"],
-          content: ["create", "mutable"],
-        },
-        relationalFields: [],
-      },
+      relationalFields: [{ key: "docId", column: "Posts" }],
     },
-  }),
-);
+    comments: {
+      repo: repos.comments,
+      path: "comments",
+      allowDelete: true,
+      fieldsConfig: {
+        docId: ["create", "filterable"],
+        likes: ["filterable"],
+        content: ["create", "mutable"],
+      },
+      relationalFields: [],
+    },
+  },
+});
+export const admin = onRequest(adminHandler.httpsOptions!, adminHandler);
 const crudServer = createCrudServer({
+  httpsOptions: { invoker: "public" },
   basePath: "/",
   repos: {
     posts: {
@@ -351,49 +352,52 @@ const crudServer = createCrudServer({
     auth: "bearer",
   },
 });
-export const crud = onRequest(crudServer);
+export const crud = onRequest(crudServer.httpsOptions!, crudServer);
 
+// Firestore → BigQuery sync
+import { BigQuery } from "@google-cloud/bigquery";
+import { PubSub } from "@google-cloud/pubsub";
+import { createFirestoreSync } from "@lpdjs/firestore-repo-service/sync";
+import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
+import * as firestoreTriggers from "firebase-functions/v2/firestore";
+import * as pubsubHandler from "firebase-functions/v2/pubsub";
 
+export const sync = createFirestoreSync(repos, {
+  deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
+  adapter: new BigQueryAdapter({
+    bigquery: new BigQuery({ projectId: "firestore-repo-services" }),
+    datasetId: "firestore_sync",
+  }),
+  topicPrefix: "firestore-sync",
+  autoMigrate: true,
+  admin: {
+    onRequest,
+    httpsOptions: { invoker: "public" },
 
-// // Firestore → BigQuery sync
-// import { PubSub } from "@google-cloud/pubsub";
-// import * as firestoreTriggers from "firebase-functions/v2/firestore";
-// import * as pubsubHandler from "firebase-functions/v2/pubsub";
-
-//  const sync = createFirestoreSync(repos, {
-//   deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
-//   adapter: new BigQueryAdapter({
-//     bigquery: new BigQuery({ projectId: "firestore-repo-services" }),
-//     datasetId: "firestore_sync",
-//   }),
-//   topicPrefix: "firestore-sync",
-//   autoMigrate: true,
-//   admin: {
-//     onRequest,
-//     auth: {
-//       type: "basic",
-//       realm: "Admin Area",
-//       username: "admin",
-//       password: "password",
-//     },
-//     basePath: "/",
-//     featuresFlag: {
-//       viewQueue: true,
-//       manualSync: true,
-//       healthCheck: true,
-//       configCheck: true,
-//     },
-//   },
-//   repos: {
-//     users: {
-//       exclude: ["documentPath"],
-//       columnMap: { docId: "user_id" },
-//       tableName: "users",
-//     },
-//     posts: { columnMap: { docId: "post_id" } },
-//     comments: {
-//       columnMap: { docId: "comment_id" },
-//       triggerPath: "posts/{postId}/comments/{docId}",
-//     },
-//   },
-// });
+    auth: {
+      type: "basic",
+      realm: "Admin Area",
+      username: "admin",
+      password: "password",
+    },
+    basePath: "/",
+    featuresFlag: {
+      viewQueue: true,
+      manualSync: true,
+      healthCheck: true,
+      configCheck: true,
+    },
+  },
+  repos: {
+    users: {
+      exclude: ["documentPath"],
+      columnMap: { docId: "user_id" },
+      tableName: "users",
+    },
+    posts: { columnMap: { docId: "post_id" } },
+    comments: {
+      columnMap: { docId: "comment_id" },
+      triggerPath: "posts/{postId}/comments/{docId}",
+    },
+  },
+});

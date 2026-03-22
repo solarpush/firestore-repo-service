@@ -313,6 +313,18 @@ export interface CrudServerOptions<
    * When unset or an object, `/__spec.json` and `/__docs` routes are exposed.
    */
   openapi?: OpenAPISpecOptions | false;
+
+  /**
+   * Options forwarded to `onRequest()` from `firebase-functions/v2/https`.
+   * Stored on the returned handler as `.httpsOptions` for easy access.
+   *
+   * @example
+   * ```ts
+   * const handler = createCrudServer({ httpsOptions: { invoker: "public" }, ... });
+   * export const crud = onRequest(handler.httpsOptions!, handler);
+   * ```
+   */
+  httpsOptions?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------

@@ -626,6 +626,8 @@ const sync = createFirestoreSync(repos, {
   topicPrefix: "firestore-sync",
   autoMigrate: true,
   admin: {
+    onRequest,
+    httpsOptions: { invoker: "public" },
     auth: { type: "basic", username: "admin", password: "secret" },
     featuresFlag: {
       healthCheck: true,
@@ -642,15 +644,13 @@ const sync = createFirestoreSync(repos, {
   },
 });
 
-// Export des Cloud Functions
+// Export des Cloud Functions (syncAdmin auto-wrappé via onRequest + httpsOptions)
 export const {
   users_onCreate, users_onUpdate, users_onDelete, sync_users,
   posts_onCreate, posts_onUpdate, posts_onDelete, sync_posts,
   comments_onCreate, comments_onUpdate, comments_onDelete, sync_comments,
+  syncAdmin,
 } = sync.functions;
-
-// Admin (optionnel)
-export const syncAdmin = onRequest(sync.adminHandler!);
 ```
 
 ### Sync Admin

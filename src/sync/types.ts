@@ -308,7 +308,12 @@ export interface SyncAdminConfig {
    * When provided, the admin handler is automatically wrapped as a Cloud Function.
    * If omitted, the raw `(req, res) => void` handler is exposed instead.
    */
-  onRequest?: (handler: (req: any, res: any) => void | Promise<void>) => any;
+  onRequest?: (...args: any[]) => any;
+  /**
+   * Options forwarded to `onRequest()` as the first argument (e.g. `{ invoker: "public" }`).
+   * Only used when `onRequest` is also provided.
+   */
+  httpsOptions?: Record<string, unknown>;
 }
 
 /** Options for `createFirestoreSync()` — the unified wrapper. */

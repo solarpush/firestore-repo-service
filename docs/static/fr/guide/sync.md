@@ -32,6 +32,8 @@ const sync = createFirestoreSync(repos, {
   topicPrefix: "firestore-sync",
   autoMigrate: true,
   admin: {
+    onRequest,
+    httpsOptions: { invoker: "public" },
     auth: { type: "basic", username: "admin", password: "secret" },
     featuresFlag: {
       healthCheck: true,
@@ -54,10 +56,8 @@ const sync = createFirestoreSync(repos, {
 export const {
   users_onCreate, users_onUpdate, users_onDelete, sync_users,
   posts_onCreate, posts_onUpdate, posts_onDelete, sync_posts,
+  syncAdmin,
 } = sync.functions;
-
-// Export de l'admin
-export const syncAdmin = onRequest(sync.adminHandler!);
 ```
 
 ## Configuration
@@ -186,12 +186,29 @@ Supporte `Accept: application/json` pour un usage programmatique.
 
 ### Déploiement de l'admin
 
-Le handler admin est un `(req, res) => void` brut — wrappez-le avec `onRequest()` :
+Le handler admin est auto-wrappé quand `onRequest` est fourni dans la config.
+Passez `httpsOptions` pour configurer la Cloud Function (invoker, memory, region, etc.) :
+
+```typescript
+admin: {
+  onRequest,
+  httpsOptions: { invoker: "public", memory: "512MiB" },
+  auth: { type: "basic", username: "admin", password: "secret" },
+  featuresFlag: { healthCheck: true, configCheck: true },
+}
+```
+
+Le handler est alors disponible dans `sync.functions.syncAdmin` — déjà wrappé comme Cloud Function.
+
+Si vous omettez `onRequest`, le handler brut est exposé et vous le wrappez manuellement :
 
 ```typescript
 import { onRequest } from "firebase-functions/v2/https";
 
-export const syncAdmin = onRequest(sync.adminHandler!);
+export const syncAdmin = onRequest(
+  { invoker: "public" },
+  sync.adminHandler!,
+);
 ```
 
 ## Functions générées

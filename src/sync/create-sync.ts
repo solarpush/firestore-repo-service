@@ -97,7 +97,9 @@ export function createFirestoreSync<M extends Record<string, any>>(
     // If onRequest is provided, wrap it as a Cloud Function automatically.
     // Otherwise expose the raw handler so the user can wrap it.
     handlers["syncAdmin"] = adminConfig.onRequest
-      ? adminConfig.onRequest(adminHandler)
+      ? adminConfig.httpsOptions
+        ? adminConfig.onRequest(adminConfig.httpsOptions, adminHandler)
+        : adminConfig.onRequest(adminHandler)
       : adminHandler;
   }
 
