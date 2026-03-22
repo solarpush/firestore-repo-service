@@ -1,24 +1,17 @@
 {
   "compilerOptions": {
-    // Build configuration
     "target": "ES2020",
-    "module": "ES2020",
+    "module": "commonjs",
     "lib": ["ES2020"],
     "moduleResolution": "node",
     "declaration": true,
-    "declarationMap": true,
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./",
-
-    // Output settings
     "removeComments": false,
-    "importHelpers": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
-
-    // Type checking
     "strict": true,
     "skipLibCheck": true,
     "noUnusedLocals": false,
@@ -28,23 +21,8 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": false,
-
-    // Allow importing .ts files in examples
-    "resolveJsonModule": true,
-    // Resolve local sub-path exports from source (no build needed)
-    "paths": {
-      "@lpdjs/firestore-repo-service/servers": ["../../src/servers/index.ts"],
-      "@lpdjs/firestore-repo-service/servers/pagination": [
-        "../../src/servers/pagination/index.ts"
-      ],
-      "@lpdjs/firestore-repo-service/servers/admin": [
-        "../../src/servers/admin/index.ts"
-      ],
-      "@lpdjs/firestore-repo-service/servers/crud": [
-        "../../src/servers/crud/index.ts"
-      ]
-    }
+    "resolveJsonModule": true
   },
   "include": ["index.ts"],
-  "exclude": ["node_modules", "dist", "example.ts", "**/*.test.ts"]
+  "exclude": ["node_modules", "dist"]
 }

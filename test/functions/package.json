@@ -6,22 +6,15 @@
     "scripts": {
         "build": "tsc"
     },
-    "peerDependencies": {
-        "firebase-admin": "^13.0.0",
-        "typescript": "^5"
-    },
     "dependencies": {
-        "@google-cloud/bigquery": "^8.1.1",
         "@google-cloud/pubsub": "^5.3.0",
-        "@lpdjs/firestore-repo-service": "file:../.."
-    },
-    "devDependencies": {
-        "@types/bun": "latest",
+        "@lpdjs/firestore-repo-service": "file:../..",
         "firebase-admin": "^13.7.0",
         "firebase-functions": "^7.2.2",
-        "tsup": "^8.5.1",
-        "typescript": "^5.9.3",
         "zod": "^4.3.6"
+    },
+    "devDependencies": {
+        "typescript": "^5.9.3"
     },
     "engines": {
         "node": "22"
