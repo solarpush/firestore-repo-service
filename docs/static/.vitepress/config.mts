@@ -10,6 +10,7 @@ const enSidebar = [
       { text: "Querying", link: "/guide/querying" },
       { text: "Advanced Usage", link: "/guide/advanced" },
       { text: "Admin Server", link: "/guide/admin" },
+      { text: "Firestore → SQL Sync", link: "/guide/sync" },
     ],
   },
 ];
@@ -24,6 +25,7 @@ const frSidebar = [
       { text: "Requêtes", link: "/fr/guide/querying" },
       { text: "Usage avancé", link: "/fr/guide/advanced" },
       { text: "Serveur Admin", link: "/fr/guide/admin" },
+      { text: "Firestore → SQL Sync", link: "/fr/guide/sync" },
     ],
   },
 ];

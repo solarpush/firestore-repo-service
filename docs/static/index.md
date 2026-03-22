@@ -30,4 +30,6 @@ features:
     details: Auto-generated admin UI with Zod-powered forms, filtering, relations navigation, and CRUD operations.
   - title: 🔌 Pagination API
     details: Ready-to-use Firebase HTTPS function for cursor-based pagination with relation population.
+  - title: 🔄 Firestore → SQL Sync
+    details: Replicate Firestore collections to BigQuery (or any SQL) via Pub/Sub with auto-migration, admin UI, and health checks.
 ---

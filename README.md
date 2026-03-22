@@ -22,6 +22,8 @@ Un service de repository type-safe pour Firestore avec génération automatique 
 - 🔄 **Transactions** : Opérations transactionnelles type-safe
 - 🔗 **Relations** : Populate avec select typé (champs projetés)
 - 📄 **Pagination** : Curseurs, include avec relations, select
+- 🔄 **Firestore → SQL Sync** : Réplication vers BigQuery via Pub/Sub avec admin UI
+- 🖥️ **Serveur Admin** : UI admin auto-générée avec formulaires Zod, filtrage, navigation de relations
 
 ## 📦 Installation
 
@@ -594,6 +596,87 @@ for (const post of page.data) {
 }
 ```
 
+## 🔄 Firestore → SQL Sync
+
+Répliquez automatiquement vos collections Firestore vers BigQuery (ou toute base SQL) via Cloud Pub/Sub.
+
+### Architecture
+
+```
+Firestore Triggers → Cloud Pub/Sub → Worker → BigQuery
+```
+
+### Démarrage rapide
+
+```typescript
+import { createFirestoreSync } from "@lpdjs/firestore-repo-service/sync";
+import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
+import { BigQuery } from "@google-cloud/bigquery";
+import { PubSub } from "@google-cloud/pubsub";
+import * as firestoreTriggers from "firebase-functions/v2/firestore";
+import * as pubsubHandler from "firebase-functions/v2/pubsub";
+import { onRequest } from "firebase-functions/v2/https";
+
+const sync = createFirestoreSync(repos, {
+  deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
+  adapter: new BigQueryAdapter({
+    bigquery: new BigQuery({ projectId: "my-project" }),
+    datasetId: "firestore_sync",
+  }),
+  topicPrefix: "firestore-sync",
+  autoMigrate: true,
+  admin: {
+    auth: { type: "basic", username: "admin", password: "secret" },
+    featuresFlag: {
+      healthCheck: true,
+      manualSync: true,
+      viewQueue: true,
+      configCheck: true,
+    },
+  },
+  repos: {
+    users: { tableName: "users", columnMap: { docId: "user_id" } },
+    posts: { columnMap: { docId: "post_id" } },
+    // Collection groups nécessitent triggerPath
+    comments: { triggerPath: "posts/{postId}/comments/{docId}" },
+  },
+});
+
+// Export des Cloud Functions
+export const {
+  users_onCreate, users_onUpdate, users_onDelete, sync_users,
+  posts_onCreate, posts_onUpdate, posts_onDelete, sync_posts,
+  comments_onCreate, comments_onUpdate, comments_onDelete, sync_comments,
+} = sync.functions;
+
+// Admin (optionnel)
+export const syncAdmin = onRequest(sync.adminHandler!);
+```
+
+### Sync Admin
+
+L'endpoint admin fournit :
+
+- **Health Check** : Compare le schéma attendu (Zod) vs les colonnes BigQuery réelles
+- **Force Sync** : Re-synchronise tous les documents d'une collection
+- **View Queues** : Inspecte les éléments en attente
+- **Config Check** : Vérifie APIs GCP, topics, tables — avec commandes `gcloud` pour corriger
+
+### Adaptateur personnalisé
+
+Implémentez l'interface `SqlAdapter` pour d'autres bases de données :
+
+```typescript
+import type { SqlAdapter } from "@lpdjs/firestore-repo-service/sync";
+
+class MyAdapter implements SqlAdapter {
+  // tableExists, getTableColumns, createTable, insertRows,
+  // upsertRows, deleteRows, executeRaw
+}
+```
+
+📚 **Documentation complète** : [frs.lpdjs.fr/guide/sync](https://frs.lpdjs.fr/guide/sync)
+
 ## 🔧 Types exportés
 
 ```typescript
@@ -616,6 +699,16 @@ import type {
   PaginationWithIncludeOptions,
   PaginationWithIncludeOptionsTyped,
 } from "@lpdjs/firestore-repo-service";
+
+// Sync types
+import type {
+  FirestoreSyncConfig,
+  SqlAdapter,
+  SqlColumn,
+  SqlTableDef,
+  RepoSyncConfig,
+  SyncAdminConfig,
+} from "@lpdjs/firestore-repo-service/sync";
 ```
 
 ## 🧪 Tests avec l'émulateur
