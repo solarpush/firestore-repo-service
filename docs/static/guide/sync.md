@@ -54,9 +54,15 @@ const sync = createFirestoreSync(repos, {
 
 // Export triggers + PubSub handlers
 export const {
-  users_onCreate, users_onUpdate, users_onDelete, sync_users,
-  posts_onCreate, posts_onUpdate, posts_onDelete, sync_posts,
-  syncAdmin,
+  users_onCreate,
+  users_onUpdate,
+  users_onDelete,
+  sync_users,
+  posts_onCreate,
+  posts_onUpdate,
+  posts_onDelete,
+  sync_posts,
+  adminsync,
 } = sync.functions;
 ```
 
@@ -66,16 +72,16 @@ export const {
 
 The unified wrapper that creates triggers, workers, and the optional admin server.
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `deps` | `SyncDeps` | required | Firebase Functions + PubSub dependencies |
-| `adapter` | `SqlAdapter` | required | SQL adapter (e.g. `BigQueryAdapter`) |
-| `topicPrefix` | `string` | `"firestore-sync"` | Pub/Sub topic name prefix |
-| `batchSize` | `number` | `100` | Max rows per flush batch |
-| `flushIntervalMs` | `number` | `5000` | Flush interval in ms |
-| `autoMigrate` | `boolean` | `false` | Auto-create/migrate tables on first event |
-| `admin` | `SyncAdminConfig` | — | Optional admin endpoint config |
-| `repos` | `TypedRepoSyncConfigs` | — | Per-repo overrides |
+| Option            | Type                   | Default            | Description                               |
+| ----------------- | ---------------------- | ------------------ | ----------------------------------------- |
+| `deps`            | `SyncDeps`             | required           | Firebase Functions + PubSub dependencies  |
+| `adapter`         | `SqlAdapter`           | required           | SQL adapter (e.g. `BigQueryAdapter`)      |
+| `topicPrefix`     | `string`               | `"firestore-sync"` | Pub/Sub topic name prefix                 |
+| `batchSize`       | `number`               | `100`              | Max rows per flush batch                  |
+| `flushIntervalMs` | `number`               | `5000`             | Flush interval in ms                      |
+| `autoMigrate`     | `boolean`              | `false`            | Auto-create/migrate tables on first event |
+| `admin`           | `adminsyncConfig`      | —                  | Optional admin endpoint config            |
+| `repos`           | `TypedRepoSyncConfigs` | —                  | Per-repo overrides                        |
 
 ### Dependencies (`deps`)
 
@@ -91,12 +97,12 @@ deps: {
 
 ### Per-Repo Config (`repos`)
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `tableName` | `string` | SQL table name (defaults to repo name) |
-| `exclude` | `string[]` | Fields to exclude from SQL |
-| `columnMap` | `Record<string, string>` | Rename fields → SQL columns |
-| `triggerPath` | `string` | **Required for collection groups** — the full document path pattern |
+| Option        | Type                     | Description                                                         |
+| ------------- | ------------------------ | ------------------------------------------------------------------- |
+| `tableName`   | `string`                 | SQL table name (defaults to repo name)                              |
+| `exclude`     | `string[]`               | Fields to exclude from SQL                                          |
+| `columnMap`   | `Record<string, string>` | Rename fields → SQL columns                                         |
+| `triggerPath` | `string`                 | **Required for collection groups** — the full document path pattern |
 
 ### Collection Groups (`triggerPath`)
 
@@ -126,6 +132,7 @@ const adapter = new BigQueryAdapter({
 ```
 
 The adapter handles:
+
 - Table creation via DDL
 - Streaming inserts
 - MERGE-based upserts
@@ -143,11 +150,11 @@ The optional admin endpoint provides a web UI for monitoring and managing the sy
 
 ### Features
 
-| Feature | Flag | Description |
-|---------|------|-------------|
-| **Health Check** | `healthCheck` | Compare expected schema (from Zod) vs actual SQL columns |
-| **Force Sync** | `manualSync` | Re-sync all documents from a Firestore collection |
-| **View Queues** | `viewQueue` | Inspect pending items in the per-repo queue |
+| Feature          | Flag          | Description                                                           |
+| ---------------- | ------------- | --------------------------------------------------------------------- |
+| **Health Check** | `healthCheck` | Compare expected schema (from Zod) vs actual SQL columns              |
+| **Force Sync**   | `manualSync`  | Re-sync all documents from a Firestore collection                     |
+| **View Queues**  | `viewQueue`   | Inspect pending items in the per-repo queue                           |
 | **Config Check** | `configCheck` | Verify GCP APIs, topics, tables, and IAM — with `gcloud` fix commands |
 
 ### Configuration
@@ -197,6 +204,7 @@ The `/config-check` endpoint verifies your GCP setup:
 - **Pub/Sub topics** — does each `{topicPrefix}-{repoName}` topic exist?
 
 For each issue, it shows:
+
 - A `gcloud` command to fix it
 - A direct link to the GCP Console
 
@@ -216,59 +224,88 @@ admin: {
 }
 ```
 
-The handler is then available in `sync.functions.syncAdmin` — already wrapped as a Cloud Function.
+The handler is then available in `sync.functions.adminsync` — already wrapped as a Cloud Function.
 
 If you omit `onRequest`, the raw handler is exposed and you wrap it manually:
 
 ```typescript
 import { onRequest } from "firebase-functions/v2/https";
 
-export const syncAdmin = onRequest(
-  { invoker: "public" },
-  sync.adminHandler!,
-);
+export const adminsync = onRequest({ invoker: "public" }, sync.adminHandler!);
 ```
 
 ## Generated Functions
 
 `createFirestoreSync` generates these Cloud Functions:
 
-| Function | Type | Purpose |
-|----------|------|---------|
-| `{repo}_onCreate` | Firestore trigger | Publish UPSERT on document create |
-| `{repo}_onUpdate` | Firestore trigger | Publish UPSERT on document update |
-| `{repo}_onDelete` | Firestore trigger | Publish DELETE on document delete |
-| `sync_{repo}` | PubSub handler | Process messages and flush to SQL |
-| `syncAdmin` | HTTP handler | Admin UI (if `admin` config provided) |
+| Function          | Type              | Purpose                               |
+| ----------------- | ----------------- | ------------------------------------- |
+| `{repo}_onCreate` | Firestore trigger | Publish UPSERT on document create     |
+| `{repo}_onUpdate` | Firestore trigger | Publish UPSERT on document update     |
+| `{repo}_onDelete` | Firestore trigger | Publish DELETE on document delete     |
+| `sync_{repo}`     | PubSub handler    | Process messages and flush to SQL     |
+| `adminsync`       | HTTP handler      | Admin UI (if `admin` config provided) |
 
 ## Schema Mapping
 
 Zod schemas are automatically mapped to SQL types:
 
-| Zod Type | BigQuery Type |
-|----------|--------------|
-| `z.string()` | `STRING` |
-| `z.number()` | `FLOAT64` |
-| `z.bigint()` | `INT64` |
-| `z.boolean()` | `BOOL` |
-| `z.date()` | `TIMESTAMP` |
-| `z.object()` / `z.array()` | `JSON` |
+| Zod Type                   | BigQuery Type |
+| -------------------------- | ------------- |
+| `z.string()`               | `STRING`      |
+| `z.number()`               | `FLOAT64`     |
+| `z.bigint()`               | `INT64`       |
+| `z.boolean()`              | `BOOL`        |
+| `z.date()`                 | `TIMESTAMP`   |
+| `z.object()` / `z.array()` | `JSON`        |
 
 ## Custom SQL Adapter
 
 Implement the `SqlAdapter` interface for other databases:
 
 ```typescript
-import type { SqlAdapter, SqlDialect, SqlColumn, SqlTableDef } from "@lpdjs/firestore-repo-service/sync";
+import type {
+  SqlAdapter,
+  SqlDialect,
+  SqlColumn,
+  SqlTableDef,
+} from "@lpdjs/firestore-repo-service/sync";
 
 class MyAdapter implements SqlAdapter {
-  get dialect(): SqlDialect { /* ... */ }
-  async tableExists(tableName: string): Promise<boolean> { /* ... */ }
-  async getTableColumns(tableName: string): Promise<string[]> { /* ... */ }
-  async createTable(table: SqlTableDef): Promise<void> { /* ... */ }
-  async insertRows(tableName: string, rows: Record<string, unknown>[]): Promise<void> { /* ... */ }
-  async upsertRows(tableName: string, rows: Record<string, unknown>[], primaryKey: string): Promise<void> { /* ... */ }
-  async deleteRows(tableName: string, primaryKey: string, ids: string[]): Promise<void> { /* ... */ }
-  async executeRaw(sql: string): Promise<void> { /* ... */ }
+  get dialect(): SqlDialect {
+    /* ... */
+  }
+  async tableExists(tableName: string): Promise<boolean> {
+    /* ... */
+  }
+  async getTableColumns(tableName: string): Promise<string[]> {
+    /* ... */
+  }
+  async createTable(table: SqlTableDef): Promise<void> {
+    /* ... */
+  }
+  async insertRows(
+    tableName: string,
+    rows: Record<string, unknown>[],
+  ): Promise<void> {
+    /* ... */
+  }
+  async upsertRows(
+    tableName: string,
+    rows: Record<string, unknown>[],
+    primaryKey: string,
+  ): Promise<void> {
+    /* ... */
+  }
+  async deleteRows(
+    tableName: string,
+    primaryKey: string,
+    ids: string[],
+  ): Promise<void> {
+    /* ... */
+  }
+  async executeRaw(sql: string): Promise<void> {
+    /* ... */
+  }
 }
 ```

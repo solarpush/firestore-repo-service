@@ -7,6 +7,13 @@
  */
 
 // ---------------------------------------------------------------------------
+// Lazy factory utility
+// ---------------------------------------------------------------------------
+
+/** A value that can be provided directly or as a lazy factory function. */
+export type OrFactory<T> = T | (() => T);
+
+// ---------------------------------------------------------------------------
 // SQL column / dialect
 // ---------------------------------------------------------------------------
 
@@ -114,10 +121,7 @@ export interface SqlAdapter {
   /**
    * Insert rows (append-only, no dedup).
    */
-  insertRows(
-    tableName: string,
-    rows: Record<string, unknown>[],
-  ): Promise<void>;
+  insertRows(tableName: string, rows: Record<string, unknown>[]): Promise<void>;
 
   /**
    * Upsert rows (INSERT … ON CONFLICT UPDATE / MERGE).
@@ -164,14 +168,13 @@ export interface RepoSyncConfig<F extends string = string> {
  * Extract field names from a repo value.
  * Works with ConfiguredRepository (_modelType), raw config (schema.shape), or fallback (type).
  */
-export type ExtractRepoFields<R> =
-  R extends { _modelType: infer Model }
-    ? string & keyof Model
-    : R extends { schema: { shape: infer S } }
-      ? string & keyof S
-      : R extends { type: infer T }
-        ? string & keyof T
-        : string;
+export type ExtractRepoFields<R> = R extends { _modelType: infer Model }
+  ? string & keyof Model
+  : R extends { schema: { shape: infer S } }
+    ? string & keyof S
+    : R extends { type: infer T }
+      ? string & keyof T
+      : string;
 
 /** Keys of repos where `_isGroup` is `true`. */
 type GroupRepoKeys<M> = {
@@ -269,7 +272,7 @@ export interface GenerateDDLConfig<M = Record<string, any>> {
 /**
  * HTTP Basic Auth configuration for the sync admin.
  */
-export interface SyncAdminBasicAuth {
+export interface adminsyncBasicAuth {
   type: "basic";
   /** Realm displayed in the browser login dialog */
   realm?: string;
@@ -280,7 +283,7 @@ export interface SyncAdminBasicAuth {
 /**
  * Feature flags controlling which sync admin endpoints are enabled.
  */
-export interface SyncAdminFeaturesFlag {
+export interface adminsyncFeaturesFlag {
   /** Show pending queue state (default: false) */
   viewQueue?: boolean;
   /** Allow force-syncing an entire collection (default: false) */
@@ -296,13 +299,15 @@ export interface SyncAdminFeaturesFlag {
  * When provided in `FirestoreSyncConfig.admin`, an `onRequest` Cloud Function
  * handler is created and added to `sync.functions`.
  */
-export interface SyncAdminConfig {
+export interface adminsyncConfig {
   /** Authentication guard — HTTP Basic Auth or custom middleware function */
-  auth?: SyncAdminBasicAuth | ((req: any, res: any, next: () => void) => void | Promise<void>);
+  auth?:
+    | adminsyncBasicAuth
+    | ((req: any, res: any, next: () => void) => void | Promise<void>);
   /** Base URL path (default: "/sync-admin") */
   basePath?: string;
   /** Feature flags controlling which endpoints are enabled */
-  featuresFlag?: SyncAdminFeaturesFlag;
+  featuresFlag?: adminsyncFeaturesFlag;
   /**
    * `onRequest` from `firebase-functions/https` (or `firebase-functions/v2/https`).
    * When provided, the admin handler is automatically wrapped as a Cloud Function.
@@ -318,10 +323,19 @@ export interface SyncAdminConfig {
 
 /** Options for `createFirestoreSync()` — the unified wrapper. */
 export interface FirestoreSyncConfig<M = Record<string, any>> {
-  /** External dependencies — all Firebase/PubSub modules */
-  deps: SyncDeps;
-  /** SQL adapter to flush data to */
-  adapter: SqlAdapter;
+  /**
+   * External dependencies — all Firebase/PubSub modules.
+   * `pubsub` can be a factory `() => PubSub` for lazy initialization
+   * (avoids creating gRPC channels at module-load time for functions that
+   * don't need PubSub, e.g. the admin or CRUD servers).
+   */
+  deps: Omit<SyncDeps, "pubsub"> & { pubsub: OrFactory<PubSubClientDep> };
+  /**
+   * SQL adapter to flush data to.
+   * Can be a factory `() => adapter` for lazy initialization
+   * (avoids connecting to BigQuery / SQL at module-load time).
+   */
+  adapter: OrFactory<SqlAdapter>;
   /** PubSub topic name prefix (topics will be `{prefix}-{repoName}`) */
   topicPrefix?: string;
   /** Max rows per flush batch (default: 100) */
@@ -331,11 +345,11 @@ export interface FirestoreSyncConfig<M = Record<string, any>> {
   /** Auto-create/migrate tables on first event (default: false) */
   autoMigrate?: boolean;
   /**
-   * Optional sync admin endpoint. When provided, a `syncAdmin` handler is
+   * Optional sync admin endpoint. When provided, a `adminsync` handler is
    * added to `sync.functions` exposing health-check, force-sync, and queue
    * inspection endpoints behind authentication.
    */
-  admin?: SyncAdminConfig;
+  admin?: adminsyncConfig;
   /** Per-repo overrides (shared between triggers and worker) */
   repos?: TypedRepoSyncConfigs<M>;
 }

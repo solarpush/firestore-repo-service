@@ -53,6 +53,7 @@ process.env.GCLOUD_PROJECT = "firestore-repo-services";
     projectId: "firestore-repo-services",
 });
 const db = (0, firestore_1.getFirestore)();
+db.settings({ preferRest: true });
 // ============================================
 // Models (interfaces pour repos sans schema Zod)
 // ============================================

@@ -262,7 +262,7 @@ const updated = await repos.users.update("user123", {
 const updatedComment = await repos.comments.update(
   "post123", // postId
   "comment456", // commentId
-  { text: "Updated text" }
+  { text: "Updated text" },
 );
 ```
 
@@ -359,7 +359,7 @@ const unsubscribe = repos.users.query.onSnapshot(
   },
   (error) => {
     console.error("Erreur:", error);
-  }
+  },
 );
 
 // Arrêter l'écoute
@@ -417,7 +417,7 @@ await repos.users.set("user123", {
 await repos.users.set(
   "user123",
   { age: 31 }, // Seul 'age' sera modifié
-  { merge: true }
+  { merge: true },
 );
 
 // Update - Mise à jour partielle
@@ -510,7 +510,7 @@ const repositoryMapping = {
       db: Firestore,
       residenceId: string,
       eventId: string,
-      ratingId: string
+      ratingId: string,
     ) =>
       doc(
         db,
@@ -519,7 +519,7 @@ const repositoryMapping = {
         "events",
         eventId,
         "ratings",
-        ratingId
+        ratingId,
       ),
   }),
 };
@@ -529,7 +529,7 @@ const rating = await repos.eventRatings.update(
   "residence123",
   "event456",
   "rating789",
-  { score: 5 }
+  { score: 5 },
 );
 ```
 
@@ -566,7 +566,7 @@ const userWithPosts = await repos.users.populate(
   {
     relation: "docId",
     select: ["docId", "title", "status"], // Type-safe: keyof PostModel
-  }
+  },
 );
 
 // Populate plusieurs relations
@@ -644,12 +644,21 @@ const sync = createFirestoreSync(repos, {
   },
 });
 
-// Export des Cloud Functions (syncAdmin auto-wrappé via onRequest + httpsOptions)
+// Export des Cloud Functions (adminsync auto-wrappé via onRequest + httpsOptions)
 export const {
-  users_onCreate, users_onUpdate, users_onDelete, sync_users,
-  posts_onCreate, posts_onUpdate, posts_onDelete, sync_posts,
-  comments_onCreate, comments_onUpdate, comments_onDelete, sync_comments,
-  syncAdmin,
+  users_onCreate,
+  users_onUpdate,
+  users_onDelete,
+  sync_users,
+  posts_onCreate,
+  posts_onUpdate,
+  posts_onDelete,
+  sync_posts,
+  comments_onCreate,
+  comments_onUpdate,
+  comments_onDelete,
+  sync_comments,
+  adminsync,
 } = sync.functions;
 ```
 
@@ -707,7 +716,7 @@ import type {
   SqlColumn,
   SqlTableDef,
   RepoSyncConfig,
-  SyncAdminConfig,
+  adminsyncConfig,
 } from "@lpdjs/firestore-repo-service/sync";
 ```
 

@@ -1,25 +1,632 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr-FR" dir="ltr">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Firestore → SQL Sync | Firestore Repo Service</title>
-    <meta name="description" content="Type-safe Firestore repository service with auto-generated methods">
-    <meta name="generator" content="VitePress v1.6.4">
-    <link rel="preload stylesheet" href="/assets/style.CwNnKCVM.css" as="style">
-    <link rel="preload stylesheet" href="/vp-icons.css" as="style">
-    
+    <meta
+      name="description"
+      content="Type-safe Firestore repository service with auto-generated methods"
+    />
+    <meta name="generator" content="VitePress v1.6.4" />
+    <link
+      rel="preload stylesheet"
+      href="/assets/style.CwNnKCVM.css"
+      as="style"
+    />
+    <link rel="preload stylesheet" href="/vp-icons.css" as="style" />
+
     <script type="module" src="/assets/app.DVWzuQZG.js"></script>
-    <link rel="preload" href="/assets/inter-roman-latin.Di8DUHzh.woff2" as="font" type="font/woff2" crossorigin="">
-    <link rel="modulepreload" href="/assets/chunks/theme.9bsLPiuH.js">
-    <link rel="modulepreload" href="/assets/chunks/framework.BQlYxExx.js">
-    <link rel="modulepreload" href="/assets/fr_guide_sync.md.DDw37p2_.lean.js">
-    <script id="check-dark-mode">(()=>{const e=localStorage.getItem("vitepress-theme-appearance")||"auto",a=window.matchMedia("(prefers-color-scheme: dark)").matches;(!e||e==="auto"?a:e==="dark")&&document.documentElement.classList.add("dark")})();</script>
-    <script id="check-mac-os">document.documentElement.classList.toggle("mac",/Mac|iPhone|iPod|iPad/i.test(navigator.platform));</script>
+    <link
+      rel="preload"
+      href="/assets/inter-roman-latin.Di8DUHzh.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin=""
+    />
+    <link rel="modulepreload" href="/assets/chunks/theme.9bsLPiuH.js" />
+    <link rel="modulepreload" href="/assets/chunks/framework.BQlYxExx.js" />
+    <link
+      rel="modulepreload"
+      href="/assets/fr_guide_sync.md.DDw37p2_.lean.js"
+    />
+    <script id="check-dark-mode">
+      (() => {
+        const e = localStorage.getItem("vitepress-theme-appearance") || "auto",
+          a = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        (!e || e === "auto" ? a : e === "dark") &&
+          document.documentElement.classList.add("dark");
+      })();
+    </script>
+    <script id="check-mac-os">
+      document.documentElement.classList.toggle(
+        "mac",
+        /Mac|iPhone|iPod|iPad/i.test(navigator.platform),
+      );
+    </script>
   </head>
   <body>
-    <div id="app"><div class="Layout" data-v-d8b57b2d><!--[--><!--]--><!--[--><span tabindex="-1" data-v-fcbfc0e0></span><a href="#VPContent" class="VPSkipLink visually-hidden" data-v-fcbfc0e0>Skip to content</a><!--]--><!----><header class="VPNav" data-v-d8b57b2d data-v-7ad780c2><div class="VPNavBar" data-v-7ad780c2 data-v-9fd4d1dd><div class="wrapper" data-v-9fd4d1dd><div class="container" data-v-9fd4d1dd><div class="title" data-v-9fd4d1dd><div class="VPNavBarTitle has-sidebar" data-v-9fd4d1dd data-v-9f43907a><a class="title" href="/fr/" data-v-9f43907a><!--[--><!--]--><!--[--><img class="VPImage logo" src="https://frs.lpdjs.fr/lpdjs/Logo.png" alt data-v-ab19afbb><!--]--><span data-v-9f43907a>Firestore Repo Service</span><!--[--><!--]--></a></div></div><div class="content" data-v-9fd4d1dd><div class="content-body" data-v-9fd4d1dd><!--[--><!--]--><div class="VPNavBarSearch search" data-v-9fd4d1dd><!----></div><nav aria-labelledby="main-nav-aria-label" class="VPNavBarMenu menu" data-v-9fd4d1dd data-v-afb2845e><span id="main-nav-aria-label" class="visually-hidden" data-v-afb2845e> Main Navigation </span><!--[--><!--[--><a class="VPLink link VPNavBarMenuLink" href="/fr/" tabindex="0" data-v-afb2845e data-v-815115f5><!--[--><span data-v-815115f5>Accueil</span><!--]--></a><!--]--><!--[--><a class="VPLink link VPNavBarMenuLink" href="/fr/guide/getting-started.html" tabindex="0" data-v-afb2845e data-v-815115f5><!--[--><span data-v-815115f5>Guide</span><!--]--></a><!--]--><!--]--></nav><div class="VPFlyout VPNavBarTranslations translations" data-v-9fd4d1dd data-v-acee064b data-v-bfe7971f><button type="button" class="button" aria-haspopup="true" aria-expanded="false" aria-label="Change language" data-v-bfe7971f><span class="text" data-v-bfe7971f><span class="vpi-languages option-icon" data-v-bfe7971f></span><!----><span class="vpi-chevron-down text-icon" data-v-bfe7971f></span></span></button><div class="menu" data-v-bfe7971f><div class="VPMenu" data-v-bfe7971f data-v-20ed86d6><!----><!--[--><!--[--><div class="items" data-v-acee064b><p class="title" data-v-acee064b>Français</p><!--[--><div class="VPMenuLink" data-v-acee064b data-v-7eeeb2dc><a class="VPLink link" href="/guide/sync.html" data-v-7eeeb2dc><!--[--><span data-v-7eeeb2dc>English</span><!--]--></a></div><!--]--></div><!--]--><!--]--></div></div></div><div class="VPNavBarAppearance appearance" data-v-9fd4d1dd data-v-3f90c1a5><button class="VPSwitch VPSwitchAppearance" type="button" role="switch" title aria-checked="false" data-v-3f90c1a5 data-v-be9742d9 data-v-b4ccac88><span class="check" data-v-b4ccac88><span class="icon" data-v-b4ccac88><!--[--><span class="vpi-sun sun" data-v-be9742d9></span><span class="vpi-moon moon" data-v-be9742d9></span><!--]--></span></span></button></div><div class="VPSocialLinks VPNavBarSocialLinks social-links" data-v-9fd4d1dd data-v-ef6192dc data-v-e71e869c><!--[--><a class="VPSocialLink no-icon" href="https://github.com/solarpush/firestore-repo-service" aria-label="github" target="_blank" rel="noopener" data-v-e71e869c data-v-60a9a2d3><span class="vpi-social-github"></span></a><!--]--></div><div class="VPFlyout VPNavBarExtra extra" data-v-9fd4d1dd data-v-f953d92f data-v-bfe7971f><button type="button" class="button" aria-haspopup="true" aria-expanded="false" aria-label="extra navigation" data-v-bfe7971f><span class="vpi-more-horizontal icon" data-v-bfe7971f></span></button><div class="menu" data-v-bfe7971f><div class="VPMenu" data-v-bfe7971f data-v-20ed86d6><!----><!--[--><!--[--><div class="group translations" data-v-f953d92f><p class="trans-title" data-v-f953d92f>Français</p><!--[--><div class="VPMenuLink" data-v-f953d92f data-v-7eeeb2dc><a class="VPLink link" href="/guide/sync.html" data-v-7eeeb2dc><!--[--><span data-v-7eeeb2dc>English</span><!--]--></a></div><!--]--></div><div class="group" data-v-f953d92f><div class="item appearance" data-v-f953d92f><p class="label" data-v-f953d92f>Appearance</p><div class="appearance-action" data-v-f953d92f><button class="VPSwitch VPSwitchAppearance" type="button" role="switch" title aria-checked="false" data-v-f953d92f data-v-be9742d9 data-v-b4ccac88><span class="check" data-v-b4ccac88><span class="icon" data-v-b4ccac88><!--[--><span class="vpi-sun sun" data-v-be9742d9></span><span class="vpi-moon moon" data-v-be9742d9></span><!--]--></span></span></button></div></div></div><div class="group" data-v-f953d92f><div class="item social-links" data-v-f953d92f><div class="VPSocialLinks social-links-list" data-v-f953d92f data-v-e71e869c><!--[--><a class="VPSocialLink no-icon" href="https://github.com/solarpush/firestore-repo-service" aria-label="github" target="_blank" rel="noopener" data-v-e71e869c data-v-60a9a2d3><span class="vpi-social-github"></span></a><!--]--></div></div></div><!--]--><!--]--></div></div></div><!--[--><!--]--><button type="button" class="VPNavBarHamburger hamburger" aria-label="mobile navigation" aria-expanded="false" aria-controls="VPNavScreen" data-v-9fd4d1dd data-v-6bee1efd><span class="container" data-v-6bee1efd><span class="top" data-v-6bee1efd></span><span class="middle" data-v-6bee1efd></span><span class="bottom" data-v-6bee1efd></span></span></button></div></div></div></div><div class="divider" data-v-9fd4d1dd><div class="divider-line" data-v-9fd4d1dd></div></div></div><!----></header><div class="VPLocalNav has-sidebar empty" data-v-d8b57b2d data-v-2488c25a><div class="container" data-v-2488c25a><button class="menu" aria-expanded="false" aria-controls="VPSidebarNav" data-v-2488c25a><span class="vpi-align-left menu-icon" data-v-2488c25a></span><span class="menu-text" data-v-2488c25a>Menu</span></button><div class="VPLocalNavOutlineDropdown" style="--vp-vh:0px;" data-v-2488c25a data-v-6b867909><button data-v-6b867909>Return to top</button><!----></div></div></div><aside class="VPSidebar" data-v-d8b57b2d data-v-42c4c606><div class="curtain" data-v-42c4c606></div><nav class="nav" id="VPSidebarNav" aria-labelledby="sidebar-aria-label" tabindex="-1" data-v-42c4c606><span class="visually-hidden" id="sidebar-aria-label" data-v-42c4c606> Sidebar Navigation </span><!--[--><!--]--><!--[--><div class="no-transition group" data-v-51288d80><section class="VPSidebarItem level-0 has-active" data-v-51288d80 data-v-0009425e><div class="item" role="button" tabindex="0" data-v-0009425e><div class="indicator" data-v-0009425e></div><h2 class="text" data-v-0009425e>Guide</h2><!----></div><div class="items" data-v-0009425e><!--[--><div class="VPSidebarItem level-1 is-link" data-v-0009425e data-v-0009425e><div class="item" data-v-0009425e><div class="indicator" data-v-0009425e></div><a class="VPLink link link" href="/fr/guide/getting-started.html" data-v-0009425e><!--[--><p class="text" data-v-0009425e>Démarrage rapide</p><!--]--></a><!----></div><!----></div><div class="VPSidebarItem level-1 is-link" data-v-0009425e data-v-0009425e><div class="item" data-v-0009425e><div class="indicator" data-v-0009425e></div><a class="VPLink link link" href="/fr/guide/configuration.html" data-v-0009425e><!--[--><p class="text" data-v-0009425e>Configuration</p><!--]--></a><!----></div><!----></div><div class="VPSidebarItem level-1 is-link" data-v-0009425e data-v-0009425e><div class="item" data-v-0009425e><div class="indicator" data-v-0009425e></div><a class="VPLink link link" href="/fr/guide/relations.html" data-v-0009425e><!--[--><p class="text" data-v-0009425e>Relations & Populate</p><!--]--></a><!----></div><!----></div><div class="VPSidebarItem level-1 is-link" data-v-0009425e data-v-0009425e><div class="item" data-v-0009425e><div class="indicator" data-v-0009425e></div><a class="VPLink link link" href="/fr/guide/querying.html" data-v-0009425e><!--[--><p class="text" data-v-0009425e>Requêtes</p><!--]--></a><!----></div><!----></div><div class="VPSidebarItem level-1 is-link" data-v-0009425e data-v-0009425e><div class="item" data-v-0009425e><div class="indicator" data-v-0009425e></div><a class="VPLink link link" href="/fr/guide/advanced.html" data-v-0009425e><!--[--><p class="text" data-v-0009425e>Usage avancé</p><!--]--></a><!----></div><!----></div><div class="VPSidebarItem level-1 is-link" data-v-0009425e data-v-0009425e><div class="item" data-v-0009425e><div class="indicator" data-v-0009425e></div><a class="VPLink link link" href="/fr/guide/admin.html" data-v-0009425e><!--[--><p class="text" data-v-0009425e>Serveur Admin</p><!--]--></a><!----></div><!----></div><div class="VPSidebarItem level-1 is-link" data-v-0009425e data-v-0009425e><div class="item" data-v-0009425e><div class="indicator" data-v-0009425e></div><a class="VPLink link link" href="/fr/guide/sync.html" data-v-0009425e><!--[--><p class="text" data-v-0009425e>Firestore → SQL Sync</p><!--]--></a><!----></div><!----></div><!--]--></div></section></div><!--]--><!--[--><!--]--></nav></aside><div class="VPContent has-sidebar" id="VPContent" data-v-d8b57b2d data-v-9a6c75ad><div class="VPDoc has-sidebar has-aside" data-v-9a6c75ad data-v-e6f2a212><!--[--><!--]--><div class="container" data-v-e6f2a212><div class="aside" data-v-e6f2a212><div class="aside-curtain" data-v-e6f2a212></div><div class="aside-container" data-v-e6f2a212><div class="aside-content" data-v-e6f2a212><div class="VPDocAside" data-v-e6f2a212 data-v-cb998dce><!--[--><!--]--><!--[--><!--]--><nav aria-labelledby="doc-outline-aria-label" class="VPDocAsideOutline" data-v-cb998dce data-v-f610f197><div class="content" data-v-f610f197><div class="outline-marker" data-v-f610f197></div><div aria-level="2" class="outline-title" id="doc-outline-aria-label" role="heading" data-v-f610f197>On this page</div><ul class="VPDocOutlineItem root" data-v-f610f197 data-v-53c99d69><!--[--><!--]--></ul></div></nav><!--[--><!--]--><div class="spacer" data-v-cb998dce></div><!--[--><!--]--><!----><!--[--><!--]--><!--[--><!--]--></div></div></div></div><div class="content" data-v-e6f2a212><div class="content-container" data-v-e6f2a212><!--[--><!--]--><main class="main" data-v-e6f2a212><div style="position:relative;" class="vp-doc _fr_guide_sync" data-v-e6f2a212><div><h1 id="firestore-→-sql-sync" tabindex="-1">Firestore → SQL Sync <a class="header-anchor" href="#firestore-→-sql-sync" aria-label="Permalink to &quot;Firestore → SQL Sync&quot;">​</a></h1><p>Répliquez automatiquement vos collections Firestore vers une base SQL (BigQuery, etc.) via Cloud Pub/Sub.</p><h2 id="architecture" tabindex="-1">Architecture <a class="header-anchor" href="#architecture" aria-label="Permalink to &quot;Architecture&quot;">​</a></h2><div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0"><code><span class="line"><span>Firestore Triggers → Cloud Pub/Sub → Worker → Base SQL</span></span>
-<span class="line"><span>      (onCreate/onUpdate/onDelete)           (BigQuery, etc.)</span></span></code></pre></div><p>Chaque modification de document dans Firestore publie un message sur un topic Pub/Sub dédié au repo. Un worker s&#39;abonne à ces topics, regroupe les changements en batch, et les flush vers SQL.</p><h2 id="demarrage-rapide" tabindex="-1">Démarrage rapide <a class="header-anchor" href="#demarrage-rapide" aria-label="Permalink to &quot;Démarrage rapide&quot;">​</a></h2><div class="language-typescript vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">typescript</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0"><code><span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> { createFirestoreSync } </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">from</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;"> &quot;@lpdjs/firestore-repo-service/sync&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">;</span></span>
+    <div id="app">
+      <div class="Layout" data-v-d8b57b2d>
+        <!--[--><!--]--><!--[--><span tabindex="-1" data-v-fcbfc0e0></span
+        ><a href="#VPContent" class="VPSkipLink visually-hidden" data-v-fcbfc0e0
+          >Skip to content</a
+        ><!--]--><!---->
+        <header class="VPNav" data-v-d8b57b2d data-v-7ad780c2>
+          <div class="VPNavBar" data-v-7ad780c2 data-v-9fd4d1dd>
+            <div class="wrapper" data-v-9fd4d1dd>
+              <div class="container" data-v-9fd4d1dd>
+                <div class="title" data-v-9fd4d1dd>
+                  <div
+                    class="VPNavBarTitle has-sidebar"
+                    data-v-9fd4d1dd
+                    data-v-9f43907a
+                  >
+                    <a class="title" href="/fr/" data-v-9f43907a
+                      ><!--[--><!--]--><!--[--><img
+                        class="VPImage logo"
+                        src="https://frs.lpdjs.fr/lpdjs/Logo.png"
+                        alt
+                        data-v-ab19afbb
+                      /><!--]--><span data-v-9f43907a
+                        >Firestore Repo Service</span
+                      ><!--[--><!--]--></a
+                    >
+                  </div>
+                </div>
+                <div class="content" data-v-9fd4d1dd>
+                  <div class="content-body" data-v-9fd4d1dd>
+                    <!--[--><!--]-->
+                    <div class="VPNavBarSearch search" data-v-9fd4d1dd>
+                      <!---->
+                    </div>
+                    <nav
+                      aria-labelledby="main-nav-aria-label"
+                      class="VPNavBarMenu menu"
+                      data-v-9fd4d1dd
+                      data-v-afb2845e
+                    >
+                      <span
+                        id="main-nav-aria-label"
+                        class="visually-hidden"
+                        data-v-afb2845e
+                      >
+                        Main Navigation </span
+                      ><!--[--><!--[--><a
+                        class="VPLink link VPNavBarMenuLink"
+                        href="/fr/"
+                        tabindex="0"
+                        data-v-afb2845e
+                        data-v-815115f5
+                        ><!--[--><span data-v-815115f5>Accueil</span
+                        ><!--]--></a
+                      ><!--]--><!--[--><a
+                        class="VPLink link VPNavBarMenuLink"
+                        href="/fr/guide/getting-started.html"
+                        tabindex="0"
+                        data-v-afb2845e
+                        data-v-815115f5
+                        ><!--[--><span data-v-815115f5>Guide</span
+                        ><!--]--></a
+                      ><!--]--><!--]-->
+                    </nav>
+                    <div
+                      class="VPFlyout VPNavBarTranslations translations"
+                      data-v-9fd4d1dd
+                      data-v-acee064b
+                      data-v-bfe7971f
+                    >
+                      <button
+                        type="button"
+                        class="button"
+                        aria-haspopup="true"
+                        aria-expanded="false"
+                        aria-label="Change language"
+                        data-v-bfe7971f
+                      >
+                        <span class="text" data-v-bfe7971f
+                          ><span
+                            class="vpi-languages option-icon"
+                            data-v-bfe7971f
+                          ></span
+                          ><!----><span
+                            class="vpi-chevron-down text-icon"
+                            data-v-bfe7971f
+                          ></span
+                        ></span>
+                      </button>
+                      <div class="menu" data-v-bfe7971f>
+                        <div class="VPMenu" data-v-bfe7971f data-v-20ed86d6>
+                          <!----><!--[--><!--[-->
+                          <div class="items" data-v-acee064b>
+                            <p class="title" data-v-acee064b>Français</p>
+                            <!--[-->
+                            <div
+                              class="VPMenuLink"
+                              data-v-acee064b
+                              data-v-7eeeb2dc
+                            >
+                              <a
+                                class="VPLink link"
+                                href="/guide/sync.html"
+                                data-v-7eeeb2dc
+                                ><!--[--><span data-v-7eeeb2dc>English</span
+                                ><!--]--></a
+                              >
+                            </div>
+                            <!--]-->
+                          </div>
+                          <!--]--><!--]-->
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      class="VPNavBarAppearance appearance"
+                      data-v-9fd4d1dd
+                      data-v-3f90c1a5
+                    >
+                      <button
+                        class="VPSwitch VPSwitchAppearance"
+                        type="button"
+                        role="switch"
+                        title
+                        aria-checked="false"
+                        data-v-3f90c1a5
+                        data-v-be9742d9
+                        data-v-b4ccac88
+                      >
+                        <span class="check" data-v-b4ccac88
+                          ><span class="icon" data-v-b4ccac88
+                            ><!--[--><span
+                              class="vpi-sun sun"
+                              data-v-be9742d9
+                            ></span
+                            ><span class="vpi-moon moon" data-v-be9742d9></span
+                            ><!--]--></span
+                          ></span
+                        >
+                      </button>
+                    </div>
+                    <div
+                      class="VPSocialLinks VPNavBarSocialLinks social-links"
+                      data-v-9fd4d1dd
+                      data-v-ef6192dc
+                      data-v-e71e869c
+                    >
+                      <!--[--><a
+                        class="VPSocialLink no-icon"
+                        href="https://github.com/solarpush/firestore-repo-service"
+                        aria-label="github"
+                        target="_blank"
+                        rel="noopener"
+                        data-v-e71e869c
+                        data-v-60a9a2d3
+                        ><span class="vpi-social-github"></span></a
+                      ><!--]-->
+                    </div>
+                    <div
+                      class="VPFlyout VPNavBarExtra extra"
+                      data-v-9fd4d1dd
+                      data-v-f953d92f
+                      data-v-bfe7971f
+                    >
+                      <button
+                        type="button"
+                        class="button"
+                        aria-haspopup="true"
+                        aria-expanded="false"
+                        aria-label="extra navigation"
+                        data-v-bfe7971f
+                      >
+                        <span
+                          class="vpi-more-horizontal icon"
+                          data-v-bfe7971f
+                        ></span>
+                      </button>
+                      <div class="menu" data-v-bfe7971f>
+                        <div class="VPMenu" data-v-bfe7971f data-v-20ed86d6>
+                          <!----><!--[--><!--[-->
+                          <div class="group translations" data-v-f953d92f>
+                            <p class="trans-title" data-v-f953d92f>Français</p>
+                            <!--[-->
+                            <div
+                              class="VPMenuLink"
+                              data-v-f953d92f
+                              data-v-7eeeb2dc
+                            >
+                              <a
+                                class="VPLink link"
+                                href="/guide/sync.html"
+                                data-v-7eeeb2dc
+                                ><!--[--><span data-v-7eeeb2dc>English</span
+                                ><!--]--></a
+                              >
+                            </div>
+                            <!--]-->
+                          </div>
+                          <div class="group" data-v-f953d92f>
+                            <div class="item appearance" data-v-f953d92f>
+                              <p class="label" data-v-f953d92f>Appearance</p>
+                              <div class="appearance-action" data-v-f953d92f>
+                                <button
+                                  class="VPSwitch VPSwitchAppearance"
+                                  type="button"
+                                  role="switch"
+                                  title
+                                  aria-checked="false"
+                                  data-v-f953d92f
+                                  data-v-be9742d9
+                                  data-v-b4ccac88
+                                >
+                                  <span class="check" data-v-b4ccac88
+                                    ><span class="icon" data-v-b4ccac88
+                                      ><!--[--><span
+                                        class="vpi-sun sun"
+                                        data-v-be9742d9
+                                      ></span
+                                      ><span
+                                        class="vpi-moon moon"
+                                        data-v-be9742d9
+                                      ></span
+                                      ><!--]--></span
+                                    ></span
+                                  >
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          <div class="group" data-v-f953d92f>
+                            <div class="item social-links" data-v-f953d92f>
+                              <div
+                                class="VPSocialLinks social-links-list"
+                                data-v-f953d92f
+                                data-v-e71e869c
+                              >
+                                <!--[--><a
+                                  class="VPSocialLink no-icon"
+                                  href="https://github.com/solarpush/firestore-repo-service"
+                                  aria-label="github"
+                                  target="_blank"
+                                  rel="noopener"
+                                  data-v-e71e869c
+                                  data-v-60a9a2d3
+                                  ><span class="vpi-social-github"></span></a
+                                ><!--]-->
+                              </div>
+                            </div>
+                          </div>
+                          <!--]--><!--]-->
+                        </div>
+                      </div>
+                    </div>
+                    <!--[--><!--]--><button
+                      type="button"
+                      class="VPNavBarHamburger hamburger"
+                      aria-label="mobile navigation"
+                      aria-expanded="false"
+                      aria-controls="VPNavScreen"
+                      data-v-9fd4d1dd
+                      data-v-6bee1efd
+                    >
+                      <span class="container" data-v-6bee1efd
+                        ><span class="top" data-v-6bee1efd></span
+                        ><span class="middle" data-v-6bee1efd></span
+                        ><span class="bottom" data-v-6bee1efd></span
+                      ></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="divider" data-v-9fd4d1dd>
+              <div class="divider-line" data-v-9fd4d1dd></div>
+            </div>
+          </div>
+          <!---->
+        </header>
+        <div
+          class="VPLocalNav has-sidebar empty"
+          data-v-d8b57b2d
+          data-v-2488c25a
+        >
+          <div class="container" data-v-2488c25a>
+            <button
+              class="menu"
+              aria-expanded="false"
+              aria-controls="VPSidebarNav"
+              data-v-2488c25a
+            >
+              <span class="vpi-align-left menu-icon" data-v-2488c25a></span
+              ><span class="menu-text" data-v-2488c25a>Menu</span>
+            </button>
+            <div
+              class="VPLocalNavOutlineDropdown"
+              style="--vp-vh: 0px"
+              data-v-2488c25a
+              data-v-6b867909
+            >
+              <button data-v-6b867909>Return to top</button
+              ><!---->
+            </div>
+          </div>
+        </div>
+        <aside class="VPSidebar" data-v-d8b57b2d data-v-42c4c606>
+          <div class="curtain" data-v-42c4c606></div>
+          <nav
+            class="nav"
+            id="VPSidebarNav"
+            aria-labelledby="sidebar-aria-label"
+            tabindex="-1"
+            data-v-42c4c606
+          >
+            <span
+              class="visually-hidden"
+              id="sidebar-aria-label"
+              data-v-42c4c606
+            >
+              Sidebar Navigation </span
+            ><!--[--><!--]--><!--[-->
+            <div class="no-transition group" data-v-51288d80>
+              <section
+                class="VPSidebarItem level-0 has-active"
+                data-v-51288d80
+                data-v-0009425e
+              >
+                <div class="item" role="button" tabindex="0" data-v-0009425e>
+                  <div class="indicator" data-v-0009425e></div>
+                  <h2 class="text" data-v-0009425e>Guide</h2>
+                  <!---->
+                </div>
+                <div class="items" data-v-0009425e>
+                  <!--[-->
+                  <div
+                    class="VPSidebarItem level-1 is-link"
+                    data-v-0009425e
+                    data-v-0009425e
+                  >
+                    <div class="item" data-v-0009425e>
+                      <div class="indicator" data-v-0009425e></div>
+                      <a
+                        class="VPLink link link"
+                        href="/fr/guide/getting-started.html"
+                        data-v-0009425e
+                        ><!--[-->
+                        <p class="text" data-v-0009425e>Démarrage rapide</p>
+                        <!--]--></a
+                      ><!---->
+                    </div>
+                    <!---->
+                  </div>
+                  <div
+                    class="VPSidebarItem level-1 is-link"
+                    data-v-0009425e
+                    data-v-0009425e
+                  >
+                    <div class="item" data-v-0009425e>
+                      <div class="indicator" data-v-0009425e></div>
+                      <a
+                        class="VPLink link link"
+                        href="/fr/guide/configuration.html"
+                        data-v-0009425e
+                        ><!--[-->
+                        <p class="text" data-v-0009425e>Configuration</p>
+                        <!--]--></a
+                      ><!---->
+                    </div>
+                    <!---->
+                  </div>
+                  <div
+                    class="VPSidebarItem level-1 is-link"
+                    data-v-0009425e
+                    data-v-0009425e
+                  >
+                    <div class="item" data-v-0009425e>
+                      <div class="indicator" data-v-0009425e></div>
+                      <a
+                        class="VPLink link link"
+                        href="/fr/guide/relations.html"
+                        data-v-0009425e
+                        ><!--[-->
+                        <p class="text" data-v-0009425e>Relations & Populate</p>
+                        <!--]--></a
+                      ><!---->
+                    </div>
+                    <!---->
+                  </div>
+                  <div
+                    class="VPSidebarItem level-1 is-link"
+                    data-v-0009425e
+                    data-v-0009425e
+                  >
+                    <div class="item" data-v-0009425e>
+                      <div class="indicator" data-v-0009425e></div>
+                      <a
+                        class="VPLink link link"
+                        href="/fr/guide/querying.html"
+                        data-v-0009425e
+                        ><!--[-->
+                        <p class="text" data-v-0009425e>Requêtes</p>
+                        <!--]--></a
+                      ><!---->
+                    </div>
+                    <!---->
+                  </div>
+                  <div
+                    class="VPSidebarItem level-1 is-link"
+                    data-v-0009425e
+                    data-v-0009425e
+                  >
+                    <div class="item" data-v-0009425e>
+                      <div class="indicator" data-v-0009425e></div>
+                      <a
+                        class="VPLink link link"
+                        href="/fr/guide/advanced.html"
+                        data-v-0009425e
+                        ><!--[-->
+                        <p class="text" data-v-0009425e>Usage avancé</p>
+                        <!--]--></a
+                      ><!---->
+                    </div>
+                    <!---->
+                  </div>
+                  <div
+                    class="VPSidebarItem level-1 is-link"
+                    data-v-0009425e
+                    data-v-0009425e
+                  >
+                    <div class="item" data-v-0009425e>
+                      <div class="indicator" data-v-0009425e></div>
+                      <a
+                        class="VPLink link link"
+                        href="/fr/guide/admin.html"
+                        data-v-0009425e
+                        ><!--[-->
+                        <p class="text" data-v-0009425e>Serveur Admin</p>
+                        <!--]--></a
+                      ><!---->
+                    </div>
+                    <!---->
+                  </div>
+                  <div
+                    class="VPSidebarItem level-1 is-link"
+                    data-v-0009425e
+                    data-v-0009425e
+                  >
+                    <div class="item" data-v-0009425e>
+                      <div class="indicator" data-v-0009425e></div>
+                      <a
+                        class="VPLink link link"
+                        href="/fr/guide/sync.html"
+                        data-v-0009425e
+                        ><!--[-->
+                        <p class="text" data-v-0009425e>Firestore → SQL Sync</p>
+                        <!--]--></a
+                      ><!---->
+                    </div>
+                    <!---->
+                  </div>
+                  <!--]-->
+                </div>
+              </section>
+            </div>
+            <!--]--><!--[--><!--]-->
+          </nav>
+        </aside>
+        <div
+          class="VPContent has-sidebar"
+          id="VPContent"
+          data-v-d8b57b2d
+          data-v-9a6c75ad
+        >
+          <div
+            class="VPDoc has-sidebar has-aside"
+            data-v-9a6c75ad
+            data-v-e6f2a212
+          >
+            <!--[--><!--]-->
+            <div class="container" data-v-e6f2a212>
+              <div class="aside" data-v-e6f2a212>
+                <div class="aside-curtain" data-v-e6f2a212></div>
+                <div class="aside-container" data-v-e6f2a212>
+                  <div class="aside-content" data-v-e6f2a212>
+                    <div class="VPDocAside" data-v-e6f2a212 data-v-cb998dce>
+                      <!--[--><!--]--><!--[--><!--]-->
+                      <nav
+                        aria-labelledby="doc-outline-aria-label"
+                        class="VPDocAsideOutline"
+                        data-v-cb998dce
+                        data-v-f610f197
+                      >
+                        <div class="content" data-v-f610f197>
+                          <div class="outline-marker" data-v-f610f197></div>
+                          <div
+                            aria-level="2"
+                            class="outline-title"
+                            id="doc-outline-aria-label"
+                            role="heading"
+                            data-v-f610f197
+                          >
+                            On this page
+                          </div>
+                          <ul
+                            class="VPDocOutlineItem root"
+                            data-v-f610f197
+                            data-v-53c99d69
+                          >
+                            <!--[--><!--]-->
+                          </ul>
+                        </div>
+                      </nav>
+                      <!--[--><!--]-->
+                      <div class="spacer" data-v-cb998dce></div>
+                      <!--[--><!--]--><!----><!--[--><!--]--><!--[--><!--]-->
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="content" data-v-e6f2a212>
+                <div class="content-container" data-v-e6f2a212>
+                  <!--[--><!--]-->
+                  <main class="main" data-v-e6f2a212>
+                    <div
+                      style="position: relative"
+                      class="vp-doc _fr_guide_sync"
+                      data-v-e6f2a212
+                    >
+                      <div>
+                        <h1 id="firestore-→-sql-sync" tabindex="-1">
+                          Firestore → SQL Sync
+                          <a
+                            class="header-anchor"
+                            href="#firestore-→-sql-sync"
+                            aria-label='Permalink to "Firestore → SQL Sync"'
+                            >​</a
+                          >
+                        </h1>
+                        <p>
+                          Répliquez automatiquement vos collections Firestore
+                          vers une base SQL (BigQuery, etc.) via Cloud Pub/Sub.
+                        </p>
+                        <h2 id="architecture" tabindex="-1">
+                          Architecture
+                          <a
+                            class="header-anchor"
+                            href="#architecture"
+                            aria-label='Permalink to "Architecture"'
+                            >​</a
+                          >
+                        </h2>
+                        <div class="language- vp-adaptive-theme">
+                          <button title="Copy Code" class="copy"></button
+                          ><span class="lang"></span>
+                          <pre
+                            class="shiki shiki-themes github-light github-dark vp-code"
+                            tabindex="0"
+                          ><code><span class="line"><span>Firestore Triggers → Cloud Pub/Sub → Worker → Base SQL</span></span>
+<span class="line"><span>      (onCreate/onUpdate/onDelete)           (BigQuery, etc.)</span></span></code></pre>
+                        </div>
+                        <p>
+                          Chaque modification de document dans Firestore publie
+                          un message sur un topic Pub/Sub dédié au repo. Un
+                          worker s&#39;abonne à ces topics, regroupe les
+                          changements en batch, et les flush vers SQL.
+                        </p>
+                        <h2 id="demarrage-rapide" tabindex="-1">
+                          Démarrage rapide
+                          <a
+                            class="header-anchor"
+                            href="#demarrage-rapide"
+                            aria-label='Permalink to "Démarrage rapide"'
+                            >​</a
+                          >
+                        </h2>
+                        <div class="language-typescript vp-adaptive-theme">
+                          <button title="Copy Code" class="copy"></button
+                          ><span class="lang">typescript</span>
+                          <pre
+                            class="shiki shiki-themes github-light github-dark vp-code"
+                            tabindex="0"
+                          ><code><span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> { createFirestoreSync } </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">from</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;"> &quot;@lpdjs/firestore-repo-service/sync&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">;</span></span>
 <span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> { BigQueryAdapter } </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">from</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;"> &quot;@lpdjs/firestore-repo-service/sync/bigquery&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">;</span></span>
 <span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> { BigQuery } </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">from</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;"> &quot;@google-cloud/bigquery&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">;</span></span>
 <span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> { PubSub } </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">from</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;"> &quot;@google-cloud/pubsub&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">;</span></span>
@@ -60,23 +667,335 @@
 <span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">export</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;"> const</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> {</span></span>
 <span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">  users_onCreate</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">users_onUpdate</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">users_onDelete</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">sync_users</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">,</span></span>
 <span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">  posts_onCreate</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">posts_onUpdate</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">posts_onDelete</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">sync_posts</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">,</span></span>
-<span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">  syncAdmin</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">,</span></span>
-<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">} </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> sync.functions;</span></span></code></pre></div><h2 id="configuration" tabindex="-1">Configuration <a class="header-anchor" href="#configuration" aria-label="Permalink to &quot;Configuration&quot;">​</a></h2><h3 id="createfirestoresync-repos-config" tabindex="-1"><code>createFirestoreSync(repos, config)</code> <a class="header-anchor" href="#createfirestoresync-repos-config" aria-label="Permalink to &quot;`createFirestoreSync(repos, config)`&quot;">​</a></h3><p>Le wrapper unifié qui crée les triggers, les workers et le serveur admin optionnel.</p><table tabindex="0"><thead><tr><th>Option</th><th>Type</th><th>Défaut</th><th>Description</th></tr></thead><tbody><tr><td><code>deps</code></td><td><code>SyncDeps</code></td><td>requis</td><td>Dépendances Firebase Functions + PubSub</td></tr><tr><td><code>adapter</code></td><td><code>SqlAdapter</code></td><td>requis</td><td>Adaptateur SQL (ex: <code>BigQueryAdapter</code>)</td></tr><tr><td><code>topicPrefix</code></td><td><code>string</code></td><td><code>&quot;firestore-sync&quot;</code></td><td>Préfixe des topics Pub/Sub</td></tr><tr><td><code>batchSize</code></td><td><code>number</code></td><td><code>100</code></td><td>Nombre max de lignes par flush</td></tr><tr><td><code>flushIntervalMs</code></td><td><code>number</code></td><td><code>5000</code></td><td>Intervalle de flush en ms</td></tr><tr><td><code>autoMigrate</code></td><td><code>boolean</code></td><td><code>false</code></td><td>Créer/migrer les tables automatiquement</td></tr><tr><td><code>admin</code></td><td><code>SyncAdminConfig</code></td><td>—</td><td>Configuration optionnelle de l&#39;admin</td></tr><tr><td><code>repos</code></td><td><code>TypedRepoSyncConfigs</code></td><td>—</td><td>Surcharges par repo</td></tr></tbody></table><h3 id="dependances-deps" tabindex="-1">Dépendances (<code>deps</code>) <a class="header-anchor" href="#dependances-deps" aria-label="Permalink to &quot;Dépendances (`deps`)&quot;">​</a></h3><p>Tous les modules Firebase/GCP sont injectés — la librairie ne les importe jamais directement :</p><div class="language-typescript vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">typescript</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0"><code><span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">deps</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: {</span></span>
+<span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">  adminsync</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">,</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">} </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">=</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> sync.functions;</span></span></code></pre>
+                        </div>
+                        <h2 id="configuration" tabindex="-1">
+                          Configuration
+                          <a
+                            class="header-anchor"
+                            href="#configuration"
+                            aria-label='Permalink to "Configuration"'
+                            >​</a
+                          >
+                        </h2>
+                        <h3 id="createfirestoresync-repos-config" tabindex="-1">
+                          <code>createFirestoreSync(repos, config)</code>
+                          <a
+                            class="header-anchor"
+                            href="#createfirestoresync-repos-config"
+                            aria-label='Permalink to "`createFirestoreSync(repos, config)`"'
+                            >​</a
+                          >
+                        </h3>
+                        <p>
+                          Le wrapper unifié qui crée les triggers, les workers
+                          et le serveur admin optionnel.
+                        </p>
+                        <table tabindex="0">
+                          <thead>
+                            <tr>
+                              <th>Option</th>
+                              <th>Type</th>
+                              <th>Défaut</th>
+                              <th>Description</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td><code>deps</code></td>
+                              <td><code>SyncDeps</code></td>
+                              <td>requis</td>
+                              <td>Dépendances Firebase Functions + PubSub</td>
+                            </tr>
+                            <tr>
+                              <td><code>adapter</code></td>
+                              <td><code>SqlAdapter</code></td>
+                              <td>requis</td>
+                              <td>
+                                Adaptateur SQL (ex:
+                                <code>BigQueryAdapter</code>)
+                              </td>
+                            </tr>
+                            <tr>
+                              <td><code>topicPrefix</code></td>
+                              <td><code>string</code></td>
+                              <td><code>&quot;firestore-sync&quot;</code></td>
+                              <td>Préfixe des topics Pub/Sub</td>
+                            </tr>
+                            <tr>
+                              <td><code>batchSize</code></td>
+                              <td><code>number</code></td>
+                              <td><code>100</code></td>
+                              <td>Nombre max de lignes par flush</td>
+                            </tr>
+                            <tr>
+                              <td><code>flushIntervalMs</code></td>
+                              <td><code>number</code></td>
+                              <td><code>5000</code></td>
+                              <td>Intervalle de flush en ms</td>
+                            </tr>
+                            <tr>
+                              <td><code>autoMigrate</code></td>
+                              <td><code>boolean</code></td>
+                              <td><code>false</code></td>
+                              <td>Créer/migrer les tables automatiquement</td>
+                            </tr>
+                            <tr>
+                              <td><code>admin</code></td>
+                              <td><code>adminsyncConfig</code></td>
+                              <td>—</td>
+                              <td>Configuration optionnelle de l&#39;admin</td>
+                            </tr>
+                            <tr>
+                              <td><code>repos</code></td>
+                              <td><code>TypedRepoSyncConfigs</code></td>
+                              <td>—</td>
+                              <td>Surcharges par repo</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        <h3 id="dependances-deps" tabindex="-1">
+                          Dépendances (<code>deps</code>)
+                          <a
+                            class="header-anchor"
+                            href="#dependances-deps"
+                            aria-label='Permalink to "Dépendances (`deps`)"'
+                            >​</a
+                          >
+                        </h3>
+                        <p>
+                          Tous les modules Firebase/GCP sont injectés — la
+                          librairie ne les importe jamais directement :
+                        </p>
+                        <div class="language-typescript vp-adaptive-theme">
+                          <button title="Copy Code" class="copy"></button
+                          ><span class="lang">typescript</span>
+                          <pre
+                            class="shiki shiki-themes github-light github-dark vp-code"
+                            tabindex="0"
+                          ><code><span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">deps</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: {</span></span>
 <span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">  firestoreTriggers, </span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D;">// firebase-functions/v2/firestore</span></span>
 <span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">  pubsubHandler,     </span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D;">// firebase-functions/v2/pubsub</span></span>
 <span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">  pubsub</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">new</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> PubSub</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">({ projectId: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;">&quot;my-project&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> }),</span></span>
-<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">}</span></span></code></pre></div><h3 id="config-par-repo-repos" tabindex="-1">Config par repo (<code>repos</code>) <a class="header-anchor" href="#config-par-repo-repos" aria-label="Permalink to &quot;Config par repo (`repos`)&quot;">​</a></h3><table tabindex="0"><thead><tr><th>Option</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code>tableName</code></td><td><code>string</code></td><td>Nom de la table SQL (par défaut : nom du repo)</td></tr><tr><td><code>exclude</code></td><td><code>string[]</code></td><td>Champs à exclure du SQL</td></tr><tr><td><code>columnMap</code></td><td><code>Record&lt;string, string&gt;</code></td><td>Renommage champs → colonnes SQL</td></tr><tr><td><code>triggerPath</code></td><td><code>string</code></td><td><strong>Obligatoire pour les collection groups</strong> — pattern du chemin document</td></tr></tbody></table><h3 id="collection-groups-triggerpath" tabindex="-1">Collection Groups (<code>triggerPath</code>) <a class="header-anchor" href="#collection-groups-triggerpath" aria-label="Permalink to &quot;Collection Groups (`triggerPath`)&quot;">​</a></h3><p>Pour les repos avec <code>isGroup: true</code>, vous <strong>devez</strong> fournir un <code>triggerPath</code> :</p><div class="language-typescript vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">typescript</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0"><code><span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">repos</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: {</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">}</span></span></code></pre>
+                        </div>
+                        <h3 id="config-par-repo-repos" tabindex="-1">
+                          Config par repo (<code>repos</code>)
+                          <a
+                            class="header-anchor"
+                            href="#config-par-repo-repos"
+                            aria-label='Permalink to "Config par repo (`repos`)"'
+                            >​</a
+                          >
+                        </h3>
+                        <table tabindex="0">
+                          <thead>
+                            <tr>
+                              <th>Option</th>
+                              <th>Type</th>
+                              <th>Description</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td><code>tableName</code></td>
+                              <td><code>string</code></td>
+                              <td>
+                                Nom de la table SQL (par défaut : nom du repo)
+                              </td>
+                            </tr>
+                            <tr>
+                              <td><code>exclude</code></td>
+                              <td><code>string[]</code></td>
+                              <td>Champs à exclure du SQL</td>
+                            </tr>
+                            <tr>
+                              <td><code>columnMap</code></td>
+                              <td><code>Record&lt;string, string&gt;</code></td>
+                              <td>Renommage champs → colonnes SQL</td>
+                            </tr>
+                            <tr>
+                              <td><code>triggerPath</code></td>
+                              <td><code>string</code></td>
+                              <td>
+                                <strong
+                                  >Obligatoire pour les collection
+                                  groups</strong
+                                >
+                                — pattern du chemin document
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        <h3 id="collection-groups-triggerpath" tabindex="-1">
+                          Collection Groups (<code>triggerPath</code>)
+                          <a
+                            class="header-anchor"
+                            href="#collection-groups-triggerpath"
+                            aria-label='Permalink to "Collection Groups (`triggerPath`)"'
+                            >​</a
+                          >
+                        </h3>
+                        <p>
+                          Pour les repos avec <code>isGroup: true</code>, vous
+                          <strong>devez</strong> fournir un
+                          <code>triggerPath</code> :
+                        </p>
+                        <div class="language-typescript vp-adaptive-theme">
+                          <button title="Copy Code" class="copy"></button
+                          ><span class="lang">typescript</span>
+                          <pre
+                            class="shiki shiki-themes github-light github-dark vp-code"
+                            tabindex="0"
+                          ><code><span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">repos</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: {</span></span>
 <span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">  comments</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: {</span></span>
 <span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">    triggerPath</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;">&quot;posts/{postId}/comments/{docId}&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">,</span></span>
 <span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">    tableName</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;">&quot;comments&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">,</span></span>
 <span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">  },</span></span>
-<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">}</span></span></code></pre></div><p>Cela indique à Firebase où écouter les changements de documents car les collection groups couvrent plusieurs chemins.</p><h2 id="adaptateur-bigquery" tabindex="-1">Adaptateur BigQuery <a class="header-anchor" href="#adaptateur-bigquery" aria-label="Permalink to &quot;Adaptateur BigQuery&quot;">​</a></h2><div class="language-typescript vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">typescript</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0"><code><span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> { BigQueryAdapter } </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">from</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;"> &quot;@lpdjs/firestore-repo-service/sync/bigquery&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">;</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">}</span></span></code></pre>
+                        </div>
+                        <p>
+                          Cela indique à Firebase où écouter les changements de
+                          documents car les collection groups couvrent plusieurs
+                          chemins.
+                        </p>
+                        <h2 id="adaptateur-bigquery" tabindex="-1">
+                          Adaptateur BigQuery
+                          <a
+                            class="header-anchor"
+                            href="#adaptateur-bigquery"
+                            aria-label='Permalink to "Adaptateur BigQuery"'
+                            >​</a
+                          >
+                        </h2>
+                        <div class="language-typescript vp-adaptive-theme">
+                          <button title="Copy Code" class="copy"></button
+                          ><span class="lang">typescript</span>
+                          <pre
+                            class="shiki shiki-themes github-light github-dark vp-code"
+                            tabindex="0"
+                          ><code><span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> { BigQueryAdapter } </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">from</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;"> &quot;@lpdjs/firestore-repo-service/sync/bigquery&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">;</span></span>
 <span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> { BigQuery } </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">from</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;"> &quot;@google-cloud/bigquery&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">;</span></span>
 <span class="line"></span>
 <span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">const</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;"> adapter</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;"> =</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;"> new</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> BigQueryAdapter</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">({</span></span>
 <span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">  bigquery: </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">new</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> BigQuery</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">({ projectId: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;">&quot;my-project&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> }),</span></span>
 <span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">  datasetId: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;">&quot;firestore_sync&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">,</span></span>
-<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">});</span></span></code></pre></div><p>L&#39;adaptateur gère :</p><ul><li>Création de tables via DDL</li><li>Insertions en streaming</li><li>Upserts via MERGE</li><li>Suppression par clé primaire</li><li>Introspection du schéma (pour les health checks)</li></ul><h3 id="authentification" tabindex="-1">Authentification <a class="header-anchor" href="#authentification" aria-label="Permalink to &quot;Authentification&quot;">​</a></h3><ul><li><strong>Production (Cloud Run / Cloud Functions)</strong> : les credentials sont automatiques via ADC — passez juste <code>projectId</code></li><li><strong>Développement local</strong> : lancez <code>gcloud auth application-default login</code></li></ul><h2 id="sync-admin" tabindex="-1">Sync Admin <a class="header-anchor" href="#sync-admin" aria-label="Permalink to &quot;Sync Admin&quot;">​</a></h2><p>L&#39;endpoint admin optionnel fournit une interface web pour surveiller et gérer le pipeline de sync.</p><h3 id="fonctionnalites" tabindex="-1">Fonctionnalités <a class="header-anchor" href="#fonctionnalites" aria-label="Permalink to &quot;Fonctionnalités&quot;">​</a></h3><table tabindex="0"><thead><tr><th>Fonctionnalité</th><th>Flag</th><th>Description</th></tr></thead><tbody><tr><td><strong>Health Check</strong></td><td><code>healthCheck</code></td><td>Compare le schéma attendu (Zod) vs les colonnes SQL réelles</td></tr><tr><td><strong>Force Sync</strong></td><td><code>manualSync</code></td><td>Re-synchronise tous les documents d&#39;une collection Firestore</td></tr><tr><td><strong>View Queues</strong></td><td><code>viewQueue</code></td><td>Inspecte les éléments en attente dans la queue par repo</td></tr><tr><td><strong>Config Check</strong></td><td><code>configCheck</code></td><td>Vérifie APIs GCP, topics, tables et IAM — avec commandes <code>gcloud</code> pour corriger</td></tr></tbody></table><h3 id="configuration-1" tabindex="-1">Configuration <a class="header-anchor" href="#configuration-1" aria-label="Permalink to &quot;Configuration&quot;">​</a></h3><div class="language-typescript vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">typescript</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0"><code><span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">admin</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: {</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">});</span></span></code></pre>
+                        </div>
+                        <p>L&#39;adaptateur gère :</p>
+                        <ul>
+                          <li>Création de tables via DDL</li>
+                          <li>Insertions en streaming</li>
+                          <li>Upserts via MERGE</li>
+                          <li>Suppression par clé primaire</li>
+                          <li>
+                            Introspection du schéma (pour les health checks)
+                          </li>
+                        </ul>
+                        <h3 id="authentification" tabindex="-1">
+                          Authentification
+                          <a
+                            class="header-anchor"
+                            href="#authentification"
+                            aria-label='Permalink to "Authentification"'
+                            >​</a
+                          >
+                        </h3>
+                        <ul>
+                          <li>
+                            <strong
+                              >Production (Cloud Run / Cloud Functions)</strong
+                            >
+                            : les credentials sont automatiques via ADC — passez
+                            juste <code>projectId</code>
+                          </li>
+                          <li>
+                            <strong>Développement local</strong> : lancez
+                            <code>gcloud auth application-default login</code>
+                          </li>
+                        </ul>
+                        <h2 id="sync-admin" tabindex="-1">
+                          Sync Admin
+                          <a
+                            class="header-anchor"
+                            href="#sync-admin"
+                            aria-label='Permalink to "Sync Admin"'
+                            >​</a
+                          >
+                        </h2>
+                        <p>
+                          L&#39;endpoint admin optionnel fournit une interface
+                          web pour surveiller et gérer le pipeline de sync.
+                        </p>
+                        <h3 id="fonctionnalites" tabindex="-1">
+                          Fonctionnalités
+                          <a
+                            class="header-anchor"
+                            href="#fonctionnalites"
+                            aria-label='Permalink to "Fonctionnalités"'
+                            >​</a
+                          >
+                        </h3>
+                        <table tabindex="0">
+                          <thead>
+                            <tr>
+                              <th>Fonctionnalité</th>
+                              <th>Flag</th>
+                              <th>Description</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td><strong>Health Check</strong></td>
+                              <td><code>healthCheck</code></td>
+                              <td>
+                                Compare le schéma attendu (Zod) vs les colonnes
+                                SQL réelles
+                              </td>
+                            </tr>
+                            <tr>
+                              <td><strong>Force Sync</strong></td>
+                              <td><code>manualSync</code></td>
+                              <td>
+                                Re-synchronise tous les documents d&#39;une
+                                collection Firestore
+                              </td>
+                            </tr>
+                            <tr>
+                              <td><strong>View Queues</strong></td>
+                              <td><code>viewQueue</code></td>
+                              <td>
+                                Inspecte les éléments en attente dans la queue
+                                par repo
+                              </td>
+                            </tr>
+                            <tr>
+                              <td><strong>Config Check</strong></td>
+                              <td><code>configCheck</code></td>
+                              <td>
+                                Vérifie APIs GCP, topics, tables et IAM — avec
+                                commandes <code>gcloud</code> pour corriger
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        <h3 id="configuration-1" tabindex="-1">
+                          Configuration
+                          <a
+                            class="header-anchor"
+                            href="#configuration-1"
+                            aria-label='Permalink to "Configuration"'
+                            >​</a
+                          >
+                        </h3>
+                        <div class="language-typescript vp-adaptive-theme">
+                          <button title="Copy Code" class="copy"></button
+                          ><span class="lang">typescript</span>
+                          <pre
+                            class="shiki shiki-themes github-light github-dark vp-code"
+                            tabindex="0"
+                          ><code><span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">admin</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: {</span></span>
 <span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">  auth</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: {</span></span>
 <span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">    type</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;">&quot;basic&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">,</span></span>
 <span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">    realm</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;">&quot;Sync Admin&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">,</span></span>
@@ -90,17 +1009,218 @@
 <span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">    viewQueue</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">true</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">,</span></span>
 <span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">    configCheck</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">true</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">,</span></span>
 <span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">  },</span></span>
-<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">}</span></span></code></pre></div><h3 id="config-check" tabindex="-1">Config Check <a class="header-anchor" href="#config-check" aria-label="Permalink to &quot;Config Check&quot;">​</a></h3><p>L&#39;endpoint <code>/config-check</code> vérifie votre configuration GCP :</p><ul><li><strong>BigQuery API</strong> — est-elle activée et accessible ?</li><li><strong>Tables BigQuery</strong> — chaque table de repo existe-t-elle ?</li><li><strong>Topics Pub/Sub</strong> — chaque topic <code>{topicPrefix}-{repoName}</code> existe-t-il ?</li></ul><p>Pour chaque problème détecté, il affiche :</p><ul><li>Une commande <code>gcloud</code> pour corriger</li><li>Un lien direct vers la Console GCP</li></ul><p>Supporte <code>Accept: application/json</code> pour un usage programmatique.</p><h3 id="deploiement-de-l-admin" tabindex="-1">Déploiement de l&#39;admin <a class="header-anchor" href="#deploiement-de-l-admin" aria-label="Permalink to &quot;Déploiement de l&#39;admin&quot;">​</a></h3><p>Le handler admin est auto-wrappé quand <code>onRequest</code> est fourni dans la config. Passez <code>httpsOptions</code> pour configurer la Cloud Function (invoker, memory, region, etc.) :</p><div class="language-typescript vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">typescript</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0"><code><span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">admin</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: {</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">}</span></span></code></pre>
+                        </div>
+                        <h3 id="config-check" tabindex="-1">
+                          Config Check
+                          <a
+                            class="header-anchor"
+                            href="#config-check"
+                            aria-label='Permalink to "Config Check"'
+                            >​</a
+                          >
+                        </h3>
+                        <p>
+                          L&#39;endpoint <code>/config-check</code> vérifie
+                          votre configuration GCP :
+                        </p>
+                        <ul>
+                          <li>
+                            <strong>BigQuery API</strong> — est-elle activée et
+                            accessible ?
+                          </li>
+                          <li>
+                            <strong>Tables BigQuery</strong> — chaque table de
+                            repo existe-t-elle ?
+                          </li>
+                          <li>
+                            <strong>Topics Pub/Sub</strong> — chaque topic
+                            <code>{topicPrefix}-{repoName}</code> existe-t-il ?
+                          </li>
+                        </ul>
+                        <p>Pour chaque problème détecté, il affiche :</p>
+                        <ul>
+                          <li>
+                            Une commande <code>gcloud</code> pour corriger
+                          </li>
+                          <li>Un lien direct vers la Console GCP</li>
+                        </ul>
+                        <p>
+                          Supporte <code>Accept: application/json</code> pour un
+                          usage programmatique.
+                        </p>
+                        <h3 id="deploiement-de-l-admin" tabindex="-1">
+                          Déploiement de l&#39;admin
+                          <a
+                            class="header-anchor"
+                            href="#deploiement-de-l-admin"
+                            aria-label='Permalink to "Déploiement de l&#39;admin"'
+                            >​</a
+                          >
+                        </h3>
+                        <p>
+                          Le handler admin est auto-wrappé quand
+                          <code>onRequest</code> est fourni dans la config.
+                          Passez <code>httpsOptions</code> pour configurer la
+                          Cloud Function (invoker, memory, region, etc.) :
+                        </p>
+                        <div class="language-typescript vp-adaptive-theme">
+                          <button title="Copy Code" class="copy"></button
+                          ><span class="lang">typescript</span>
+                          <pre
+                            class="shiki shiki-themes github-light github-dark vp-code"
+                            tabindex="0"
+                          ><code><span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">admin</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: {</span></span>
 <span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">  onRequest,</span></span>
 <span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">  httpsOptions</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: { </span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">invoker</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;">&quot;public&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">memory</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;">&quot;512MiB&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> },</span></span>
 <span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">  auth</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: { </span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">type</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;">&quot;basic&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">username</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;">&quot;admin&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">password</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;">&quot;secret&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> },</span></span>
 <span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">  featuresFlag</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: { </span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">healthCheck</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">true</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;">configCheck</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">: </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">true</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> },</span></span>
-<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">}</span></span></code></pre></div><p>Le handler est alors disponible dans <code>sync.functions.syncAdmin</code> — déjà wrappé comme Cloud Function.</p><p>Si vous omettez <code>onRequest</code>, le handler brut est exposé et vous le wrappez manuellement :</p><div class="language-typescript vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">typescript</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0"><code><span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> { onRequest } </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">from</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;"> &quot;firebase-functions/v2/https&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">;</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">}</span></span></code></pre>
+                        </div>
+                        <p>
+                          Le handler est alors disponible dans
+                          <code>sync.functions.adminsync</code> — déjà wrappé
+                          comme Cloud Function.
+                        </p>
+                        <p>
+                          Si vous omettez <code>onRequest</code>, le handler
+                          brut est exposé et vous le wrappez manuellement :
+                        </p>
+                        <div class="language-typescript vp-adaptive-theme">
+                          <button title="Copy Code" class="copy"></button
+                          ><span class="lang">typescript</span>
+                          <pre
+                            class="shiki shiki-themes github-light github-dark vp-code"
+                            tabindex="0"
+                          ><code><span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">import</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> { onRequest } </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">from</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;"> &quot;firebase-functions/v2/https&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">;</span></span>
 <span class="line"></span>
-<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">export</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;"> const</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;"> syncAdmin</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;"> =</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> onRequest</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">(</span></span>
+<span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">export</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;"> const</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;"> adminsync</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;"> =</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> onRequest</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">(</span></span>
 <span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">  { invoker: </span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;">&quot;public&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> },</span></span>
 <span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">  sync.adminHandler</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">!</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">,</span></span>
-<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">);</span></span></code></pre></div><h2 id="functions-generees" tabindex="-1">Functions générées <a class="header-anchor" href="#functions-generees" aria-label="Permalink to &quot;Functions générées&quot;">​</a></h2><p><code>createFirestoreSync</code> génère ces Cloud Functions :</p><table tabindex="0"><thead><tr><th>Fonction</th><th>Type</th><th>Rôle</th></tr></thead><tbody><tr><td><code>{repo}_onCreate</code></td><td>Trigger Firestore</td><td>Publie UPSERT à la création</td></tr><tr><td><code>{repo}_onUpdate</code></td><td>Trigger Firestore</td><td>Publie UPSERT à la modification</td></tr><tr><td><code>{repo}_onDelete</code></td><td>Trigger Firestore</td><td>Publie DELETE à la suppression</td></tr><tr><td><code>sync_{repo}</code></td><td>Handler PubSub</td><td>Traite les messages et flush vers SQL</td></tr><tr><td><code>syncAdmin</code></td><td>Handler HTTP</td><td>Interface admin (si <code>admin</code> configuré)</td></tr></tbody></table><h2 id="mapping-des-schemas" tabindex="-1">Mapping des schémas <a class="header-anchor" href="#mapping-des-schemas" aria-label="Permalink to &quot;Mapping des schémas&quot;">​</a></h2><p>Les schémas Zod sont automatiquement mappés vers les types SQL :</p><table tabindex="0"><thead><tr><th>Type Zod</th><th>Type BigQuery</th></tr></thead><tbody><tr><td><code>z.string()</code></td><td><code>STRING</code></td></tr><tr><td><code>z.number()</code></td><td><code>FLOAT64</code></td></tr><tr><td><code>z.bigint()</code></td><td><code>INT64</code></td></tr><tr><td><code>z.boolean()</code></td><td><code>BOOL</code></td></tr><tr><td><code>z.date()</code></td><td><code>TIMESTAMP</code></td></tr><tr><td><code>z.object()</code> / <code>z.array()</code></td><td><code>JSON</code></td></tr></tbody></table><h2 id="adaptateur-sql-personnalise" tabindex="-1">Adaptateur SQL personnalisé <a class="header-anchor" href="#adaptateur-sql-personnalise" aria-label="Permalink to &quot;Adaptateur SQL personnalisé&quot;">​</a></h2><p>Implémentez l&#39;interface <code>SqlAdapter</code> pour d&#39;autres bases de données :</p><div class="language-typescript vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">typescript</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0"><code><span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">import</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;"> type</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> { SqlAdapter, SqlDialect, SqlColumn, SqlTableDef } </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">from</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;"> &quot;@lpdjs/firestore-repo-service/sync&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">;</span></span>
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">);</span></span></code></pre>
+                        </div>
+                        <h2 id="functions-generees" tabindex="-1">
+                          Functions générées
+                          <a
+                            class="header-anchor"
+                            href="#functions-generees"
+                            aria-label='Permalink to "Functions générées"'
+                            >​</a
+                          >
+                        </h2>
+                        <p>
+                          <code>createFirestoreSync</code> génère ces Cloud
+                          Functions :
+                        </p>
+                        <table tabindex="0">
+                          <thead>
+                            <tr>
+                              <th>Fonction</th>
+                              <th>Type</th>
+                              <th>Rôle</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td><code>{repo}_onCreate</code></td>
+                              <td>Trigger Firestore</td>
+                              <td>Publie UPSERT à la création</td>
+                            </tr>
+                            <tr>
+                              <td><code>{repo}_onUpdate</code></td>
+                              <td>Trigger Firestore</td>
+                              <td>Publie UPSERT à la modification</td>
+                            </tr>
+                            <tr>
+                              <td><code>{repo}_onDelete</code></td>
+                              <td>Trigger Firestore</td>
+                              <td>Publie DELETE à la suppression</td>
+                            </tr>
+                            <tr>
+                              <td><code>sync_{repo}</code></td>
+                              <td>Handler PubSub</td>
+                              <td>Traite les messages et flush vers SQL</td>
+                            </tr>
+                            <tr>
+                              <td><code>adminsync</code></td>
+                              <td>Handler HTTP</td>
+                              <td>
+                                Interface admin (si
+                                <code>admin</code> configuré)
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        <h2 id="mapping-des-schemas" tabindex="-1">
+                          Mapping des schémas
+                          <a
+                            class="header-anchor"
+                            href="#mapping-des-schemas"
+                            aria-label='Permalink to "Mapping des schémas"'
+                            >​</a
+                          >
+                        </h2>
+                        <p>
+                          Les schémas Zod sont automatiquement mappés vers les
+                          types SQL :
+                        </p>
+                        <table tabindex="0">
+                          <thead>
+                            <tr>
+                              <th>Type Zod</th>
+                              <th>Type BigQuery</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td><code>z.string()</code></td>
+                              <td><code>STRING</code></td>
+                            </tr>
+                            <tr>
+                              <td><code>z.number()</code></td>
+                              <td><code>FLOAT64</code></td>
+                            </tr>
+                            <tr>
+                              <td><code>z.bigint()</code></td>
+                              <td><code>INT64</code></td>
+                            </tr>
+                            <tr>
+                              <td><code>z.boolean()</code></td>
+                              <td><code>BOOL</code></td>
+                            </tr>
+                            <tr>
+                              <td><code>z.date()</code></td>
+                              <td><code>TIMESTAMP</code></td>
+                            </tr>
+                            <tr>
+                              <td>
+                                <code>z.object()</code> / <code>z.array()</code>
+                              </td>
+                              <td><code>JSON</code></td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        <h2 id="adaptateur-sql-personnalise" tabindex="-1">
+                          Adaptateur SQL personnalisé
+                          <a
+                            class="header-anchor"
+                            href="#adaptateur-sql-personnalise"
+                            aria-label='Permalink to "Adaptateur SQL personnalisé"'
+                            >​</a
+                          >
+                        </h2>
+                        <p>
+                          Implémentez l&#39;interface
+                          <code>SqlAdapter</code> pour d&#39;autres bases de
+                          données :
+                        </p>
+                        <div class="language-typescript vp-adaptive-theme">
+                          <button title="Copy Code" class="copy"></button
+                          ><span class="lang">typescript</span>
+                          <pre
+                            class="shiki shiki-themes github-light github-dark vp-code"
+                            tabindex="0"
+                          ><code><span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">import</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;"> type</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> { SqlAdapter, SqlDialect, SqlColumn, SqlTableDef } </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">from</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF;"> &quot;@lpdjs/firestore-repo-service/sync&quot;</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">;</span></span>
 <span class="line"></span>
 <span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">class</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> MyAdapter</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;"> implements</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> SqlAdapter</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> {</span></span>
 <span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">  get</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> dialect</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">()</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">:</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> SqlDialect</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> { </span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D;">/* ... */</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> }</span></span>
@@ -111,8 +1231,56 @@
 <span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">  async</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> upsertRows</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">(</span><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70;">tableName</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">:</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;"> string</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70;">rows</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">:</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> Record</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">&lt;</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">string</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">unknown</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">&gt;[], </span><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70;">primaryKey</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">:</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;"> string</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">)</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">:</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> Promise</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">&lt;</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">void</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">&gt; { </span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D;">/* ... */</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> }</span></span>
 <span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">  async</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> deleteRows</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">(</span><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70;">tableName</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">:</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;"> string</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70;">primaryKey</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">:</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;"> string</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">, </span><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70;">ids</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">:</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;"> string</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">[])</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">:</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> Promise</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">&lt;</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">void</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">&gt; { </span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D;">/* ... */</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> }</span></span>
 <span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">  async</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> executeRaw</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">(</span><span style="--shiki-light:#E36209;--shiki-dark:#FFAB70;">sql</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">:</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;"> string</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">)</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583;">:</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0;"> Promise</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">&lt;</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF;">void</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">&gt; { </span><span style="--shiki-light:#6A737D;--shiki-dark:#6A737D;">/* ... */</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;"> }</span></span>
-<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">}</span></span></code></pre></div></div></div></main><footer class="VPDocFooter" data-v-e6f2a212 data-v-1bcd8184><!--[--><!--]--><!----><nav class="prev-next" aria-labelledby="doc-footer-aria-label" data-v-1bcd8184><span class="visually-hidden" id="doc-footer-aria-label" data-v-1bcd8184>Pager</span><div class="pager" data-v-1bcd8184><a class="VPLink link pager-link prev" href="/fr/guide/admin.html" data-v-1bcd8184><!--[--><span class="desc" data-v-1bcd8184>Previous page</span><span class="title" data-v-1bcd8184>Serveur Admin</span><!--]--></a></div><div class="pager" data-v-1bcd8184><!----></div></nav></footer><!--[--><!--]--></div></div></div><!--[--><!--]--></div></div><!----><!--[--><!--]--></div></div>
-    <script>window.__VP_HASH_MAP__=JSON.parse("{\"fr_guide_admin.md\":\"BDsj2h4_\",\"fr_guide_advanced.md\":\"moJB9Oyq\",\"fr_guide_configuration.md\":\"ChLq_WBO\",\"fr_guide_getting-started.md\":\"BIzVWB9n\",\"fr_guide_querying.md\":\"DB9aTrPI\",\"fr_guide_relations.md\":\"5qs2Zc_q\",\"fr_guide_sync.md\":\"DDw37p2_\",\"fr_index.md\":\"DPpTTvqw\",\"guide_admin.md\":\"CpbRA8Ah\",\"guide_advanced.md\":\"r_epvWsz\",\"guide_configuration.md\":\"B-WwxBOF\",\"guide_getting-started.md\":\"CK7qV3le\",\"guide_querying.md\":\"LV3xscok\",\"guide_relations.md\":\"DJZAuFvU\",\"guide_sync.md\":\"Oyik5sl4\",\"index.md\":\"DAcrFBD7\"}");window.__VP_SITE_DATA__=JSON.parse("{\"lang\":\"en-US\",\"dir\":\"ltr\",\"title\":\"Firestore Repo Service\",\"description\":\"Type-safe Firestore repository service with auto-generated methods\",\"base\":\"/\",\"head\":[],\"router\":{\"prefetchLinks\":true},\"appearance\":true,\"themeConfig\":{\"nav\":[{\"text\":\"Home\",\"link\":\"/\"},{\"text\":\"Guide\",\"link\":\"/guide/getting-started\"}],\"logo\":\"https://frs.lpdjs.fr/lpdjs/Logo.png\",\"sidebar\":[{\"text\":\"Guide\",\"items\":[{\"text\":\"Getting Started\",\"link\":\"/guide/getting-started\"},{\"text\":\"Configuration\",\"link\":\"/guide/configuration\"},{\"text\":\"Relations & Populate\",\"link\":\"/guide/relations\"},{\"text\":\"Querying\",\"link\":\"/guide/querying\"},{\"text\":\"Advanced Usage\",\"link\":\"/guide/advanced\"},{\"text\":\"Admin Server\",\"link\":\"/guide/admin\"},{\"text\":\"Firestore → SQL Sync\",\"link\":\"/guide/sync\"}]}],\"socialLinks\":[{\"icon\":\"github\",\"link\":\"https://github.com/solarpush/firestore-repo-service\"}]},\"locales\":{\"root\":{\"label\":\"English\",\"lang\":\"en-US\"},\"fr\":{\"label\":\"Français\",\"lang\":\"fr-FR\",\"themeConfig\":{\"nav\":[{\"text\":\"Accueil\",\"link\":\"/fr/\"},{\"text\":\"Guide\",\"link\":\"/fr/guide/getting-started\"}],\"sidebar\":[{\"text\":\"Guide\",\"items\":[{\"text\":\"Démarrage rapide\",\"link\":\"/fr/guide/getting-started\"},{\"text\":\"Configuration\",\"link\":\"/fr/guide/configuration\"},{\"text\":\"Relations & Populate\",\"link\":\"/fr/guide/relations\"},{\"text\":\"Requêtes\",\"link\":\"/fr/guide/querying\"},{\"text\":\"Usage avancé\",\"link\":\"/fr/guide/advanced\"},{\"text\":\"Serveur Admin\",\"link\":\"/fr/guide/admin\"},{\"text\":\"Firestore → SQL Sync\",\"link\":\"/fr/guide/sync\"}]}]}}},\"scrollOffset\":134,\"cleanUrls\":false}");</script>
-    
+<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8;">}</span></span></code></pre>
+                        </div>
+                      </div>
+                    </div>
+                  </main>
+                  <footer class="VPDocFooter" data-v-e6f2a212 data-v-1bcd8184>
+                    <!--[--><!--]--><!---->
+                    <nav
+                      class="prev-next"
+                      aria-labelledby="doc-footer-aria-label"
+                      data-v-1bcd8184
+                    >
+                      <span
+                        class="visually-hidden"
+                        id="doc-footer-aria-label"
+                        data-v-1bcd8184
+                        >Pager</span
+                      >
+                      <div class="pager" data-v-1bcd8184>
+                        <a
+                          class="VPLink link pager-link prev"
+                          href="/fr/guide/admin.html"
+                          data-v-1bcd8184
+                          ><!--[--><span class="desc" data-v-1bcd8184
+                            >Previous page</span
+                          ><span class="title" data-v-1bcd8184
+                            >Serveur Admin</span
+                          ><!--]--></a
+                        >
+                      </div>
+                      <div class="pager" data-v-1bcd8184><!----></div>
+                    </nav>
+                  </footer>
+                  <!--[--><!--]-->
+                </div>
+              </div>
+            </div>
+            <!--[--><!--]-->
+          </div>
+        </div>
+        <!----><!--[--><!--]-->
+      </div>
+    </div>
+    <script>
+      window.__VP_HASH_MAP__ = JSON.parse(
+        '{"fr_guide_admin.md":"BDsj2h4_","fr_guide_advanced.md":"moJB9Oyq","fr_guide_configuration.md":"ChLq_WBO","fr_guide_getting-started.md":"BIzVWB9n","fr_guide_querying.md":"DB9aTrPI","fr_guide_relations.md":"5qs2Zc_q","fr_guide_sync.md":"DDw37p2_","fr_index.md":"DPpTTvqw","guide_admin.md":"CpbRA8Ah","guide_advanced.md":"r_epvWsz","guide_configuration.md":"B-WwxBOF","guide_getting-started.md":"CK7qV3le","guide_querying.md":"LV3xscok","guide_relations.md":"DJZAuFvU","guide_sync.md":"Oyik5sl4","index.md":"DAcrFBD7"}',
+      );
+      window.__VP_SITE_DATA__ = JSON.parse(
+        '{"lang":"en-US","dir":"ltr","title":"Firestore Repo Service","description":"Type-safe Firestore repository service with auto-generated methods","base":"/","head":[],"router":{"prefetchLinks":true},"appearance":true,"themeConfig":{"nav":[{"text":"Home","link":"/"},{"text":"Guide","link":"/guide/getting-started"}],"logo":"https://frs.lpdjs.fr/lpdjs/Logo.png","sidebar":[{"text":"Guide","items":[{"text":"Getting Started","link":"/guide/getting-started"},{"text":"Configuration","link":"/guide/configuration"},{"text":"Relations & Populate","link":"/guide/relations"},{"text":"Querying","link":"/guide/querying"},{"text":"Advanced Usage","link":"/guide/advanced"},{"text":"Admin Server","link":"/guide/admin"},{"text":"Firestore → SQL Sync","link":"/guide/sync"}]}],"socialLinks":[{"icon":"github","link":"https://github.com/solarpush/firestore-repo-service"}]},"locales":{"root":{"label":"English","lang":"en-US"},"fr":{"label":"Français","lang":"fr-FR","themeConfig":{"nav":[{"text":"Accueil","link":"/fr/"},{"text":"Guide","link":"/fr/guide/getting-started"}],"sidebar":[{"text":"Guide","items":[{"text":"Démarrage rapide","link":"/fr/guide/getting-started"},{"text":"Configuration","link":"/fr/guide/configuration"},{"text":"Relations & Populate","link":"/fr/guide/relations"},{"text":"Requêtes","link":"/fr/guide/querying"},{"text":"Usage avancé","link":"/fr/guide/advanced"},{"text":"Serveur Admin","link":"/fr/guide/admin"},{"text":"Firestore → SQL Sync","link":"/fr/guide/sync"}]}]}}},"scrollOffset":134,"cleanUrls":false}',
+      );
+    </script>
   </body>
 </html>

@@ -10,35 +10,36 @@
  */
 
 export type {
-  SqlColumn,
-  SqlTableDef,
-  SqlDialect,
-  SqlAdapter,
+  FirestoreSyncConfig,
+  FirestoreTriggersDep,
+  GenerateDDLConfig,
   LogicalType,
+  OrFactory,
+  PubSubClientDep,
+  PubSubHandlerDep,
+  RepoSyncConfig,
+  SqlAdapter,
+  SqlColumn,
+  SqlDialect,
+  SqlTableDef,
+  SyncDeps,
   SyncEvent,
   SyncOperation,
-  RepoSyncConfig,
   SyncTriggersConfig,
   SyncWorkerConfig,
-  GenerateDDLConfig,
-  FirestoreSyncConfig,
-  SyncDeps,
-  FirestoreTriggersDep,
-  PubSubHandlerDep,
-  PubSubClientDep,
-  SyncAdminConfig,
-  SyncAdminBasicAuth,
-  SyncAdminFeaturesFlag,
+  adminsyncBasicAuth,
+  adminsyncConfig,
+  adminsyncFeaturesFlag,
 } from "./types";
 
-export { zodTypeToLogical, zodSchemaToColumns } from "./schema-mapper";
-export { serializeValue, serializeDocument } from "./serializer";
-export { createTableDDL, addColumnsDDL, generateDDL } from "./ddl-generator";
-export { SyncQueue } from "./queue";
-export type { SyncQueueOptions } from "./queue";
-export { createSyncWorker } from "./worker";
+export { createadminsyncServer } from "./admin";
+export { createFirestoreSync } from "./create-sync";
+export { addColumnsDDL, createTableDDL, generateDDL } from "./ddl-generator";
 export { autoMigrate } from "./migration";
 export type { MigrateResult } from "./migration";
+export { SyncQueue } from "./queue";
+export type { SyncQueueOptions } from "./queue";
+export { zodSchemaToColumns, zodTypeToLogical } from "./schema-mapper";
+export { serializeDocument, serializeValue } from "./serializer";
 export { createSyncTriggers } from "./triggers";
-export { createFirestoreSync } from "./create-sync";
-export { createSyncAdminServer } from "./admin";
+export { createSyncWorker } from "./worker";

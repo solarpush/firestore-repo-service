@@ -22,7 +22,6 @@ initializeApp({
 });
 
 const db = getFirestore();
-db.settings({ preferRest: true });
 
 // ============================================
 // Models (interfaces pour repos sans schema Zod)
@@ -364,11 +363,16 @@ import * as firestoreTriggers from "firebase-functions/v2/firestore";
 import * as pubsubHandler from "firebase-functions/v2/pubsub";
 
 export const sync = createFirestoreSync(repos, {
-  deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
-  adapter: new BigQueryAdapter({
-    bigquery: new BigQuery({ projectId: "firestore-repo-services" }),
-    datasetId: "firestore_sync",
-  }),
+  deps: {
+    firestoreTriggers,
+    pubsubHandler,
+    pubsub: () => new PubSub(),
+  },
+  adapter: () =>
+    new BigQueryAdapter({
+      bigquery: new BigQuery({ projectId: "firestore-repo-services" }),
+      datasetId: "firestore_sync",
+    }),
   topicPrefix: "firestore-sync",
   autoMigrate: true,
   admin: {

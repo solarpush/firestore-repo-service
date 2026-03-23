@@ -17,23 +17,23 @@
  *   },
  * });
  *
- * export const syncAdmin = onRequest(sync.adminHandler!);
+ * export const adminsync = onRequest(sync.adminHandler!);
  * ```
  */
 
 import { z } from "zod";
-import { MiniRouter } from "../servers/admin/router";
 import type { AnyReq, AnyRes, RouteParams } from "../servers/admin/router";
+import { MiniRouter } from "../servers/admin/router";
+import type { SyncQueue } from "./queue";
 import { zodSchemaToColumns } from "./schema-mapper";
 import { serializeDocument } from "./serializer";
 import type {
+  adminsyncConfig,
   PubSubClientDep,
   RepoSyncConfig,
   SqlAdapter,
-  SyncAdminConfig,
   SyncEvent,
 } from "./types";
-import type { SyncQueue } from "./queue";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,8 +71,8 @@ function getLinkBase(req: any, base: string): string {
       process.env["GOOGLE_CLOUD_PROJECT"] ??
       "demo-project";
     const region = process.env["FUNCTION_REGION"] ?? "us-central1";
-    // FUNCTION_TARGET uses dots (e.g. "sync.functions.syncAdmin") but the
-    // emulator URL uses hyphens ("sync-functions-syncAdmin").
+    // FUNCTION_TARGET uses dots (e.g. "sync.functions.adminsync") but the
+    // emulator URL uses hyphens ("sync-functions-adminsync").
     const target = (process.env["FUNCTION_TARGET"] ?? "").replace(/\./g, "-");
     return `/${project}/${region}/${target}${base}`;
   }
@@ -131,7 +131,10 @@ function sendHtml(res: AnyRes, html: string, status = 200): void {
 }
 
 function sendJson(res: AnyRes, data: unknown, status = 200): void {
-  res.status(status).set("Content-Type", "application/json").send(JSON.stringify(data, null, 2));
+  res
+    .status(status)
+    .set("Content-Type", "application/json")
+    .send(JSON.stringify(data, null, 2));
 }
 
 function isJsonRequest(req: AnyReq): boolean {
@@ -155,12 +158,12 @@ function isJsonRequest(req: AnyReq): boolean {
  * @param pubsub        - PubSub client (needed for configCheck)
  * @param topicPrefix   - PubSub topic prefix (needed for configCheck)
  */
-export function createSyncAdminServer(
+export function createadminsyncServer(
   repoMapping: Record<string, any>,
   adapter: SqlAdapter,
   queues: Map<string, SyncQueue>,
   handleMessage: (event: SyncEvent) => Promise<void>,
-  config: SyncAdminConfig,
+  config: adminsyncConfig,
   repoConfigs: Record<string, RepoSyncConfig<string> | undefined>,
   pubsub?: PubSubClientDep,
   topicPrefix?: string,
@@ -198,8 +201,7 @@ export function createSyncAdminServer(
           "base64",
         );
       router.use((req, res, next) => {
-        const authorization =
-          (req as any).headers?.["authorization"] ?? "";
+        const authorization = (req as any).headers?.["authorization"] ?? "";
         if (authorization !== expected) {
           res
             .status(401)
@@ -220,9 +222,7 @@ export function createSyncAdminServer(
       .map((r) => {
         const links: string[] = [];
         if (features.healthCheck)
-          links.push(
-            `<a class="btn" href="${lb}/${r.name}/health">Health</a>`,
-          );
+          links.push(`<a class="btn" href="${lb}/${r.name}/health">Health</a>`);
         if (features.manualSync)
           links.push(
             `<a class="btn btn-primary" href="${lb}/${r.name}/force-sync">Force Sync</a>`,
@@ -270,13 +270,21 @@ export function createSyncAdminServer(
       const lb = getLinkBase(req, basePath);
       const info = repoInfos.find((r) => r.name === req.params.repoName);
       if (!info) {
-        sendHtml(res, page("Not Found", lb, `<p>Unknown repo: ${req.params.repoName}</p>`), 404);
+        sendHtml(
+          res,
+          page("Not Found", lb, `<p>Unknown repo: ${req.params.repoName}</p>`),
+          404,
+        );
         return;
       }
       if (!info.schema) {
         sendHtml(
           res,
-          page("Health Check", lb, `<p class="badge badge-warn">No Zod schema attached to "${info.name}"</p>`),
+          page(
+            "Health Check",
+            lb,
+            `<p class="badge badge-warn">No Zod schema attached to "${info.name}"</p>`,
+          ),
         );
         return;
       }
@@ -284,7 +292,9 @@ export function createSyncAdminServer(
       const expectedCols = zodSchemaToColumns(info.schema, adapter.dialect, {
         primaryKey: info.documentKey,
         exclude: info.repoCfg?.exclude,
-        columnMap: info.repoCfg?.columnMap as Record<string, string> | undefined,
+        columnMap: info.repoCfg?.columnMap as
+          | Record<string, string>
+          | undefined,
       });
 
       let actualCols: string[] = [];
@@ -378,7 +388,11 @@ export function createSyncAdminServer(
       const lb = getLinkBase(req, basePath);
       const info = repoInfos.find((r) => r.name === req.params.repoName);
       if (!info) {
-        sendHtml(res, page("Not Found", lb, `<p>Unknown repo: ${req.params.repoName}</p>`), 404);
+        sendHtml(
+          res,
+          page("Not Found", lb, `<p>Unknown repo: ${req.params.repoName}</p>`),
+          404,
+        );
         return;
       }
 
@@ -409,7 +423,11 @@ export function createSyncAdminServer(
       // Use the repository's collectionGroup or collection query
       const collRef = info.repo.ref;
       if (!collRef) {
-        sendJson(res, { error: `No collection reference for "${info.name}"` }, 400);
+        sendJson(
+          res,
+          { error: `No collection reference for "${info.name}"` },
+          400,
+        );
         return;
       }
 
@@ -422,17 +440,13 @@ export function createSyncAdminServer(
       try {
         // eslint-disable-next-line no-constant-condition
         while (true) {
-          const paginatedQuery = lastDoc
-            ? query.startAfter(lastDoc)
-            : query;
+          const paginatedQuery = lastDoc ? query.startAfter(lastDoc) : query;
           const snapshot = await paginatedQuery.get();
           if (snapshot.empty) break;
 
           for (const doc of snapshot.docs) {
             const data = doc.data() as Record<string, unknown>;
-            const docId = String(
-              data[info.documentKey] ?? doc.id,
-            );
+            const docId = String(data[info.documentKey] ?? doc.id);
             const serialized = serializeDocument(data, {
               exclude: info.repoCfg?.exclude,
               columnMap: info.repoCfg?.columnMap,
@@ -461,7 +475,11 @@ export function createSyncAdminServer(
         if (queue) await queue.flush();
       } catch (e: any) {
         if (isJsonRequest(req)) {
-          sendJson(res, { error: e?.message ?? String(e), synced, errors }, 500);
+          sendJson(
+            res,
+            { error: e?.message ?? String(e), synced, errors },
+            500,
+          );
           return;
         }
         sendHtml(
@@ -480,7 +498,12 @@ export function createSyncAdminServer(
       }
 
       if (isJsonRequest(req)) {
-        sendJson(res, { repo: info.name, table: info.tableName, synced, errors });
+        sendJson(res, {
+          repo: info.name,
+          table: info.tableName,
+          synced,
+          errors,
+        });
         return;
       }
 
@@ -577,10 +600,18 @@ export function createSyncAdminServer(
       } catch (e: any) {
         const msg = e?.message ?? String(e);
         const msgLower = msg.toLowerCase();
-        const isApiDisabled = msgLower.includes("disabled") || msgLower.includes("has not been used") || msgLower.includes("accessnotconfigured");
-        const isPermission = msgLower.includes("permission") || msg.includes("403") || msgLower.includes("access denied");
-        const isProjectNotFound = msgLower.includes("project") && msgLower.includes("not found");
-        const isNotFound = msgLower.includes("not found") || msg.includes("404");
+        const isApiDisabled =
+          msgLower.includes("disabled") ||
+          msgLower.includes("has not been used") ||
+          msgLower.includes("accessnotconfigured");
+        const isPermission =
+          msgLower.includes("permission") ||
+          msg.includes("403") ||
+          msgLower.includes("access denied");
+        const isProjectNotFound =
+          msgLower.includes("project") && msgLower.includes("not found");
+        const isNotFound =
+          msgLower.includes("not found") || msg.includes("404");
 
         if (isApiDisabled) {
           checks.push({
@@ -600,9 +631,10 @@ export function createSyncAdminServer(
             status: "error",
             message: msg,
             fix: {
-              hint: "The GCP project does not exist or the credentials don't have access to it. "
-                + "In the Firebase emulator, GCLOUD_PROJECT may override the configured projectId. "
-                + "Ensure you pass the correct projectId to the BigQuery constructor and have valid credentials.",
+              hint:
+                "The GCP project does not exist or the credentials don't have access to it. " +
+                "In the Firebase emulator, GCLOUD_PROJECT may override the configured projectId. " +
+                "Ensure you pass the correct projectId to the BigQuery constructor and have valid credentials.",
               console: `${consoleBase}/home/dashboard`,
             },
           });
@@ -639,7 +671,8 @@ export function createSyncAdminServer(
             name: "BigQuery API",
             category: "bigquery",
             status: "ok",
-            message: "BigQuery API is reachable (table lookup returned expected error)",
+            message:
+              "BigQuery API is reachable (table lookup returned expected error)",
           });
         }
       }
@@ -700,7 +733,8 @@ export function createSyncAdminServer(
                 name: `Topic: ${topicName}`,
                 category: "pubsub",
                 status: "warn",
-                message: "Cannot verify topic existence (PubSub client doesn't expose .exists())",
+                message:
+                  "Cannot verify topic existence (PubSub client doesn't expose .exists())",
                 fix: {
                   gcloud: `gcloud pubsub topics create ${topicName} --project=${project}`,
                   console: `${consoleBase}/cloudpubsub/topic/list?project=${project}`,
@@ -710,7 +744,8 @@ export function createSyncAdminServer(
             }
           } catch (e: any) {
             const msg = e?.message ?? String(e);
-            const isApiDisabled = msg.includes("disabled") || msg.includes("has not been used");
+            const isApiDisabled =
+              msg.includes("disabled") || msg.includes("has not been used");
             checks.push({
               name: isApiDisabled ? "Pub/Sub API" : `Topic: ${topicName}`,
               category: "pubsub",
@@ -769,7 +804,10 @@ export function createSyncAdminServer(
               const parts: string[] = [];
               if (c.fix.hint) parts.push(`<p class="muted">${c.fix.hint}</p>`);
               if (c.fix.gcloud) parts.push(`<pre>$ ${c.fix.gcloud}</pre>`);
-              if (c.fix.console) parts.push(`<p><a href="${c.fix.console}" target="_blank">Open GCP Console →</a></p>`);
+              if (c.fix.console)
+                parts.push(
+                  `<p><a href="${c.fix.console}" target="_blank">Open GCP Console →</a></p>`,
+                );
               fixHtml = `<div style="margin-top:.5rem">${parts.join("")}</div>`;
             }
             return `<tr>

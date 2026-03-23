@@ -26,20 +26,41 @@
  * export const { users_onCreate, users_onUpdate, users_onDelete, sync_users } = sync.functions;
  *
  * // Admin endpoint — wrap with onRequest yourself
- * export const syncAdmin = onRequest(sync.adminHandler!);
+ * export const adminsync = onRequest(sync.adminHandler!);
  *
  * // Or pass onRequest in admin config to auto-add to sync.functions:
- * // admin: { onRequest, ... } → export const { syncAdmin } = sync.functions;
+ * // admin: { onRequest, ... } → export const { adminsync } = sync.functions;
  * ```
  */
 
-import { createSyncTriggers } from "./triggers";
-import { createSyncWorker } from "./worker";
-import { createSyncAdminServer } from "./admin";
-import type { FirestoreSyncConfig, RepoSyncConfig, SyncEvent } from "./types";
+import { createadminsyncServer } from "./admin";
 import type { SyncQueue } from "./queue";
+import { createSyncTriggers } from "./triggers";
+import type { FirestoreSyncConfig, OrFactory, RepoSyncConfig, SyncEvent } from "./types";
+import { createSyncWorker } from "./worker";
 
 const DEFAULT_TOPIC_PREFIX = "firestore-sync";
+
+/**
+ * Wraps a value-or-factory into a lazy proxy that only instantiates
+ * when a property is first accessed. If the value is already an instance,
+ * returns it as-is (zero overhead).
+ */
+function lazyProxy<T extends object>(v: OrFactory<T>): T {
+  if (typeof v !== "function") return v;
+  const factory = v as () => T;
+  let instance: T | undefined;
+  return new Proxy({} as T, {
+    get(_, prop) {
+      if (!instance) instance = factory();
+      return (instance as any)[prop];
+    },
+    has(_, prop) {
+      if (!instance) instance = factory();
+      return prop in (instance as object);
+    },
+  });
+}
 
 export function createFirestoreSync<M extends Record<string, any>>(
   repoMapping: M,
@@ -47,7 +68,7 @@ export function createFirestoreSync<M extends Record<string, any>>(
 ) {
   const {
     deps,
-    adapter,
+    adapter: rawAdapter,
     topicPrefix = DEFAULT_TOPIC_PREFIX,
     batchSize,
     flushIntervalMs,
@@ -56,16 +77,21 @@ export function createFirestoreSync<M extends Record<string, any>>(
     repos: repoConfigs,
   } = config;
 
+  // Resolve lazy deps — instances are returned as-is, factories are wrapped
+  // in a proxy that defers construction until the first property access.
+  const pubsub = lazyProxy(deps.pubsub);
+  const adapter = lazyProxy(rawAdapter);
+
   // Create triggers (Firestore → PubSub)
   const triggers = createSyncTriggers(repoMapping, {
-    deps: { firestoreTriggers: deps.firestoreTriggers, pubsub: deps.pubsub },
+    deps: { firestoreTriggers: deps.firestoreTriggers, pubsub },
     topicPrefix,
     repos: repoConfigs,
   });
 
   // Create worker (PubSub → SQL)
   const worker = createSyncWorker(repoMapping, {
-    deps: { pubsubHandler: deps.pubsubHandler, pubsub: deps.pubsub },
+    deps: { pubsubHandler: deps.pubsubHandler, pubsub },
     adapter,
     batchSize,
     flushIntervalMs,
@@ -84,19 +110,19 @@ export function createFirestoreSync<M extends Record<string, any>>(
   // Optional admin endpoint
   let adminHandler: ((req: any, res: any) => Promise<void>) | null = null;
   if (adminConfig) {
-    adminHandler = createSyncAdminServer(
+    adminHandler = createadminsyncServer(
       repoMapping,
       adapter,
       worker.queues as Map<string, SyncQueue>,
       worker.handleMessage as (event: SyncEvent) => Promise<void>,
       adminConfig,
       (repoConfigs ?? {}) as Record<string, RepoSyncConfig<string> | undefined>,
-      deps.pubsub,
+      pubsub,
       topicPrefix,
     );
     // If onRequest is provided, wrap it as a Cloud Function automatically.
     // Otherwise expose the raw handler so the user can wrap it.
-    handlers["syncAdmin"] = adminConfig.onRequest
+    handlers["adminsync"] = adminConfig.onRequest
       ? adminConfig.httpsOptions
         ? adminConfig.onRequest(adminConfig.httpsOptions, adminHandler)
         : adminConfig.onRequest(adminHandler)
@@ -111,10 +137,12 @@ export function createFirestoreSync<M extends Record<string, any>>(
      * didn't pass `onRequest` in the admin config.
      * @example
      * ```ts
-     * export const syncAdmin = onRequest(sync.adminHandler!);
+     * export const adminsync = onRequest(sync.adminHandler!);
      * ```
      */
-    adminHandler: adminHandler as ((req: any, res: any) => Promise<void>) | null,
+    adminHandler: adminHandler as
+      | ((req: any, res: any) => Promise<void>)
+      | null,
     /** Process a SyncEvent directly (for testing) */
     handleMessage: worker.handleMessage as (event: SyncEvent) => Promise<void>,
     /** Internal queue map (for testing) */
@@ -125,7 +153,12 @@ export function createFirestoreSync<M extends Record<string, any>>(
 
   // Hide non-function properties from Firebase's recursive discovery.
   // Only `functions` is enumerable — the rest is accessible but invisible to Object.keys().
-  for (const key of ["adminHandler", "handleMessage", "queues", "shutdown"] as const) {
+  for (const key of [
+    "adminHandler",
+    "handleMessage",
+    "queues",
+    "shutdown",
+  ] as const) {
     Object.defineProperty(result, key, { enumerable: false });
   }
 
