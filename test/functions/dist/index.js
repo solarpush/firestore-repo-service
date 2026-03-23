@@ -252,7 +252,7 @@ const adminHandler = (0, firestore_repo_service_1.createAdminServer)({
         username: "admin",
         password: "password",
     },
-    basePath: "/admin",
+    basePath: "/",
     repos: {
         posts: {
             repo: repos.posts,
@@ -300,7 +300,7 @@ const adminHandler = (0, firestore_repo_service_1.createAdminServer)({
 exports.admin = (0, https_1.onRequest)(adminHandler.httpsOptions, adminHandler);
 const crudServer = (0, firestore_repo_service_1.createCrudServer)({
     httpsOptions: { invoker: "public" },
-    basePath: "/crud",
+    basePath: "/",
     repos: {
         posts: {
             repo: repos.posts,
@@ -374,7 +374,7 @@ exports.sync = (0, sync_1.createFirestoreSync)(repos, {
             username: "admin",
             password: "password",
         },
-        basePath: "/sync-functions-syncAdmin",
+        basePath: "/",
         featuresFlag: {
             viewQueue: true,
             manualSync: true,

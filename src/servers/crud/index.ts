@@ -120,7 +120,7 @@ function scalarDocsHtml(title: string, specUrl: string): string {
  * is visible in URLs but stripped before the handler receives `req.url`.
  * In production Firebase proxy strips it automatically.
  */
-function getLinkBase(staticBasePath: string): string {
+function getLinkBase(req: any, staticBasePath: string): string {
   const base = staticBasePath === "/" ? "" : staticBasePath.replace(/\/$/, "");
 
   if (process.env["FUNCTIONS_EMULATOR"] === "true") {
@@ -131,6 +131,14 @@ function getLinkBase(staticBasePath: string): string {
     const region = process.env["FUNCTION_REGION"] ?? "us-central1";
     const target = process.env["FUNCTION_TARGET"] ?? "";
     return `/${project}/${region}/${target}${base}`;
+  }
+
+  // Cloud Functions v2: K_SERVICE = function name = URL path prefix.
+  // Only add it when accessed via cloudfunctions.net (not custom domains).
+  const service = process.env["K_SERVICE"];
+  const host: string = req?.hostname ?? req?.headers?.["host"] ?? "";
+  if (service && host.includes("cloudfunctions.net")) {
+    return `/${service}${base}`;
   }
 
   return base;
@@ -429,10 +437,10 @@ export function createCrudServer<
         .send(JSON.stringify(spec, null, 2));
     });
 
-    router.get(docsPath, (_req: any, res: any) => {
-      // Rebuild spec URL with the Firebase Functions prefix when running
-      // in the emulator so Scalar can fetch the spec correctly.
-      const specUrl = getLinkBase(base) + "/__spec.json";
+    router.get(docsPath, (req: any, res: any) => {
+      // Rebuild spec URL with the correct prefix for the current context
+      // (emulator, Cloud Functions URL, or custom domain).
+      const specUrl = getLinkBase(req, base) + "/__spec.json";
       const html = scalarDocsHtml(openapiOpts.title ?? "CRUD API", specUrl);
       res
         .status(200)

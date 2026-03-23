@@ -22,6 +22,7 @@ initializeApp({
 });
 
 const db = getFirestore();
+db.settings({ preferRest: true });
 
 // ============================================
 // Models (interfaces pour repos sans schema Zod)
@@ -303,7 +304,7 @@ const adminHandler = createAdminServer({
 export const admin = onRequest(adminHandler.httpsOptions!, adminHandler);
 const crudServer = createCrudServer({
   httpsOptions: { invoker: "public" },
-  basePath: "/crud",
+  basePath: "/",
   repos: {
     posts: {
       repo: repos.posts,
@@ -380,7 +381,7 @@ export const sync = createFirestoreSync(repos, {
       username: "admin",
       password: "password",
     },
-    basePath: "/sync-functions-syncAdmin",
+    basePath: "/",
     featuresFlag: {
       viewQueue: true,
       manualSync: true,
