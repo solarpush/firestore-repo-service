@@ -103,8 +103,15 @@ export class SyncQueue {
       }
     } catch (err) {
       if (this.onFlushError) {
-        await this.onFlushError(batch, err).catch(() => {
-          /* swallow re-publish errors to avoid infinite loops */
+        await this.onFlushError(batch, err).catch((handlerErr) => {
+          console.error(
+            `[SyncQueue] Flush error for ${this.tableName}:`,
+            err,
+          );
+          console.error(
+            `[SyncQueue] Error handler also failed:`,
+            handlerErr,
+          );
         });
       } else {
         // Re-insert at the front so we retry next flush

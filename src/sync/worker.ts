@@ -96,11 +96,15 @@ export function createSyncWorker<M extends Record<string, any>>(
     const repoCfg = repoConfigs[repoName];
     const tableName = repoCfg?.tableName ?? repoName;
 
-    // On flush failure → re-publish to PubSub dead-letter
+    // On flush failure → log error + re-publish to PubSub dead-letter
     const onFlushError = async (
       events: SyncEvent[],
-      _error: unknown,
+      error: unknown,
     ): Promise<void> => {
+      console.error(
+        `[SyncWorker] Flush failed for "${repoName}" (${events.length} events):`,
+        error,
+      );
       try {
         const dlTopicName = `${topicPrefix}-${repoName}-dlq`;
         const dlTopic = deps.pubsub.topic(dlTopicName);
@@ -114,7 +118,7 @@ export function createSyncWorker<M extends Record<string, any>>(
         }
       } catch (dlErr) {
         console.error(
-          `[SyncWorker] Dead-letter publish failed for ${repoName}:`,
+          `[SyncWorker] Dead-letter publish also failed for ${repoName}:`,
           dlErr,
         );
       }
