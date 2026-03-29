@@ -287,11 +287,11 @@ const adminHandler = createAdminServer({
       path: "comments",
       allowDelete: true,
       fieldsConfig: {
-        docId: ["create", "filterable"],
+        docId: ["filterable"],
         likes: ["filterable"],
         content: ["create", "mutable"],
       },
-      relationalFields: [],
+      relationalFields: [{ key: "postId", column: "Post" }],
     },
   },
 });
@@ -394,7 +394,6 @@ export const sync = createFirestoreSync(repos, {
     },
     posts: { columnMap: { docId: "post_id" } },
     comments: {
-      columnMap: { docId: "comment_id" },
       triggerPath: "posts/{postId}/comments/{docId}",
     },
   },

@@ -284,11 +284,11 @@ const adminHandler = (0, firestore_repo_service_1.createAdminServer)({
             path: "comments",
             allowDelete: true,
             fieldsConfig: {
-                docId: ["create", "filterable"],
+                docId: ["filterable"],
                 likes: ["filterable"],
                 content: ["create", "mutable"],
             },
-            relationalFields: [],
+            relationalFields: [{ key: "postId", column: "Post" }],
         },
     },
 });
@@ -389,7 +389,6 @@ exports.sync = (0, sync_1.createFirestoreSync)(repos, {
         },
         posts: { columnMap: { docId: "post_id" } },
         comments: {
-            columnMap: { docId: "comment_id" },
             triggerPath: "posts/{postId}/comments/{docId}",
         },
     },

@@ -181,6 +181,10 @@ export function createSyncWorker<M extends Record<string, any>>(
           return;
         }
         await handleMessage(data);
+        // Flush so data is persisted before the Cloud Function container shuts down.
+        // Force-sync (admin) handles its own flush after the batch loop.
+        const q = queues.get(data.repoName);
+        if (q) await q.flush();
       },
     );
   }

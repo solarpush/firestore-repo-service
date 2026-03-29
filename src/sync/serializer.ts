@@ -105,7 +105,12 @@ export function serializeDocument(
     // Also check top-level prefix for excludes (e.g. exclude "address" removes all address_* cols)
     const topLevel = flatKey.split("__")[0]!;
     if (topLevel !== flatKey && exclude.has(topLevel)) continue;
-    const column = columnMap[flatKey] ?? flatKey;
+    const column =
+      columnMap[flatKey] ??
+      (flatKey.includes("__")
+        ? columnMap[flatKey.split("__").pop()!]
+        : undefined) ??
+      flatKey;
     result[column] = value;
   }
 
