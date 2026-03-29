@@ -8,9 +8,14 @@
  */
 
 import { z } from "zod";
-import { zodSchemaToColumns } from "./schema-mapper";
 import { SyncQueue } from "./queue";
-import type { RepoSyncConfig, SqlAdapter, SyncEvent, SyncWorkerConfig } from "./types";
+import { zodSchemaToColumns } from "./schema-mapper";
+import type {
+  RepoSyncConfig,
+  SqlAdapter,
+  SyncEvent,
+  SyncWorkerConfig,
+} from "./types";
 
 // ---------------------------------------------------------------------------
 // Migration tracking
@@ -43,11 +48,7 @@ async function ensureMigrated(
     const existing = new Set(await adapter.getTableColumns(tableName));
     const newCols = columns.filter((c) => !existing.has(c.name));
     if (newCols.length > 0) {
-      const ddl = adapter.dialect.addColumnsDDL(tableName, newCols);
-      for (const stmt of ddl.split("\n").filter(Boolean)) {
-        await (adapter as any).bigquery?.query?.({ query: stmt }) ??
-          Promise.resolve();
-      }
+      await adapter.addColumns(tableName, newCols);
     }
   }
 
@@ -78,7 +79,10 @@ export function createSyncWorker<M extends Record<string, any>>(
     batchSize = 100,
     flushIntervalMs = 5_000,
     autoMigrate = false,
-    repos: repoConfigs = {} as Record<string, RepoSyncConfig<string> | undefined>,
+    repos: repoConfigs = {} as Record<
+      string,
+      RepoSyncConfig<string> | undefined
+    >,
   } = config;
 
   // Build per-repo queues lazily
@@ -131,9 +135,7 @@ export function createSyncWorker<M extends Record<string, any>>(
     }
 
     const documentKey: string =
-      (repo as any)._systemKeys?.[0] ??
-      (repo as any).documentKey ??
-      "docId";
+      (repo as any)._systemKeys?.[0] ?? (repo as any).documentKey ?? "docId";
 
     if (autoMigrate) {
       const schema: z.ZodObject<any> | undefined =
@@ -159,14 +161,17 @@ export function createSyncWorker<M extends Record<string, any>>(
 
   // Cloud Function v2 PubSub handler (sync — deps are already available)
   function createHandler(topicName: string) {
-    return deps.pubsubHandler.onMessagePublished(topicName, async (event: any) => {
-      const data: SyncEvent = event.data?.message?.json ?? event.data?.json;
-      if (!data) {
-        console.warn("[SyncWorker] Received empty PubSub message");
-        return;
-      }
-      await handleMessage(data);
-    });
+    return deps.pubsubHandler.onMessagePublished(
+      topicName,
+      async (event: any) => {
+        const data: SyncEvent = event.data?.message?.json ?? event.data?.json;
+        if (!data) {
+          console.warn("[SyncWorker] Received empty PubSub message");
+          return;
+        }
+        await handleMessage(data);
+      },
+    );
   }
 
   return {

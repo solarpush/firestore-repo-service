@@ -9,11 +9,6 @@ import { initializeApp } from "firebase-admin/app";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
 import { onRequest } from "firebase-functions/https";
 import z from "zod";
-// IMPORTANT: Configurer les variables d'environnement AVANT d'initialiser
-process.env.FIRESTORE_EMULATOR_HOST = "localhost:8080";
-// Supprimer le warning de métadonnées GCP
-process.env.GOOGLE_CLOUD_PROJECT = "firestore-repo-services";
-process.env.GCLOUD_PROJECT = "firestore-repo-services";
 
 // Initialize Firebase Admin avec l'émulateur
 // IMPORTANT: Utiliser le même projectId que l'émulateur (firestore-repo-services)
@@ -366,13 +361,12 @@ export const sync = createFirestoreSync(repos, {
   deps: {
     firestoreTriggers,
     pubsubHandler,
-    pubsub: () => new PubSub(),
+    pubsub: new PubSub(),
   },
-  adapter: () =>
-    new BigQueryAdapter({
-      bigquery: new BigQuery({ projectId: "firestore-repo-services" }),
-      datasetId: "firestore_sync",
-    }),
+  adapter: new BigQueryAdapter({
+    bigquery: new BigQuery({ projectId: "firestore-repo-services" }),
+    datasetId: "firestore_sync",
+  }),
   topicPrefix: "firestore-sync",
   autoMigrate: true,
   admin: {

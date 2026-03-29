@@ -50,10 +50,6 @@ export interface SqlDialect {
   mapType(logical: LogicalType): string;
   /** Wrap an identifier (table / column name) for the dialect */
   quoteIdentifier(id: string): string;
-  /** Generate a full CREATE TABLE statement */
-  createTableDDL(table: SqlTableDef): string;
-  /** Generate ALTER TABLE ADD COLUMN statement(s) for new columns */
-  addColumnsDDL(tableName: string, columns: SqlColumn[]): string;
 }
 
 /**
@@ -141,6 +137,18 @@ export interface SqlAdapter {
     primaryKey: string,
     ids: string[],
   ): Promise<void>;
+
+  /**
+   * Add columns to an existing table.
+   * The adapter is responsible for qualifying table names (e.g. dataset.table).
+   */
+  addColumns(tableName: string, columns: SqlColumn[]): Promise<void>;
+
+  /**
+   * Execute a raw SQL statement.
+   * The adapter is responsible for qualifying any table references.
+   */
+  executeRaw(sql: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

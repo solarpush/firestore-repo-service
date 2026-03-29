@@ -135,10 +135,13 @@ function getLinkBase(req: any, staticBasePath: string): string {
 
   // Cloud Functions v2: K_SERVICE = function name = URL path prefix.
   // Only add it when accessed via cloudfunctions.net (not custom domains).
+  // Cloud Run (Gen 2) lowercases service names, but K_SERVICE may still
+  // carry the original mixed-case export name — normalise to lowercase
+  // so that generated links match the canonical URL.
   const service = process.env["K_SERVICE"];
   const host: string = req?.hostname ?? req?.headers?.["host"] ?? "";
   if (service && host.includes("cloudfunctions.net")) {
-    return `/${service}${base}`;
+    return `/${service.toLowerCase()}${base}`;
   }
 
   return base;

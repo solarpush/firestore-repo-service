@@ -42,18 +42,12 @@ const app_1 = require("firebase-admin/app");
 const firestore_1 = require("firebase-admin/firestore");
 const https_1 = require("firebase-functions/https");
 const zod_1 = __importDefault(require("zod"));
-// IMPORTANT: Configurer les variables d'environnement AVANT d'initialiser
-process.env.FIRESTORE_EMULATOR_HOST = "localhost:8080";
-// Supprimer le warning de métadonnées GCP
-process.env.GOOGLE_CLOUD_PROJECT = "firestore-repo-services";
-process.env.GCLOUD_PROJECT = "firestore-repo-services";
 // Initialize Firebase Admin avec l'émulateur
 // IMPORTANT: Utiliser le même projectId que l'émulateur (firestore-repo-services)
 (0, app_1.initializeApp)({
     projectId: "firestore-repo-services",
 });
 const db = (0, firestore_1.getFirestore)();
-db.settings({ preferRest: true });
 // ============================================
 // Models (interfaces pour repos sans schema Zod)
 // ============================================
@@ -359,7 +353,11 @@ const bigquery_2 = require("@lpdjs/firestore-repo-service/sync/bigquery");
 const firestoreTriggers = __importStar(require("firebase-functions/v2/firestore"));
 const pubsubHandler = __importStar(require("firebase-functions/v2/pubsub"));
 exports.sync = (0, sync_1.createFirestoreSync)(repos, {
-    deps: { firestoreTriggers, pubsubHandler, pubsub: new pubsub_1.PubSub() },
+    deps: {
+        firestoreTriggers,
+        pubsubHandler,
+        pubsub: new pubsub_1.PubSub(),
+    },
     adapter: new bigquery_2.BigQueryAdapter({
         bigquery: new bigquery_1.BigQuery({ projectId: "firestore-repo-services" }),
         datasetId: "firestore_sync",

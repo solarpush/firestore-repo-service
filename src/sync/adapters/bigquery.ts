@@ -1,13 +1,13 @@
 import type {
+  LogicalType,
   SqlAdapter,
   SqlColumn,
   SqlDialect,
   SqlTableDef,
-  LogicalType,
 } from "../types";
 
 // ---------------------------------------------------------------------------
-// Dialect
+// Dialect (internal — used only by BigQueryAdapter)
 // ---------------------------------------------------------------------------
 
 /** BigQuery SQL dialect mapping. */
@@ -35,26 +35,6 @@ class BigQueryDialect implements SqlDialect {
 
   quoteIdentifier(id: string): string {
     return `\`${id}\``;
-  }
-
-  createTableDDL(table: SqlTableDef): string {
-    const cols = table.columns
-      .map((c) => {
-        const notNull = c.isPrimaryKey ? " NOT NULL" : "";
-        return `  ${this.quoteIdentifier(c.name)} ${c.sqlType}${notNull}`;
-      })
-      .join(",\n");
-
-    return `CREATE TABLE IF NOT EXISTS ${this.quoteIdentifier(table.tableName)} (\n${cols}\n);`;
-  }
-
-  addColumnsDDL(tableName: string, columns: SqlColumn[]): string {
-    return columns
-      .map(
-        (c) =>
-          `ALTER TABLE ${this.quoteIdentifier(tableName)} ADD COLUMN ${this.quoteIdentifier(c.name)} ${c.sqlType};`,
-      )
-      .join("\n");
   }
 }
 
@@ -109,10 +89,27 @@ export class BigQueryAdapter implements SqlAdapter {
     return fields.map((f) => f.name);
   }
 
-  /** Create a table using the dialect's DDL. */
+  /** Create a table using a fully-qualified name. */
   async createTable(table: SqlTableDef): Promise<void> {
-    const ddl = this.dialect.createTableDDL(table);
+    const qi = (id: string) => this.dialect.quoteIdentifier(id);
+    const cols = table.columns
+      .map((c) => {
+        const notNull = c.isPrimaryKey ? " NOT NULL" : "";
+        return `  ${qi(c.name)} ${c.sqlType}${notNull}`;
+      })
+      .join(",\n");
+
+    const ddl = `CREATE TABLE IF NOT EXISTS ${this.fqn(table.tableName)} (\n${cols}\n);`;
     await this.bigquery.query({ query: ddl });
+  }
+
+  /** Add columns to an existing table using a fully-qualified name. */
+  async addColumns(tableName: string, columns: SqlColumn[]): Promise<void> {
+    const qi = (id: string) => this.dialect.quoteIdentifier(id);
+    for (const c of columns) {
+      const stmt = `ALTER TABLE ${this.fqn(tableName)} ADD COLUMN ${qi(c.name)} ${c.sqlType};`;
+      await this.bigquery.query({ query: stmt });
+    }
   }
 
   /** Append rows via BigQuery streaming insert. */
@@ -145,7 +142,10 @@ export class BigQueryAdapter implements SqlAdapter {
     const selects = rows.map((row, i) => {
       const values = allKeys
         .map((k) => {
-          const aliased = i === 0 ? `${this.escapeValue(row[k])} AS ${qi(k)}` : this.escapeValue(row[k]);
+          const aliased =
+            i === 0
+              ? `${this.escapeValue(row[k])} AS ${qi(k)}`
+              : this.escapeValue(row[k]);
           return aliased;
         })
         .join(", ");
