@@ -8,6 +8,7 @@ import { z } from "zod";
 import { serializeDocument } from "../../src/sync/serializer";
 import { zodSchemaToColumns } from "../../src/sync/schema-mapper";
 import { createSyncWorker } from "../../src/sync/worker";
+import { BigQueryAdapter } from "../../src/sync/adapters/bigquery";
 import type { SqlAdapter, SqlColumn, SqlDialect, SqlTableDef } from "../../src/sync/types";
 
 // ---------------------------------------------------------------------------
@@ -418,5 +419,88 @@ describe("handleMessage with columnMap", () => {
     expect(adapter.upsertCalls[0]!.primaryKey).toBe("user_id");
 
     await worker.shutdown();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BigQueryAdapter — escapeValue handles timestamps
+// ---------------------------------------------------------------------------
+
+describe("BigQueryAdapter escapeValue", () => {
+  test("MERGE uses TIMESTAMP() for ISO date strings", async () => {
+    let capturedQuery = "";
+    const fakeBigquery = {
+      dataset: () => ({
+        table: () => ({
+          exists: async () => [true],
+          getMetadata: async () => [{ schema: { fields: [] } }],
+        }),
+      }),
+      query: async ({ query }: { query: string }) => {
+        capturedQuery = query;
+      },
+    };
+
+    const adapter = new BigQueryAdapter({
+      bigquery: fakeBigquery,
+      datasetId: "test_ds",
+    });
+
+    await adapter.upsertRows(
+      "posts",
+      [
+        {
+          post_id: "p1",
+          title: "Hello",
+          createdAt: "2026-03-29T20:59:27.394Z",
+          updatedAt: "2026-03-29T21:00:00.000Z",
+        },
+      ],
+      "post_id",
+    );
+
+    // Timestamps should use TIMESTAMP() not bare string literals
+    expect(capturedQuery).toContain("TIMESTAMP('2026-03-29T20:59:27.394Z')");
+    expect(capturedQuery).toContain("TIMESTAMP('2026-03-29T21:00:00.000Z')");
+    // Regular strings should stay as plain string literals
+    expect(capturedQuery).toContain("'p1'");
+    expect(capturedQuery).toContain("'Hello'");
+    expect(capturedQuery).not.toContain("TIMESTAMP('p1')");
+  });
+
+  test("MERGE handles null, boolean, number, and JSON values", async () => {
+    let capturedQuery = "";
+    const fakeBigquery = {
+      dataset: () => ({
+        table: () => ({ exists: async () => [true] }),
+      }),
+      query: async ({ query }: { query: string }) => {
+        capturedQuery = query;
+      },
+    };
+
+    const adapter = new BigQueryAdapter({
+      bigquery: fakeBigquery,
+      datasetId: "test_ds",
+    });
+
+    await adapter.upsertRows(
+      "items",
+      [
+        {
+          id: "i1",
+          count: 42,
+          active: true,
+          tags: '[\"a\",\"b\"]',
+          meta: null,
+        },
+      ],
+      "id",
+    );
+
+    expect(capturedQuery).toContain("42");
+    expect(capturedQuery).toContain("TRUE");
+    expect(capturedQuery).toContain("PARSE_JSON(");
+    expect(capturedQuery).toContain("NULL");
   });
 });

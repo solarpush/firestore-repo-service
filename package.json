@@ -1,6 +1,6 @@
 {
   "name": "@lpdjs/firestore-repo-service",
-  "version": "2.1.7",
+  "version": "2.1.9",
   "description": "⚡ Type-safe Firestore ORM with auto-generated repositories, advanced queries, relations with typed select, pagination with include, batch/bulk operations, aggregations and transactions.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -84,7 +84,7 @@
     "deploy": "firebase deploy --only functions --project firestore-repo-services",
     "emulator": "firebase emulators:start --project firestore-repo-services",
     "emulator:fire": "firebase emulators:start --only firestore --project firestore-repo-services",
-    "emulator:func": "firebase emulators:start --only firestore,functions --project firestore-repo-services",
+    "emulator:func": "firebase emulators:start --only functions --project firestore-repo-services",
     "lint": "tsc --noEmit"
   },
   "keywords": [

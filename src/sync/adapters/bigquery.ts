@@ -208,12 +208,20 @@ export class BigQueryAdapter implements SqlAdapter {
     return `\`${this.datasetId}.${tableName}\``;
   }
 
+  /** ISO 8601 timestamp pattern (e.g. 2026-03-29T20:59:27.394Z) */
+  private static readonly ISO_TIMESTAMP_RE =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+
   /** Escape a value for use as a SQL literal. */
   private escapeValue(v: unknown): string {
     if (v === null || v === undefined) return "NULL";
     if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
     if (typeof v === "number" || typeof v === "bigint") return String(v);
     if (typeof v === "string") {
+      // ISO 8601 timestamps → TIMESTAMP literal (keeps type-safety with BQ TIMESTAMP columns)
+      if (BigQueryAdapter.ISO_TIMESTAMP_RE.test(v)) {
+        return `TIMESTAMP('${v}')`;
+      }
       // Detect JSON strings (arrays/objects) → use PARSE_JSON for native JSON columns
       if (
         (v.startsWith("[") && v.endsWith("]")) ||
