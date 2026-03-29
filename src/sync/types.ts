@@ -224,7 +224,11 @@ export interface PubSubHandlerDep {
 
 /** PubSub client instance (e.g. `new PubSub()`). */
 export interface PubSubClientDep {
-  topic(name: string): { publishMessage(msg: any): Promise<any> };
+  topic(name: string): {
+    publishMessage(msg: any): Promise<any>;
+    exists(): Promise<[boolean]>;
+    create(): Promise<any>;
+  };
 }
 
 /** All external deps needed by the sync module. */
@@ -263,6 +267,8 @@ export interface SyncWorkerConfig<M = Record<string, any>> {
   flushIntervalMs?: number;
   /** Auto-create/migrate tables on first event (default: false) */
   autoMigrate?: boolean;
+  /** PubSub topic prefix (default: "firestore-sync") */
+  topicPrefix?: string;
   /** Per-repo overrides */
   repos?: TypedRepoSyncConfigs<M>;
 }

@@ -79,6 +79,7 @@ export function createSyncWorker<M extends Record<string, any>>(
     batchSize = 100,
     flushIntervalMs = 5_000,
     autoMigrate = false,
+    topicPrefix = "firestore-sync",
     repos: repoConfigs = {} as Record<
       string,
       RepoSyncConfig<string> | undefined
@@ -101,7 +102,13 @@ export function createSyncWorker<M extends Record<string, any>>(
       _error: unknown,
     ): Promise<void> => {
       try {
-        const dlTopic = deps.pubsub.topic(`${repoName}-sync-dlq`);
+        const dlTopicName = `${topicPrefix}-${repoName}-dlq`;
+        const dlTopic = deps.pubsub.topic(dlTopicName);
+        const [exists] = await dlTopic.exists();
+        if (!exists) {
+          await dlTopic.create();
+          console.info(`[SyncWorker] Created DLQ topic "${dlTopicName}"`);
+        }
         for (const evt of events) {
           await dlTopic.publishMessage({ json: evt });
         }
@@ -137,11 +144,15 @@ export function createSyncWorker<M extends Record<string, any>>(
     const documentKey: string =
       (repo as any)._systemKeys?.[0] ?? (repo as any).documentKey ?? "docId";
 
+    const repoCfg = repoConfigs[repoName];
+    const columnMap = repoCfg?.columnMap as Record<string, string> | undefined;
+    // The primaryKey for BigQuery must use the mapped column name (e.g. docId → user_id)
+    const primaryKey = columnMap?.[documentKey] ?? documentKey;
+
     if (autoMigrate) {
       const schema: z.ZodObject<any> | undefined =
         (repo as any).schema ?? undefined;
       if (schema) {
-        const repoCfg = repoConfigs[repoName];
         const tableName = repoCfg?.tableName ?? repoName;
         await ensureMigrated(
           repoName,
@@ -150,12 +161,12 @@ export function createSyncWorker<M extends Record<string, any>>(
           tableName,
           documentKey,
           repoCfg?.exclude,
-          repoCfg?.columnMap as Record<string, string> | undefined,
+          columnMap,
         );
       }
     }
 
-    const queue = getQueue(repoName, documentKey);
+    const queue = getQueue(repoName, primaryKey);
     queue.enqueue(syncEvent);
   }
 

@@ -372,7 +372,6 @@ export const sync = createFirestoreSync(repos, {
   admin: {
     onRequest,
     httpsOptions: { invoker: "public" },
-
     auth: {
       type: "basic",
       realm: "Admin Area",

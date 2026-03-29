@@ -96,6 +96,7 @@ export function createFirestoreSync<M extends Record<string, any>>(
     batchSize,
     flushIntervalMs,
     autoMigrate,
+    topicPrefix,
     repos: repoConfigs,
   });
 
