@@ -347,7 +347,7 @@ const crudServer = createCrudServer({
     auth: "bearer",
   },
 });
-export const crud = onRequest(crudServer.httpsOptions!, crudServer);
+export const crud = onRequest(crudServer.httpsOptions ?? {}, crudServer);
 
 // Firestore → BigQuery sync
 import { BigQuery } from "@google-cloud/bigquery";

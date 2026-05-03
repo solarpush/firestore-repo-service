@@ -169,23 +169,58 @@ export const admin = onRequest(handler.httpsOptions!, handler);
 Available options include `invoker`, `region`, `memory`, `timeoutSeconds`, `minInstances`,
 `maxInstances`, `concurrency`, `cors`, `serviceAccount`, `secrets`, etc.
 
-## Pagination API server (`createPaginationFunction`)
+## Composite Index Error Handling
 
-A separate Firebase HTTPS handler for client-facing paginated API endpoints:
+When a query requires a composite index that doesn't exist, Firestore throws `FAILED_PRECONDITION` (code 9).
+The admin server catches this error and displays a helpful alert with a direct link to create the index:
+
+- **Regular collections**: the error message often contains the Firebase Console URL — the admin extracts it automatically
+- **Collection groups**: Firestore does *not* include the URL — the admin **generates** it from the query context (filters, sort, collection ID, project ID)
+
+The list view shows a **warning alert** with a "Create Index →" button linking directly to the Firebase Console index creation wizard.
+
+### Filter bar index hint
+
+When two or more filters are active (or any filter on a collection group), the filter bar displays a subtle info badge:
+
+> ⚠ This query may require a composite index.
+
+This proactive hint helps before the query even fails.
+
+### `QueryError` type
 
 ```typescript
-import { createPaginationFunction } from "@lpdjs/firestore-repo-service/servers/pagination";
-import z from "zod";
+interface QueryError {
+  type: "index" | "error";
+  message: string;
+  indexUrl?: string;  // Firebase Console URL (always present for "index" type)
+}
+```
 
-export const postsApi = onRequest(
-  createPaginationFunction(repos.posts, {
-    schema:          z.object({ status: z.enum(["draft", "published"]).optional() }),
-    defaultPageSize: 20,
-    maxPageSize:     100,
-    cors:            true,
+## CRUD API Server
+
+For client-facing REST endpoints with validation, pagination, and relation population, use `createCrudServer`:
+
+```typescript
+import { createCrudServer } from "@lpdjs/firestore-repo-service/servers/crud";
+
+export const api = onRequest(
+  createCrudServer({
+    basePath: "/api",
+    repos: {
+      posts: {
+        repo: repos.posts,
+        schema: postSchema,
+        path: "posts",
+        fieldsConfig: {
+          status:   ["filterable"],
+          authorId: ["filterable"],
+        },
+        allowDelete: true,
+      },
+    },
   }),
 );
 ```
 
-Supports GET (query string) and POST (JSON body) with `where`, `orderBy`, `select`,
-`include`, `cursor` (base64url encoded), and `pageSize`.
+Supports GET and POST with `where`, `orderBy`, `select`, `include`, `cursor`, and `pageSize`.

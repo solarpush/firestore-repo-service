@@ -338,6 +338,18 @@ export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
+  /**
+   * Discriminator for known error categories. Currently:
+   * - "index" → Firestore composite index missing; see `indexUrl`.
+   */
+  errorType?: "index";
+  /**
+   * Firebase Console URL to create the missing composite index.
+   * Always present when `errorType === "index"`. The CRUD server fills this in
+   * even for collection-group queries, where the Firestore SDK does not
+   * include the link in the error message.
+   */
+  indexUrl?: string;
   meta?: {
     total?: number;
     page?: number;

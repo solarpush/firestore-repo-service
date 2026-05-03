@@ -9,6 +9,8 @@ type OpDef = { value: WhereOp; label: string };
 const OPS_TEXT: OpDef[] = [
   { value: "==", label: "=" },
   { value: "!=", label: "≠" },
+  { value: "in", label: "in" },
+  { value: "not-in", label: "not in" },
 ];
 const OPS_NUMERIC: OpDef[] = [
   { value: "==", label: "=" },
@@ -17,6 +19,8 @@ const OPS_NUMERIC: OpDef[] = [
   { value: "<=", label: "≤" },
   { value: ">", label: ">" },
   { value: ">=", label: "≥" },
+  { value: "in", label: "in" },
+  { value: "not-in", label: "not in" },
 ];
 const OPS_ARRAY: OpDef[] = [
   { value: "array-contains", label: "contains" },
@@ -121,14 +125,18 @@ export function FilterBar({
   action,
   columnMeta,
   activeFilters,
+  isGroup,
 }: {
   /** Form action URL (list page URL, without query params) */
   action: string;
   columnMeta: ColumnMeta[];
   activeFilters: FilterState[];
+  /** Whether this repo is a collection group (subcollection) */
+  isGroup?: boolean;
 }) {
   const activeMap = Object.fromEntries(activeFilters.map((f) => [f.field, f]));
   const hasActive = activeFilters.length > 0;
+  const needsIndexHint = activeFilters.length >= 2 || (isGroup && hasActive);
 
   // Columns that can be filtered (exclude pure-object columns)
   const filterable = columnMeta.filter(
@@ -191,7 +199,7 @@ export function FilterBar({
             })}
           </div>
 
-          <div class="flex gap-2 mt-4 pt-3 border-t border-base-200">
+          <div class="flex flex-wrap gap-2 mt-4 pt-3 border-t border-base-200 items-center">
             <button type="submit" class="btn btn-sm btn-primary">
               Apply
             </button>
@@ -199,6 +207,27 @@ export function FilterBar({
               <a href={action} class="btn btn-sm btn-ghost">
                 Clear
               </a>
+            )}
+            {needsIndexHint && (
+              <span class="text-xs text-warning ml-auto flex items-center gap-1">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                {isGroup
+                  ? "Collection group queries require a composite index"
+                  : "Multiple filters may require a composite index"}
+              </span>
             )}
           </div>
         </form>

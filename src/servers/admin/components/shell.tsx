@@ -71,9 +71,26 @@ export const PageShell: FC<PropsWithChildren<{ opts: PageOptions }>> = ({
           {flash && (
             <div
               role="alert"
-              class={`alert ${flash.type === "success" ? "alert-success" : "alert-error"} mb-6`}
+              class={`alert ${
+                flash.type === "success"
+                  ? "alert-success"
+                  : flash.type === "warning"
+                    ? "alert-warning"
+                    : "alert-error"
+              } mb-6`}
             >
-              <span>{flash.message}</span>
+              <span class="flex-1">{flash.message}</span>
+              {flash.action && (
+                <a
+                  href={flash.action.href}
+                  {...(flash.action.external
+                    ? { target: "_blank", rel: "noopener noreferrer" }
+                    : {})}
+                  class="btn btn-sm btn-outline"
+                >
+                  {flash.action.label}
+                </a>
+              )}
             </div>
           )}
 

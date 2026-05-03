@@ -95,6 +95,17 @@ deps: {
 }
 ```
 
+::: tip Initialisation lazy
+`deps.pubsub` et `adapter` acceptent une factory `() => T` pour une initialisation différée.
+Cela évite de créer des canaux gRPC ou des connexions BigQuery au chargement du module pour les
+Cloud Functions qui n'en ont pas besoin (ex: fonctions HTTP-only partageant le même déploiement).
+
+```typescript
+deps: { firestoreTriggers, pubsubHandler, pubsub: () => new PubSub() },
+adapter: () => new BigQueryAdapter({ bigquery: new BigQuery(), datasetId: "sync" }),
+```
+:::
+
 ### Config par repo (`repos`)
 
 | Option        | Type                     | Description                                                             |
@@ -134,10 +145,11 @@ const adapter = new BigQueryAdapter({
 L'adaptateur gère :
 
 - Création de tables via DDL
-- Insertions en streaming
-- Upserts via MERGE
+- Upserts via MERGE (INSERT … ON CONFLICT / MERGE)
 - Suppression par clé primaire
 - Introspection du schéma (pour les health checks)
+- Migration automatique de colonnes (`addColumns`)
+- Les chaînes ISO 8601 dans les colonnes `TIMESTAMP` sont wrappées en littéraux `TIMESTAMP('...')`
 
 ### Authentification
 
@@ -264,6 +276,9 @@ class MyAdapter implements SqlAdapter {
     /* ... */
   }
   async createTable(table: SqlTableDef): Promise<void> {
+    /* ... */
+  }
+  async addColumns(tableName: string, columns: SqlColumn[]): Promise<void> {
     /* ... */
   }
   async insertRows(

@@ -11,6 +11,11 @@
  */
 
 import { z } from "zod";
+import {
+  isMissingIndexError,
+  toQueryError,
+  type QueryErrorContext,
+} from "../admin/index-url";
 import type {
   ApiResponse,
   CrudRepoEntry,
@@ -41,6 +46,35 @@ function sendSuccess<T>(
 
 function sendError(res: any, error: string, status = 400): void {
   sendJson(res, { success: false, error }, status);
+}
+
+/**
+ * Send a structured error response. When the underlying Firestore error is a
+ * missing-index (`FAILED_PRECONDITION` / code 9), include `errorType: "index"`
+ * and an `indexUrl` pointing to the Firebase Console index-creation wizard —
+ * crucial for collection-group queries where the SDK omits the link.
+ */
+function sendQueryError(
+  res: any,
+  err: unknown,
+  ctx: QueryErrorContext,
+  fallbackMessage: string,
+  verbose: boolean,
+): void {
+  const qe = toQueryError(err, ctx);
+  const isIndex = qe.type === "index";
+  const status = isIndex ? 424 : 500;
+  const message = isIndex
+    ? qe.message
+    : verbose && err instanceof Error
+      ? err.message
+      : fallbackMessage;
+  const payload: ApiResponse = { success: false, error: message };
+  if (isIndex) {
+    payload.errorType = "index";
+    if (qe.indexUrl) payload.indexUrl = qe.indexUrl;
+  }
+  sendJson(res, payload, status);
 }
 
 // ---------------------------------------------------------------------------
@@ -350,6 +384,10 @@ export function createCrudHandlers(
     const entry = getRepoEntry(params.repoName, res);
     if (!entry) return;
 
+    // Captured for error handling (so the catch can build an index URL)
+    let ctxFilters: { field: string; op: any; value: string }[] = [];
+    let ctxSort: { field: string; dir: "asc" | "desc" } | undefined;
+
     try {
       const query = req.query ?? {};
       const pageSize = Math.min(
@@ -387,6 +425,12 @@ export function createCrudHandlers(
 
       // Parse filters
       const filters = parseFilters(query, entry.filterableFields);
+      ctxFilters = filters.map((f) => ({
+        field: f.field,
+        op: f.op,
+        value: String(f.value ?? ""),
+      }));
+      if (orderBy) ctxSort = { field: orderBy, dir: orderDir };
 
       // Build query options
       const queryOptions: any = {
@@ -436,11 +480,19 @@ export function createCrudHandlers(
         hasMore: result.hasNextPage,
       });
     } catch (err) {
-      const message =
-        verbose && err instanceof Error
-          ? err.message
-          : "Failed to fetch documents";
-      sendError(res, message, 500);
+      sendQueryError(
+        res,
+        err,
+        {
+          ref: entry.repo.ref,
+          path: entry.path,
+          isGroup: !!entry.isGroup,
+          filters: ctxFilters,
+          sort: ctxSort,
+        },
+        "Failed to fetch documents",
+        verbose,
+      );
     }
   }
 
@@ -451,10 +503,29 @@ export function createCrudHandlers(
     const entry = getRepoEntry(params.repoName, res);
     if (!entry) return;
 
+    // Captured for error handling (so the catch can build an index URL)
+    let ctxFilters: { field: string; op: any; value: string }[] = [];
+    let ctxSort: { field: string; dir: "asc" | "desc" } | undefined;
+
     try {
       const body: QueryRequestBody = req.body ?? {};
       const pageSize = Math.min(body.pageSize || entry.pageSize, 100);
       const direction = body.direction === "prev" ? "prev" : "next";
+
+      // Capture context for index URL fallback
+      if (body.where) {
+        ctxFilters = body.where.map((w) => ({
+          field: String(w[0]),
+          op: w[1] as any,
+          value: String(w[2] ?? ""),
+        }));
+      }
+      if (body.orderBy && body.orderBy[0]) {
+        ctxSort = {
+          field: body.orderBy[0].field,
+          dir: body.orderBy[0].direction === "desc" ? "desc" : "asc",
+        };
+      }
 
       // Build query options
       const queryOptions: any = {
@@ -576,11 +647,19 @@ export function createCrudHandlers(
         hasMore: result.hasNextPage,
       });
     } catch (err) {
-      const message =
-        verbose && err instanceof Error
-          ? err.message
-          : "Failed to query documents";
-      sendError(res, message, 500);
+      sendQueryError(
+        res,
+        err,
+        {
+          ref: entry.repo.ref,
+          path: entry.path,
+          isGroup: !!entry.isGroup,
+          filters: ctxFilters,
+          sort: ctxSort,
+        },
+        "Failed to query documents",
+        verbose,
+      );
     }
   }
 
@@ -606,11 +685,18 @@ export function createCrudHandlers(
 
       sendSuccess(res, doc);
     } catch (err) {
-      const message =
-        verbose && err instanceof Error
-          ? err.message
-          : "Failed to fetch document";
-      sendError(res, message, 500);
+      sendQueryError(
+        res,
+        err,
+        {
+          ref: entry.repo.ref,
+          path: entry.path,
+          isGroup: !!entry.isGroup,
+          filters: [{ field: entry.documentKey, op: "==", value: id }],
+        },
+        "Failed to fetch document",
+        verbose,
+      );
     }
   }
 

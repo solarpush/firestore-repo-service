@@ -22,8 +22,9 @@ import type {
   RelationalFieldMeta,
   WhereOp,
 } from "./renderer";
-import { renderDashboard, renderFormPage, renderList } from "./renderer";
+import { renderDashboard, renderFormPage, renderList, renderPage } from "./renderer";
 import type { AnyReq, AnyRes, RouteParams } from "./router";
+import { isMissingIndexError, toQueryError } from "./index-url";
 
 // ---------------------------------------------------------------------------
 // Registry type
@@ -135,6 +136,45 @@ async function fetchDocById(
     limit: 1,
   });
   return (results[0] as Record<string, unknown>) ?? null;
+}
+
+/**
+ * Build a `flash` payload (with optional "Create Index" CTA) from a Firestore
+ * error raised while loading a single document. Returns `undefined` if the
+ * error is not interesting enough to render as a structured alert.
+ */
+function flashFromDocFetchError(
+  entry: AdminRepoEntry,
+  docId: string,
+  err: unknown,
+): { type: "warning" | "error"; message: string; action?: { href: string; label: string; external?: boolean } } {
+  const docKey = entry.documentKey ?? "docId";
+  const qe = toQueryError(err, {
+    ref: entry.repo.ref,
+    path: entry.path,
+    isGroup: !!entry.isGroup,
+    filters: [{ field: docKey, op: "==", value: docId }],
+  });
+  if (qe.type === "index") {
+    return {
+      type: "warning",
+      message:
+        "Loading this document requires a composite index that does not exist yet.",
+      ...(qe.indexUrl
+        ? {
+            action: {
+              href: qe.indexUrl,
+              label: "Create Index →",
+              external: true,
+            },
+          }
+        : {}),
+    };
+  }
+  return {
+    type: "error",
+    message: qe.message,
+  };
 }
 
 function sendHtml(res: AnyRes, html: string, status = 200): void {
@@ -420,6 +460,8 @@ function parseFilters(
     "<=",
     ">",
     ">=",
+    "in",
+    "not-in",
     "array-contains",
     "array-contains-any",
   ]);
@@ -449,7 +491,7 @@ function filtersToWhere(filters: FilterState[]): [string, WhereOp, unknown][] {
     return v;
   };
   return filters.map((f) => {
-    if (f.op === "array-contains-any") {
+    if (f.op === "array-contains-any" || f.op === "in" || f.op === "not-in") {
       // CSV list → array, each element coerced
       const arr = f.value
         .split(",")
@@ -748,35 +790,52 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       }
     }
 
-    const result = await entry.repo.query.paginate({
-      pageSize: currentPageSize,
-      cursor: cursorSnapshot,
-      // direction + where + orderBy are supported at runtime but not in the strict typed interface
-      ...{ direction: dir },
-      ...(whereFilters.length > 0 ? { where: whereFilters } : {}),
-      ...(sortState
-        ? {
-            orderBy: [
-              { field: sortState.field as any, direction: sortState.dir },
-            ],
-          }
-        : {}),
-    });
+    const result = await entry.repo.query
+      .paginate({
+        pageSize: currentPageSize,
+        cursor: cursorSnapshot,
+        // direction + where + orderBy are supported at runtime but not in the strict typed interface
+        ...{ direction: dir },
+        ...(whereFilters.length > 0 ? { where: whereFilters } : {}),
+        ...(sortState
+          ? {
+              orderBy: [
+                { field: sortState.field as any, direction: sortState.dir },
+              ],
+            }
+          : {}),
+      })
+      .catch(
+        (err: unknown) =>
+          ({
+            queryError: toQueryError(err, {
+              ref: entry.repo.ref,
+              path: entry.path,
+              isGroup: !!entry.isGroup,
+              filters: activeFilters,
+              sort: sortState,
+            }),
+          }) as const,
+      );
 
-    const nextCursorId = result.nextCursor?.id ?? "";
-    const prevCursorId = result.prevCursor?.id ?? "";
+    // Discriminate between success and error results
+    const isError = "queryError" in result;
+    const docs = isError ? [] : (result.data as Record<string, unknown>[]);
+    const nextCursorId = isError ? "" : (result.nextCursor?.id ?? "");
+    const prevCursorId = isError ? "" : (result.prevCursor?.id ?? "");
+    const queryError = isError ? result.queryError : undefined;
     const lb = getLinkBase(req, basePath);
 
     sendHtml(
       res,
       renderList(
         entry.name,
-        result.data as Record<string, unknown>[],
+        docs,
         columns,
         lb,
         {
-          hasPrev: result.hasPrevPage,
-          hasNext: result.hasNextPage,
+          hasPrev: isError ? false : result.hasPrevPage,
+          hasNext: isError ? false : result.hasNextPage,
           prevCursor: prevCursorId,
           nextCursor: nextCursorId,
         },
@@ -787,6 +846,8 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
         entry.relationalMeta,
         sortState,
         currentPageSize,
+        queryError,
+        entry.isGroup,
       ),
     );
   };
@@ -912,11 +973,28 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       return;
     }
 
+    const lb = getLinkBase(req, basePath);
+
     let doc: Record<string, unknown> | null = null;
     try {
       doc = await fetchDocById(entry, docId);
     } catch (err) {
-      sendHtml(res, `Error fetching document: ${(err as Error).message}`, 500);
+      const flash = flashFromDocFetchError(entry, docId, err);
+      const status = isMissingIndexError(err) ? 424 : 500;
+      sendHtml(
+        res,
+        renderPage("", {
+          title: `Edit ${entry.name} / ${docId}`,
+          basePath: lb,
+          breadcrumb: [
+            { label: "Repositories", href: lb },
+            { label: entry.name, href: `${lb}/${entry.name}` },
+            { label: `Edit ${docId}` },
+          ],
+          flash,
+        }),
+        status,
+      );
       return;
     }
 
@@ -929,7 +1007,6 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     const mutableSchema = getMutableSchema(entry.schema, entry.mutableFields);
     const fields = applyPrefill(zodToFields(mutableSchema), prefilled);
 
-    const lb = getLinkBase(req, basePath);
     const actionUrl = `${lb}/${entry.name}/${encodeURIComponent(docId)}/edit`;
     const formHtml = renderForm(fields, actionUrl, "POST", "Save changes");
 
@@ -1000,13 +1077,14 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       const fields = zodToFields(mutableSchema2);
       const actionUrl = `${lb}/${entry.name}/${encodeURIComponent(docId)}/edit`;
       const formHtml = renderForm(fields, actionUrl, "POST", "Save changes");
+      const flash = isMissingIndexError(err)
+        ? flashFromDocFetchError(entry, docId, err)
+        : { type: "error" as const, message: `Save error: ${(err as Error).message}` };
+      const status = isMissingIndexError(err) ? 424 : 500;
       sendHtml(
         res,
-        renderFormPage(entry.name, formHtml, "edit", docId, lb, {
-          type: "error",
-          message: `Save error: ${(err as Error).message}`,
-        }),
-        500,
+        renderFormPage(entry.name, formHtml, "edit", docId, lb, flash),
+        status,
       );
     }
   };
@@ -1039,7 +1117,24 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       await entry.repo.delete(...pathArgs);
       redirect(res, `${lb}/${entry.name}?flash=deleted`);
     } catch (err) {
-      sendHtml(res, `Delete error: ${(err as Error).message}`, 500);
+      const flash = isMissingIndexError(err)
+        ? flashFromDocFetchError(entry, docId, err)
+        : { type: "error" as const, message: `Delete error: ${(err as Error).message}` };
+      const status = isMissingIndexError(err) ? 424 : 500;
+      sendHtml(
+        res,
+        renderPage("", {
+          title: `Delete ${entry.name} / ${docId}`,
+          basePath: lb,
+          breadcrumb: [
+            { label: "Repositories", href: lb },
+            { label: entry.name, href: `${lb}/${entry.name}` },
+            { label: `Delete ${docId}` },
+          ],
+          flash,
+        }),
+        status,
+      );
     }
   };
 

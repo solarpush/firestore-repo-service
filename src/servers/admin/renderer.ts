@@ -62,6 +62,7 @@ export type {
   ColumnMeta,
   FilterState,
   PageOptions,
+  QueryError,
   RelationalFieldMeta,
   SortState,
   WhereOp,
@@ -74,6 +75,7 @@ import type {
   ColumnMeta,
   FilterState,
   PageOptions,
+  QueryError,
   RelationalFieldMeta,
   SortState,
 } from "./components";
@@ -113,6 +115,8 @@ export function renderList(
   relationalMeta?: RelationalFieldMeta[],
   sortState?: SortState,
   currentPageSize?: number,
+  queryError?: QueryError,
+  isGroup?: boolean,
 ): string {
   return renderListJsx(
     repoName,
@@ -127,6 +131,8 @@ export function renderList(
     relationalMeta,
     sortState,
     currentPageSize,
+    queryError,
+    isGroup,
   );
 }
 

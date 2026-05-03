@@ -36,6 +36,36 @@
         "types": "./dist/sync/bigquery.d.ts",
         "default": "./dist/sync/bigquery.js"
       }
+    },
+    "./servers": {
+      "require": {
+        "types": "./dist/servers/index.d.cts",
+        "default": "./dist/servers/index.cjs"
+      },
+      "import": {
+        "types": "./dist/servers/index.d.ts",
+        "default": "./dist/servers/index.js"
+      }
+    },
+    "./servers/admin": {
+      "require": {
+        "types": "./dist/servers/admin/index.d.cts",
+        "default": "./dist/servers/admin/index.cjs"
+      },
+      "import": {
+        "types": "./dist/servers/admin/index.d.ts",
+        "default": "./dist/servers/admin/index.js"
+      }
+    },
+    "./servers/crud": {
+      "require": {
+        "types": "./dist/servers/crud/index.d.cts",
+        "default": "./dist/servers/crud/index.cjs"
+      },
+      "import": {
+        "types": "./dist/servers/crud/index.d.ts",
+        "default": "./dist/servers/crud/index.js"
+      }
     }
   },
   "typesVersions": {
