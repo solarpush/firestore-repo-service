@@ -5,6 +5,7 @@ import type {
   Query,
   QuerySnapshot,
 } from "firebase-admin/firestore";
+import { maybeNormalize } from "../shared/date-config";
 import type { GetOptions } from "../shared/types";
 import { capitalize, chunkArray } from "../shared/utils";
 
@@ -85,7 +86,7 @@ export function createGetMethods<T>(
       const snapshot: QuerySnapshot = await q.get();
 
       snapshot.forEach((doc) => {
-        const data = doc.data() as T;
+        const data = maybeNormalize(doc.data()) as T;
         results.push(options.returnDoc ? { data, doc } : data);
       });
     }
@@ -109,7 +110,7 @@ export function createGetMethods<T>(
         const docRef = documentRef(value);
         const doc = await docRef.get();
         if (!doc.exists) return null;
-        const data = doc.data() as T;
+        const data = maybeNormalize(doc.data()) as T;
         return opts.returnDoc ? { data, doc } : data;
       }
 
@@ -126,7 +127,7 @@ export function createGetMethods<T>(
       if (snapshot.empty) return null;
       const doc = snapshot.docs[0];
       if (!doc) return null;
-      const data = doc.data() as T;
+      const data = maybeNormalize(doc.data()) as T;
       return opts.returnDoc ? { data, doc } : data;
     };
   });

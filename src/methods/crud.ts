@@ -1,4 +1,5 @@
 import type { CollectionReference } from "firebase-admin/firestore";
+import { maybeNormalize } from "../shared/date-config";
 
 /**
  * Creates CRUD methods (create, set, update, delete).
@@ -115,7 +116,7 @@ export function createCrudMethods<T>(
     }
 
     const createdDoc = await docRef.get();
-    return createdDoc.data() as T;
+    return maybeNormalize(createdDoc.data()) as T;
   };
 
   // Set - creates or replaces a document
@@ -150,7 +151,7 @@ export function createCrudMethods<T>(
     await docRef.set(enrichedData, mergeOption);
 
     const setDocument = await docRef.get();
-    return setDocument.data() as T;
+    return maybeNormalize(setDocument.data()) as T;
   };
 
   // Update - updates a document and returns the merged object
@@ -168,7 +169,7 @@ export function createCrudMethods<T>(
     await docRef.update(enrichedData);
 
     const updatedDoc = await docRef.get();
-    return updatedDoc.data() as T;
+    return maybeNormalize(updatedDoc.data()) as T;
   };
 
   // Delete - removes a document

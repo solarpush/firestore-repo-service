@@ -12,6 +12,11 @@
 
 import { z } from "zod";
 import {
+  coerceToDate,
+  getDateHandling,
+  maybeNormalize,
+} from "../../shared/date-config";
+import {
   isMissingIndexError,
   toQueryError,
   type QueryErrorContext,
@@ -29,10 +34,11 @@ import type {
 // ---------------------------------------------------------------------------
 
 function sendJson<T>(res: any, data: ApiResponse<T>, status = 200): void {
+  const payload = maybeNormalize(data);
   res
     .status(status)
     .set("Content-Type", "application/json; charset=utf-8")
-    .send(JSON.stringify(data));
+    .send(JSON.stringify(payload));
 }
 
 function sendSuccess<T>(
@@ -98,6 +104,52 @@ function generateFirestoreId(): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Recursively wrap z.date() with z.preprocess(coerceToDate) so that ISO strings,
+ * Firestore Timestamps and {_seconds,_nanoseconds} payloads are accepted as input.
+ * Only invoked when global date handling mode is "normalize".
+ */
+function wrapDateSchemas(schema: z.ZodType): z.ZodType {
+  const def = (schema as any)._def ?? (schema as any).def;
+  if (!def) return schema;
+  const typeName = def.typeName ?? def.type;
+
+  if (typeName === "ZodDate" || typeName === "date") {
+    return z.preprocess((v) => coerceToDate(v) ?? v, schema as z.ZodDate);
+  }
+  if (typeName === "ZodObject" || typeName === "object") {
+    const shape = (schema as z.ZodObject<any>).shape;
+    const wrapped: Record<string, z.ZodType> = {};
+    for (const [k, v] of Object.entries(shape)) {
+      wrapped[k] = wrapDateSchemas(v as z.ZodType);
+    }
+    return z.object(wrapped);
+  }
+  if (typeName === "ZodArray" || typeName === "array") {
+    const inner = def.element ?? def.type;
+    if (inner) return z.array(wrapDateSchemas(inner));
+  }
+  if (typeName === "ZodOptional" || typeName === "optional") {
+    const inner = def.innerType;
+    if (inner) return wrapDateSchemas(inner).optional();
+  }
+  if (typeName === "ZodNullable" || typeName === "nullable") {
+    const inner = def.innerType;
+    if (inner) return wrapDateSchemas(inner).nullable();
+  }
+  if (typeName === "ZodDefault" || typeName === "default") {
+    const inner = def.innerType;
+    const dflt = def.defaultValue;
+    if (inner) {
+      const wrapped = wrapDateSchemas(inner);
+      return typeof dflt === "function"
+        ? wrapped.default(dflt())
+        : wrapped.default(dflt);
+    }
+  }
+  return schema;
+}
+
+/**
  * Pick only specified fields from a Zod schema, always excluding system-managed keys.
  *
  * - `fields` undefined or empty  → all schema fields minus systemKeys
@@ -138,7 +190,11 @@ function validateData(
   | { success: false; error: string } {
   try {
     const targetSchema = pickSchemaFields(schema, fields, systemKeys);
-    const finalSchema = partial ? targetSchema.partial() : targetSchema;
+    const partialSchema = partial ? targetSchema.partial() : targetSchema;
+    const finalSchema =
+      getDateHandling() === "normalize"
+        ? (wrapDateSchemas(partialSchema) as z.ZodObject<any>)
+        : partialSchema;
     const parsed = finalSchema.parse(data);
     return { success: true, data: parsed as Record<string, unknown> };
   } catch (err) {

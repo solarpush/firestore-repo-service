@@ -6,6 +6,7 @@ import {
   type PaginationResult,
 } from "../pagination";
 import { buildAndExecuteQuery } from "../query-builder";
+import { maybeNormalize } from "../shared/date-config";
 import type {
   QueryOptions,
   RelationConfig,
@@ -177,20 +178,20 @@ export function createQueryMethods<T>(
         collectionRef,
         mergedOptions,
       );
-      return snapshot.docs.map((doc) => doc.data() as T);
+      return snapshot.docs.map((doc) => maybeNormalize(doc.data()) as T);
     };
   });
 
   // Generic query.by — full orWhere support via buildAndExecuteQuery
   queryMethods.by = async (options: QueryOptions<T>): Promise<T[]> => {
     const snapshot = await buildAndExecuteQuery<T>(collectionRef, options);
-    return snapshot.docs.map((doc) => doc.data() as T);
+    return snapshot.docs.map((doc) => maybeNormalize(doc.data()) as T);
   };
 
   // getAll — full orWhere support via buildAndExecuteQuery
   queryMethods.getAll = async (options: QueryOptions<T> = {}): Promise<T[]> => {
     const snapshot = await buildAndExecuteQuery<T>(collectionRef, options);
-    return snapshot.docs.map((doc) => doc.data() as T);
+    return snapshot.docs.map((doc) => maybeNormalize(doc.data()) as T);
   };
 
   // onSnapshot — real-time listener (orWhere not supported by Firestore SDK real-time)
@@ -201,7 +202,7 @@ export function createQueryMethods<T>(
   ): (() => void) => {
     const q = applyQueryOptions(collectionRef, options);
     return q.onSnapshot((snapshot) => {
-      onNext(snapshot.docs.map((doc) => doc.data() as T));
+      onNext(snapshot.docs.map((doc) => maybeNormalize(doc.data()) as T));
     }, onError);
   };
 

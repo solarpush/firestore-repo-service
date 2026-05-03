@@ -51,6 +51,15 @@ export type {
   PopulateOptionsTyped,
 } from "./repositories/types";
 
+// Date handling (global)
+export {
+  coerceToDate,
+  getDateHandling,
+  normalizeTimestamps,
+  setDateHandling,
+} from "./shared/date-config";
+export type { DateHandlingMode } from "./shared/date-config";
+
 // ============================================
 // Imports for internal use
 // ============================================
