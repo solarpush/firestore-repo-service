@@ -4,6 +4,7 @@ import {
   createCrudServer,
   createRepositoryConfig,
   createRepositoryMapping,
+  setDateHandling,
 } from "@lpdjs/firestore-repo-service";
 import { initializeApp } from "firebase-admin/app";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
@@ -17,7 +18,7 @@ initializeApp({
 });
 
 const db = getFirestore();
-
+setDateHandling("normalize");
 // ============================================
 // Models (interfaces pour repos sans schema Zod)
 // ============================================
@@ -102,7 +103,6 @@ const repositoryMapping = {
       db.collection("posts").doc(postId).collection("comments").doc(docId),
   }),
 };
-
 // Step 2: Build relations with full type validation
 const repositoryMappingWithRelations = buildRepositoryRelations(
   repositoryMapping,

@@ -48,6 +48,7 @@ const zod_1 = __importDefault(require("zod"));
     projectId: "firestore-repo-services",
 });
 const db = (0, firestore_1.getFirestore)();
+(0, firestore_repo_service_1.setDateHandling)("normalize");
 // ============================================
 // Models (interfaces pour repos sans schema Zod)
 // ============================================

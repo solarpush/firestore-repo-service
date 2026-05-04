@@ -72,14 +72,20 @@ export function createSyncTriggers<M extends Record<string, any>>(
   repoMapping: M,
   config: SyncTriggersConfig<NoInfer<M>>,
 ): Record<string, any> {
-  const { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } = config.deps.firestoreTriggers;
+  const { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } =
+    config.deps.firestoreTriggers;
   const pubsub = config.deps.pubsub;
 
   const topicPrefix = config?.topicPrefix ?? DEFAULT_TOPIC_PREFIX;
   const triggers: Record<string, any> = {};
 
-  for (const [repoName, repo] of Object.entries(repoMapping) as [string, any][]) {
-    const repoCfg = (config?.repos as Record<string, RepoSyncConfig<string>> | undefined)?.[repoName];
+  for (const [repoName, repo] of Object.entries(repoMapping) as [
+    string,
+    any,
+  ][]) {
+    const repoCfg = (
+      config?.repos as Record<string, RepoSyncConfig<string>> | undefined
+    )?.[repoName];
 
     let documentPath: string | null;
 
@@ -97,8 +103,7 @@ export function createSyncTriggers<M extends Record<string, any>>(
     }
     if (!documentPath) continue;
 
-    const documentKey: string =
-      (repo as any)._systemKeys?.[0] ?? "docId";
+    const documentKey: string = (repo as any)._systemKeys?.[0] ?? "docId";
     const topicName = `${topicPrefix}-${repoName}`;
 
     // -- onCreate ---------------------------------------------------------
