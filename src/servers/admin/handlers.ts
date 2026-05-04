@@ -14,7 +14,14 @@
 import { z } from "zod";
 import type { ConfiguredRepository } from "../../repositories/types";
 import type { RepositoryConfig } from "../../shared/types";
-import { getInnerType, getShape, getTypeName } from "../../shared/zod-compat";
+import {
+  getEnumValues,
+  getInnerType,
+  getLiteralValue,
+  getNativeEnumValues,
+  getShape,
+  getTypeName,
+} from "../../shared/zod-compat";
 import { renderForm, zodToFields, type FieldDescriptor } from "./form-gen";
 import type {
   ColumnMeta,
@@ -356,6 +363,57 @@ function resolveTypeName(schema: z.ZodType): string {
   }
 }
 
+/** Resolve the innermost Zod schema (unwrapping Optional/Nullable/Default) */
+function resolveInnerSchema(schema: z.ZodType): z.ZodType {
+  let s: z.ZodType = schema;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const tn = getTypeName(s);
+    if (tn === "ZodOptional" || tn === "ZodNullable" || tn === "ZodDefault") {
+      s = getInnerType(s)!;
+    } else {
+      return s;
+    }
+  }
+}
+
+/** True if the schema is wrapped in ZodOptional or ZodNullable (recursively). */
+function isFieldNullable(schema: z.ZodType): boolean {
+  let s: z.ZodType = schema;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const tn = getTypeName(s);
+    if (tn === "ZodOptional" || tn === "ZodNullable") return true;
+    if (tn === "ZodDefault") {
+      s = getInnerType(s)!;
+      continue;
+    }
+    return false;
+  }
+}
+
+/** Extract enum values from a (possibly wrapped) ZodEnum / ZodNativeEnum / ZodLiteral. Returns undefined if not an enum. */
+function extractEnumValues(schema: z.ZodType): readonly string[] | undefined {
+  const inner = resolveInnerSchema(schema);
+  const tn = getTypeName(inner);
+  if (tn === "ZodEnum") {
+    const v = getEnumValues(inner);
+    return v.length > 0 ? v : undefined;
+  }
+  if (tn === "ZodNativeEnum") {
+    const obj = getNativeEnumValues(inner);
+    const vals = Object.values(obj).filter(
+      (v) => typeof v === "string",
+    ) as string[];
+    return vals.length > 0 ? vals : undefined;
+  }
+  if (tn === "ZodLiteral") {
+    const v = getLiteralValue(inner);
+    return typeof v === "string" ? [v] : undefined;
+  }
+  return undefined;
+}
+
 /**
  * Prefill a Zod schema fields with existing document values.
  * For ZodObject fields, recurses into nested sub-fields using dot-notation keys
@@ -484,7 +542,9 @@ function parseFilters(
  * Coerces string values to boolean/number when unambiguous.
  */
 function filtersToWhere(filters: FilterState[]): [string, WhereOp, unknown][] {
+  const NULL_SENTINEL = "__null__";
   const coerce = (v: string): unknown => {
+    if (v === NULL_SENTINEL) return null;
     if (v === "true") return true;
     if (v === "false") return false;
     if (v !== "" && !isNaN(Number(v))) return Number(v);
@@ -492,11 +552,13 @@ function filtersToWhere(filters: FilterState[]): [string, WhereOp, unknown][] {
   };
   return filters.map((f) => {
     if (f.op === "array-contains-any" || f.op === "in" || f.op === "not-in") {
-      // CSV list → array, each element coerced
+      // CSV list → array, each element coerced (drop empty / null sentinels —
+      // Firestore rejects null inside `in`/`not-in`).
       const arr = f.value
         .split(",")
-        .map((s) => coerce(s.trim()))
-        .filter((s) => s !== "");
+        .map((s) => s.trim())
+        .filter((s) => s !== "" && s !== NULL_SENTINEL)
+        .map((s) => coerce(s));
       return [f.field, f.op, arr];
     }
     return [f.field, f.op, coerce(f.value)];
@@ -540,7 +602,12 @@ function buildColumnMeta(
         ),
       );
     } else {
-      result.push({ name: fullName, zodType });
+      result.push({
+        name: fullName,
+        zodType,
+        nullable: isFieldNullable(field),
+        enumValues: extractEnumValues(field),
+      });
     }
   }
   return result;
@@ -761,6 +828,8 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
           out.push({
             name: col,
             zodType: resolved ? resolveTypeName(resolved) : "ZodString",
+            nullable: resolved ? isFieldNullable(resolved) : false,
+            enumValues: resolved ? extractEnumValues(resolved) : undefined,
           });
         } else {
           out.push(...buildColumnMeta([col], entry.schema));

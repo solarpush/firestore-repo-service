@@ -46,6 +46,41 @@ function opsForType(zodType: string): OpDef[] {
 // Value input per type
 // ---------------------------------------------------------------------------
 
+const NULL_SENTINEL = "__null__";
+
+/** Inline JS toggle that flips the sibling input value to "__null__" / "". */
+function nullToggleScript(inputId: string): string {
+  return `(function(cb){var i=document.getElementById('${inputId}');if(!i)return;if(cb.checked){i.dataset._prev=i.value;i.value='${NULL_SENTINEL}';i.disabled=true;i.style.opacity='0.35';}else{i.disabled=false;i.style.opacity='';i.value=(i.dataset._prev&&i.dataset._prev!=='${NULL_SENTINEL}')?i.dataset._prev:'';}})(this)`;
+}
+
+/** Inline JS that syncs a list of enum checkboxes into a CSV hidden input. */
+function enumChecklistScript(hiddenId: string, group: string): string {
+  return `(function(){var h=document.getElementById('${hiddenId}');var boxes=document.querySelectorAll('input[data-enum-group="${group}"]');h.value=Array.from(boxes).filter(function(b){return b.checked;}).map(function(b){return b.value;}).join(',');})()`;
+}
+
+function NullToggle({
+  inputId,
+  active,
+}: {
+  inputId: string;
+  active: boolean;
+}) {
+  return (
+    <label
+      class="flex items-center gap-1 cursor-pointer select-none text-xs text-base-content/40 hover:text-base-content/70 border border-base-300 rounded px-2 shrink-0"
+      title="Filter where field IS NULL"
+    >
+      <input
+        type="checkbox"
+        class="checkbox checkbox-xs"
+        checked={active}
+        onchange={nullToggleScript(inputId)}
+      />
+      <span>null</span>
+    </label>
+  );
+}
+
 function FilterValueInput({
   col,
   active,
@@ -54,29 +89,105 @@ function FilterValueInput({
   active?: FilterState;
 }) {
   const val = active?.value ?? "";
+  const isNull = val === NULL_SENTINEL;
+  const inputId = `fv_input_${col.name.replace(/\./g, "__")}`;
+  const op = active?.op;
+  const isMultiOp = op === "in" || op === "not-in";
 
-  if (col.zodType === "ZodBoolean") {
+  // ── Enum / Literal columns ────────────────────────────────────────────────
+  if (col.enumValues && col.enumValues.length > 0) {
+    if (isMultiOp) {
+      // Multi-select via checkbox group + hidden CSV input
+      const selected = new Set(
+        val
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      );
+      const group = `eg_${col.name.replace(/\./g, "__")}`;
+      return (
+        <div class="flex flex-wrap items-center gap-1 w-full">
+          <input
+            type="hidden"
+            id={inputId}
+            name={`fv_${col.name}`}
+            value={val}
+          />
+          {col.enumValues.map((v) => (
+            <label
+              key={v}
+              class="flex items-center gap-1 text-xs border border-base-300 rounded px-2 cursor-pointer hover:bg-base-200"
+            >
+              <input
+                type="checkbox"
+                class="checkbox checkbox-xs"
+                value={v}
+                checked={selected.has(v)}
+                data-enum-group={group}
+                onchange={enumChecklistScript(inputId, group)}
+              />
+              <span>{v}</span>
+            </label>
+          ))}
+        </div>
+      );
+    }
+    // Single-select for ==, !=, etc.
     return (
-      <select
-        name={`fv_${col.name}`}
-        class="select select-sm select-bordered w-full"
-      >
-        <option value="" selected={val === ""}>
-          —
-        </option>
-        <option value="true" selected={val === "true"}>
-          true
-        </option>
-        <option value="false" selected={val === "false"}>
-          false
-        </option>
-      </select>
+      <div class="flex items-center gap-1 w-full">
+        <select
+          id={inputId}
+          name={`fv_${col.name}`}
+          class="select select-sm select-bordered w-full"
+          disabled={isNull}
+          style={isNull ? "opacity:0.35" : undefined}
+        >
+          <option value="" selected={val === ""}>
+            —
+          </option>
+          {col.enumValues.map((v) => (
+            <option key={v} value={v} selected={val === v}>
+              {v}
+            </option>
+          ))}
+        </select>
+        {col.nullable && <NullToggle inputId={inputId} active={isNull} />}
+      </div>
     );
   }
+
+  // ── Boolean ────────────────────────────────────────────────────────────────
+  if (col.zodType === "ZodBoolean") {
+    return (
+      <div class="flex items-center gap-1 w-full">
+        <select
+          id={inputId}
+          name={`fv_${col.name}`}
+          class="select select-sm select-bordered w-full"
+          disabled={isNull}
+          style={isNull ? "opacity:0.35" : undefined}
+        >
+          <option value="" selected={val === ""}>
+            —
+          </option>
+          <option value="true" selected={val === "true"}>
+            true
+          </option>
+          <option value="false" selected={val === "false"}>
+            false
+          </option>
+        </select>
+        {col.nullable && <NullToggle inputId={inputId} active={isNull} />}
+      </div>
+    );
+  }
+
+  // ── Array (no nullable toggle: array-contains semantics differ) ───────────
   if (col.zodType === "ZodArray") {
     const isAny = active?.op === "array-contains-any";
     return (
       <input
+        id={inputId}
         type="text"
         name={`fv_${col.name}`}
         value={val}
@@ -85,35 +196,59 @@ function FilterValueInput({
       />
     );
   }
+
+  // ── Numeric ────────────────────────────────────────────────────────────────
   if (col.zodType === "ZodNumber" || col.zodType === "ZodBigInt") {
     return (
-      <input
-        type="number"
-        name={`fv_${col.name}`}
-        value={val}
-        placeholder="value"
-        class="input input-sm input-bordered w-full"
-      />
+      <div class="flex items-center gap-1 w-full">
+        <input
+          id={inputId}
+          type="number"
+          name={`fv_${col.name}`}
+          value={isNull ? "" : val}
+          placeholder="value"
+          class="input input-sm input-bordered w-full"
+          disabled={isNull}
+          style={isNull ? "opacity:0.35" : undefined}
+        />
+        {col.nullable && <NullToggle inputId={inputId} active={isNull} />}
+      </div>
     );
   }
+
+  // ── Date ───────────────────────────────────────────────────────────────────
   if (col.zodType === "ZodDate") {
     return (
-      <input
-        type="datetime-local"
-        name={`fv_${col.name}`}
-        value={val}
-        class="input input-sm input-bordered w-full"
-      />
+      <div class="flex items-center gap-1 w-full">
+        <input
+          id={inputId}
+          type="datetime-local"
+          name={`fv_${col.name}`}
+          value={isNull ? "" : val}
+          class="input input-sm input-bordered w-full"
+          disabled={isNull}
+          style={isNull ? "opacity:0.35" : undefined}
+        />
+        {col.nullable && <NullToggle inputId={inputId} active={isNull} />}
+      </div>
     );
   }
+
+  // ── Default text ───────────────────────────────────────────────────────────
   return (
-    <input
-      type="text"
-      name={`fv_${col.name}`}
-      value={val}
-      placeholder="value"
-      class="input input-sm input-bordered w-full"
-    />
+    <div class="flex items-center gap-1 w-full">
+      <input
+        id={inputId}
+        type="text"
+        name={`fv_${col.name}`}
+        value={isNull ? "" : val}
+        placeholder="value"
+        class="input input-sm input-bordered w-full"
+        disabled={isNull}
+        style={isNull ? "opacity:0.35" : undefined}
+      />
+      {col.nullable && <NullToggle inputId={inputId} active={isNull} />}
+    </div>
   );
 }
 

@@ -35,6 +35,10 @@ export interface ColumnMeta {
   name: string;
   /** Innermost Zod type name, e.g. "ZodString", "ZodNumber" */
   zodType: string;
+  /** True if the field schema is wrapped in ZodOptional or ZodNullable */
+  nullable?: boolean;
+  /** For ZodEnum / ZodNativeEnum / ZodLiteral: the allowed values */
+  enumValues?: readonly string[];
 }
 
 /** Active sort state for the list view */
