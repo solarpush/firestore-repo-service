@@ -29,7 +29,7 @@ const db = getFirestore();
 const postSchema = z.object({
   docId: z.string(),
   documentPath: z.string(),
-  userId: z.string(),
+  userId: z.string().nullish(),
   address: z.object({ street: z.string(), city: z.string() }),
   title: z.string(),
   content: z.string(),
@@ -256,6 +256,7 @@ const adminHandler = createAdminServer({
       repo: repos.posts,
       path: "posts",
       fieldsConfig: {
+        docId: ["filterable"],
         title: ["create", "mutable", "filterable"],
         content: ["create", "mutable"],
         status: ["mutable", "filterable"],
@@ -264,8 +265,8 @@ const adminHandler = createAdminServer({
         userId: ["filterable"],
       },
       relationalFields: [
-        { key: "userId", column: "Author" },
-        { key: "docId", column: "Comments" },
+        { key: "userId", column: "Associated author" },
+        { key: "docId", column: "Associated comments" },
       ],
       allowDelete: true,
     },
@@ -280,7 +281,7 @@ const adminHandler = createAdminServer({
         isActive: ["create", "mutable", "filterable"],
         docId: ["filterable"],
       },
-      relationalFields: [{ key: "docId", column: "Posts" }],
+      relationalFields: [{ key: "docId", column: "Associated posts" }],
     },
     comments: {
       repo: repos.comments,
@@ -288,10 +289,11 @@ const adminHandler = createAdminServer({
       allowDelete: true,
       fieldsConfig: {
         docId: ["filterable"],
+        postId: ["filterable"],
         likes: ["filterable"],
         content: ["create", "mutable"],
       },
-      relationalFields: [{ key: "postId", column: "Post" }],
+      relationalFields: [{ key: "postId", column: "Associated posts" }],
     },
   },
 });

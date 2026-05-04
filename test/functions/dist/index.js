@@ -57,7 +57,7 @@ const db = (0, firestore_1.getFirestore)();
 const postSchema = zod_1.default.object({
     docId: zod_1.default.string(),
     documentPath: zod_1.default.string(),
-    userId: zod_1.default.string(),
+    userId: zod_1.default.string().nullish(),
     address: zod_1.default.object({ street: zod_1.default.string(), city: zod_1.default.string() }),
     title: zod_1.default.string(),
     content: zod_1.default.string(),
@@ -253,6 +253,7 @@ const adminHandler = (0, firestore_repo_service_1.createAdminServer)({
             repo: repos.posts,
             path: "posts",
             fieldsConfig: {
+                docId: ["filterable"],
                 title: ["create", "mutable", "filterable"],
                 content: ["create", "mutable"],
                 status: ["mutable", "filterable"],
@@ -261,8 +262,8 @@ const adminHandler = (0, firestore_repo_service_1.createAdminServer)({
                 userId: ["filterable"],
             },
             relationalFields: [
-                { key: "userId", column: "Author" },
-                { key: "docId", column: "Comments" },
+                { key: "userId", column: "Associated author" },
+                { key: "docId", column: "Associated comments" },
             ],
             allowDelete: true,
         },
@@ -277,7 +278,7 @@ const adminHandler = (0, firestore_repo_service_1.createAdminServer)({
                 isActive: ["create", "mutable", "filterable"],
                 docId: ["filterable"],
             },
-            relationalFields: [{ key: "docId", column: "Posts" }],
+            relationalFields: [{ key: "docId", column: "Associated posts" }],
         },
         comments: {
             repo: repos.comments,
@@ -285,10 +286,11 @@ const adminHandler = (0, firestore_repo_service_1.createAdminServer)({
             allowDelete: true,
             fieldsConfig: {
                 docId: ["filterable"],
+                postId: ["filterable"],
                 likes: ["filterable"],
                 content: ["create", "mutable"],
             },
-            relationalFields: [{ key: "postId", column: "Post" }],
+            relationalFields: [{ key: "postId", column: "Associated posts" }],
         },
     },
 });

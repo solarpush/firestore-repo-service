@@ -48,9 +48,14 @@ function opsForType(zodType: string): OpDef[] {
 
 const NULL_SENTINEL = "__null__";
 
-/** Inline JS toggle that flips the sibling input value to "__null__" / "". */
+/**
+ * Inline JS toggle that sets the sibling input's value to "__null__" / restores it.
+ * Keeps the input enabled so it stays in the form payload (disabled inputs are NOT
+ * submitted, which would silently drop the filter). Swaps number/date inputs to
+ * text temporarily because they reject the sentinel value.
+ */
 function nullToggleScript(inputId: string): string {
-  return `(function(cb){var i=document.getElementById('${inputId}');if(!i)return;if(cb.checked){i.dataset._prev=i.value;i.value='${NULL_SENTINEL}';i.disabled=true;i.style.opacity='0.35';}else{i.disabled=false;i.style.opacity='';i.value=(i.dataset._prev&&i.dataset._prev!=='${NULL_SENTINEL}')?i.dataset._prev:'';}})(this)`;
+  return `(function(cb){var i=document.getElementById('${inputId}');if(!i)return;if(cb.checked){i.dataset._prev=i.value;if(i.tagName==='SELECT'){var o=i.querySelector('option[value="${NULL_SENTINEL}"]');if(!o){o=document.createElement('option');o.value='${NULL_SENTINEL}';o.textContent='∅ null';o.dataset._auto='1';i.appendChild(o);}o.selected=true;}else{if(i.type==='number'||i.type==='datetime-local'){i.dataset._type=i.type;i.type='text';}i.value='${NULL_SENTINEL}';i.readOnly=true;}i.style.opacity='0.55';}else{i.style.opacity='';if(i.tagName==='SELECT'){var o2=i.querySelector('option[value="${NULL_SENTINEL}"][data-_auto="1"]');if(o2)o2.remove();var prev=i.dataset._prev||'';for(var k=0;k<i.options.length;k++)i.options[k].selected=(i.options[k].value===prev);}else{if(i.dataset._type){i.type=i.dataset._type;delete i.dataset._type;}i.readOnly=false;i.value=(i.dataset._prev&&i.dataset._prev!=='${NULL_SENTINEL}')?i.dataset._prev:'';}}})(this)`;
 }
 
 /** Inline JS that syncs a list of enum checkboxes into a CSV hidden input. */
@@ -67,7 +72,7 @@ function NullToggle({
 }) {
   return (
     <label
-      class="flex items-center gap-1 cursor-pointer select-none text-xs text-base-content/40 hover:text-base-content/70 border border-base-300 rounded px-2 shrink-0"
+      class="flex items-center gap-1 cursor-pointer select-none text-xs text-base-content/60 hover:text-base-content border border-base-300 rounded-md px-1.5 py-1 shrink-0 leading-none h-8"
       title="Filter where field IS NULL"
     >
       <input
@@ -76,7 +81,7 @@ function NullToggle({
         checked={active}
         onchange={nullToggleScript(inputId)}
       />
-      <span>null</span>
+      <span>∅</span>
     </label>
   );
 }
@@ -139,10 +144,9 @@ function FilterValueInput({
           id={inputId}
           name={`fv_${col.name}`}
           class="select select-sm select-bordered w-full"
-          disabled={isNull}
-          style={isNull ? "opacity:0.35" : undefined}
+          style={isNull ? "opacity:0.55" : undefined}
         >
-          <option value="" selected={val === ""}>
+          <option value="" selected={val === "" && !isNull}>
             —
           </option>
           {col.enumValues.map((v) => (
@@ -150,6 +154,11 @@ function FilterValueInput({
               {v}
             </option>
           ))}
+          {col.nullable && (
+            <option value={NULL_SENTINEL} data-_auto="1" selected={isNull}>
+              ∅ null
+            </option>
+          )}
         </select>
         {col.nullable && <NullToggle inputId={inputId} active={isNull} />}
       </div>
@@ -164,10 +173,9 @@ function FilterValueInput({
           id={inputId}
           name={`fv_${col.name}`}
           class="select select-sm select-bordered w-full"
-          disabled={isNull}
-          style={isNull ? "opacity:0.35" : undefined}
+          style={isNull ? "opacity:0.55" : undefined}
         >
-          <option value="" selected={val === ""}>
+          <option value="" selected={val === "" && !isNull}>
             —
           </option>
           <option value="true" selected={val === "true"}>
@@ -176,6 +184,11 @@ function FilterValueInput({
           <option value="false" selected={val === "false"}>
             false
           </option>
+          {col.nullable && (
+            <option value={NULL_SENTINEL} data-_auto="1" selected={isNull}>
+              ∅ null
+            </option>
+          )}
         </select>
         {col.nullable && <NullToggle inputId={inputId} active={isNull} />}
       </div>
@@ -203,13 +216,14 @@ function FilterValueInput({
       <div class="flex items-center gap-1 w-full">
         <input
           id={inputId}
-          type="number"
+          type={isNull ? "text" : "number"}
           name={`fv_${col.name}`}
-          value={isNull ? "" : val}
+          value={val}
           placeholder="value"
           class="input input-sm input-bordered w-full"
-          disabled={isNull}
-          style={isNull ? "opacity:0.35" : undefined}
+          readOnly={isNull}
+          style={isNull ? "opacity:0.55" : undefined}
+          data-_type={isNull ? "number" : undefined}
         />
         {col.nullable && <NullToggle inputId={inputId} active={isNull} />}
       </div>
@@ -222,12 +236,13 @@ function FilterValueInput({
       <div class="flex items-center gap-1 w-full">
         <input
           id={inputId}
-          type="datetime-local"
+          type={isNull ? "text" : "datetime-local"}
           name={`fv_${col.name}`}
-          value={isNull ? "" : val}
+          value={val}
           class="input input-sm input-bordered w-full"
-          disabled={isNull}
-          style={isNull ? "opacity:0.35" : undefined}
+          readOnly={isNull}
+          style={isNull ? "opacity:0.55" : undefined}
+          data-_type={isNull ? "datetime-local" : undefined}
         />
         {col.nullable && <NullToggle inputId={inputId} active={isNull} />}
       </div>
@@ -241,11 +256,11 @@ function FilterValueInput({
         id={inputId}
         type="text"
         name={`fv_${col.name}`}
-        value={isNull ? "" : val}
+        value={val}
         placeholder="value"
         class="input input-sm input-bordered w-full"
-        disabled={isNull}
-        style={isNull ? "opacity:0.35" : undefined}
+        readOnly={isNull}
+        style={isNull ? "opacity:0.55" : undefined}
       />
       {col.nullable && <NullToggle inputId={inputId} active={isNull} />}
     </div>
