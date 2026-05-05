@@ -32,8 +32,8 @@ const postSchema = z.object({
   documentPath: z.string(),
   userId: z.string().nullish(),
   address: z.object({ street: z.string(), city: z.string() }),
-  title: z.string(),
-  content: z.string(),
+  title: z.string().nullish(),
+  content: z.string().nullish(),
   status: z.enum(["draft", "published"]),
   views: z.number(),
   createdAt: z.date(),
@@ -386,6 +386,12 @@ export const sync = createFirestoreSync(repos, {
       manualSync: true,
       healthCheck: true,
       configCheck: true,
+    },
+    pubsubSetup: {
+      ordering: true,
+      ackDeadlineSeconds: 60,
+      includeDLQ: true,
+      subscriptionSuffix: "sync-sub",
     },
   },
   repos: {

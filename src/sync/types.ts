@@ -253,6 +253,25 @@ export interface SyncTriggersConfig<M = Record<string, any>> {
   topicPrefix?: string;
   /** Per-repo overrides */
   repos?: TypedRepoSyncConfigs<M>;
+  /**
+   * Enable Pub/Sub message ordering so events for the same document are
+   * delivered in the order they were published.
+   *
+   * - `false` (default): no ordering, messages may be delivered out-of-order.
+   * - `true`: ordering keyed by `docId` (per-document ordering — recommended
+   *   for Firestore sync; different docs remain parallelizable).
+   * - `(event) => string`: custom key (e.g. `"${repoName}:${docId}"` or a
+   *   tenant id). All messages sharing the same key are strictly ordered.
+   *
+   * **IMPORTANT:** the matching subscription must also be created with
+   * `enableMessageOrdering: true` (it cannot be enabled after creation):
+   * ```ts
+   * await topic.createSubscription("my-sub", { enableMessageOrdering: true });
+   * ```
+   * Publish-and-subscribe must happen in the **same region** for the ordering
+   * guarantee to hold.
+   */
+  ordering?: boolean | ((event: SyncEvent) => string);
 }
 
 /** Options for `createSyncWorker()`. */
@@ -333,6 +352,24 @@ export interface adminsyncConfig {
    * Only used when `onRequest` is also provided.
    */
   httpsOptions?: Record<string, unknown>;
+  /**
+   * Options used by the "Setup Pub/Sub" action on the Config Check page.
+   * When `featuresFlag.configCheck` is enabled and a PubSub client is
+   * available, the admin exposes a button that runs `ensureSyncInfra()`
+   * to (re-)create the topics + subscriptions with the desired ordering.
+   */
+  pubsubSetup?: {
+    /** Enable `enableMessageOrdering` on created subscriptions (default: true) */
+    ordering?: boolean;
+    /** Suffix for subscription name: `{prefix}-{repoName}-{suffix}` (default: "sync-sub") */
+    subscriptionSuffix?: string;
+    /** Also create the `-dlq` topic per repo (default: true) */
+    includeDLQ?: boolean;
+    /** Ack deadline for created subscriptions, in seconds (default: 60) */
+    ackDeadlineSeconds?: number;
+    /** Message retention duration (e.g. "604800s" for 7 days) */
+    messageRetentionDuration?: string;
+  };
 }
 
 /** Options for `createFirestoreSync()` — the unified wrapper. */
@@ -366,4 +403,12 @@ export interface FirestoreSyncConfig<M = Record<string, any>> {
   admin?: adminsyncConfig;
   /** Per-repo overrides (shared between triggers and worker) */
   repos?: TypedRepoSyncConfigs<M>;
+  /**
+   * Enable Pub/Sub message ordering for Firestore triggers. See
+   * `SyncTriggersConfig.ordering` for details. The matching subscriptions
+   * must be created with `enableMessageOrdering: true` (use the "Setup
+   * Pub/Sub" action on the admin Config Check page or call
+   * `ensureSyncInfra()` directly).
+   */
+  ordering?: boolean | ((event: SyncEvent) => string);
 }

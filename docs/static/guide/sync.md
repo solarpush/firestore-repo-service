@@ -26,11 +26,12 @@ import { onRequest } from "firebase-functions/v2/https";
 const sync = createFirestoreSync(repos, {
   deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
   adapter: new BigQueryAdapter({
-    bigquery: new BigQuery({ projectId: "my-project" }),
+    bigquery: new BigQuery({ projectId: "my-project", location: "us-central1" }),
     datasetId: "firestore_sync",
   }),
   topicPrefix: "firestore-sync",
   autoMigrate: true,
+  ordering: true, // strict per-document ordering on Pub/Sub
   admin: {
     onRequest,
     httpsOptions: { invoker: "public" },
@@ -41,6 +42,7 @@ const sync = createFirestoreSync(repos, {
       viewQueue: true,
       configCheck: true,
     },
+    pubsubSetup: { ordering: true },
   },
   repos: {
     users: {
@@ -72,16 +74,17 @@ export const {
 
 The unified wrapper that creates triggers, workers, and the optional admin server.
 
-| Option            | Type                   | Default            | Description                               |
-| ----------------- | ---------------------- | ------------------ | ----------------------------------------- |
-| `deps`            | `SyncDeps`             | required           | Firebase Functions + PubSub dependencies  |
-| `adapter`         | `SqlAdapter`           | required           | SQL adapter (e.g. `BigQueryAdapter`)      |
-| `topicPrefix`     | `string`               | `"firestore-sync"` | Pub/Sub topic name prefix                 |
-| `batchSize`       | `number`               | `100`              | Max rows per flush batch                  |
-| `flushIntervalMs` | `number`               | `5000`             | Flush interval in ms                      |
-| `autoMigrate`     | `boolean`              | `false`            | Auto-create/migrate tables on first event |
-| `admin`           | `adminsyncConfig`      | —                  | Optional admin endpoint config            |
-| `repos`           | `TypedRepoSyncConfigs` | —                  | Per-repo overrides                        |
+| Option            | Type                                                  | Default            | Description                                                       |
+| ----------------- | ----------------------------------------------------- | ------------------ | ----------------------------------------------------------------- |
+| `deps`            | `SyncDeps`                                            | required           | Firebase Functions + PubSub dependencies                          |
+| `adapter`         | `SqlAdapter`                                          | required           | SQL adapter (e.g. `BigQueryAdapter`)                              |
+| `topicPrefix`     | `string`                                              | `"firestore-sync"` | Pub/Sub topic name prefix                                         |
+| `batchSize`       | `number`                                              | `100`              | Max rows per flush batch                                          |
+| `flushIntervalMs` | `number`                                              | `5000`             | Flush interval in ms                                              |
+| `autoMigrate`     | `boolean`                                             | `false`            | Auto-create/migrate tables on first event                         |
+| `ordering`        | `boolean \| (event) => string`                        | `false`            | Enable Pub/Sub message ordering (per-`docId` when `true`)         |
+| `admin`           | `adminsyncConfig`                                     | —                  | Optional admin endpoint config                                    |
+| `repos`           | `TypedRepoSyncConfigs`                                | —                  | Per-repo overrides                                                |
 
 ### Dependencies (`deps`)
 
@@ -129,6 +132,89 @@ repos: {
 ```
 
 This tells Firebase where to listen for document changes since collection groups span multiple paths.
+
+## Pub/Sub Message Ordering
+
+By default, Pub/Sub does not guarantee message order. For Firestore sync this means rapid
+successive writes to the same document (e.g. `create` then `update`) can be flushed to SQL
+out of order, leaving stale data.
+
+Pass `ordering: true` to publish each message with the document id as the **ordering key**.
+The Pub/Sub broker then delivers messages with the same key sequentially to the worker.
+
+```typescript
+const sync = createFirestoreSync(repos, {
+  // ...
+  ordering: true, // per-docId ordering (recommended)
+  // ordering: (event) => `${event.repo}:${event.docId}`, // custom key
+});
+```
+
+::: warning Subscription must be created with `enableMessageOrdering: true`
+The flag is **immutable** on a Pub/Sub subscription after creation. Cloud Functions v2
+auto-creates subscriptions **without** ordering enabled, so you must pre-create them
+before `firebase deploy` (or delete + recreate them). Use the `ensureSyncInfra` helper
+below or the **Setup Pub/Sub** button on the admin Config Check page.
+:::
+
+On publish errors the publisher automatically calls `resumePublishing(orderingKey)` —
+without that, all subsequent messages for the same key would be silently dropped.
+
+## Pre-creating Topics & Subscriptions (`ensureSyncInfra`)
+
+Helper that idempotently creates the Pub/Sub topics and push subscriptions used by the
+sync pipeline, with the correct `enableMessageOrdering` flag.
+
+```typescript
+import { ensureSyncInfra } from "@lpdjs/firestore-repo-service/sync";
+import { PubSub } from "@google-cloud/pubsub";
+
+await ensureSyncInfra(repoMapping, {
+  pubsub: new PubSub(),
+  topicPrefix: "firestore-sync",
+  ordering: true,
+  subscriptionSuffix: "-sub",
+  includeDLQ: true,
+  ackDeadlineSeconds: 60,
+  messageRetentionDuration: 7 * 24 * 60 * 60, // 7 days
+});
+```
+
+| Option                     | Type      | Default        | Description                                           |
+| -------------------------- | --------- | -------------- | ----------------------------------------------------- |
+| `pubsub`                   | `PubSub`  | required       | Google Cloud Pub/Sub client                           |
+| `topicPrefix`              | `string`  | required       | Same value as in `createFirestoreSync`                |
+| `ordering`                 | `boolean` | `false`        | Create topics/subscriptions with ordering enabled     |
+| `subscriptionSuffix`       | `string`  | `"-sub"`       | Subscription name suffix per topic                    |
+| `includeDLQ`               | `boolean` | `false`        | Also create `{topic}-dlq` topics                      |
+| `ackDeadlineSeconds`       | `number`  | provider-default | Subscription ack deadline                          |
+| `messageRetentionDuration` | `number`  | provider-default | Retention in seconds                               |
+
+Existing topics and subscriptions are left untouched (the result reports `created` /
+`existing` counts). When ordering is enabled but an existing subscription was created
+without it, a warning is emitted — you must delete and recreate that subscription.
+
+### Wired into the admin dashboard (`pubsubSetup`)
+
+When `pubsubSetup` is set under `admin`, a **⚙ Setup Pub/Sub** button appears on the
+`/config-check` page (gated by `featuresFlag.configCheck`). Clicking it runs
+`ensureSyncInfra` with the provided options and renders the result inline.
+
+```typescript
+admin: {
+  // ...
+  featuresFlag: { configCheck: true /* required */ },
+  pubsubSetup: {
+    ordering: true,
+    subscriptionSuffix: "-sub",
+    includeDLQ: true,
+    ackDeadlineSeconds: 60,
+  },
+}
+```
+
+The same action is available as `POST /config-check/setup-pubsub` and supports
+`Accept: application/json` for scripting.
 
 ## BigQuery Adapter
 
@@ -246,6 +332,24 @@ import { onRequest } from "firebase-functions/v2/https";
 export const adminsync = onRequest({ invoker: "public" }, sync.adminHandler!);
 ```
 
+### Force Sync
+
+Triggered from the admin dashboard or via `POST /force-sync/{repo}` (HTML or
+`Accept: application/json`). It re-reads every document of a Firestore collection and
+republishes it through the sync pipeline.
+
+The response includes:
+
+| Field          | Description                                         |
+| -------------- | --------------------------------------------------- |
+| `processed`    | Total documents read from Firestore                 |
+| `published`    | Successful Pub/Sub publishes                        |
+| `errors`       | Number of documents that failed to publish          |
+| `errorSamples` | First 5 errors (`{ docId, message }`) for diagnosis |
+
+Errors are also logged via `console.error('[ForceSync:{repo}] doc={docId} failed:', e)`
+so they appear in Cloud Logging.
+
 ## Generated Functions
 
 `createFirestoreSync` generates these Cloud Functions:
@@ -270,6 +374,32 @@ Zod schemas are automatically mapped to SQL types:
 | `z.boolean()`              | `BOOL`        |
 | `z.date()`                 | `TIMESTAMP`   |
 | `z.object()` / `z.array()` | `JSON`        |
+
+## Date Handling (`setDateHandling`)
+
+Firestore returns dates as `Timestamp` objects. By default the library leaves them as
+`Timestamp` (mode `"preserve"`), which keeps full nanosecond precision but means
+consumers must call `.toDate()` themselves and Zod `z.date()` schemas will reject them.
+
+Switch to `"normalize"` once at app startup to convert every `Timestamp` (including
+nested ones inside objects/arrays) to a JavaScript `Date` on read:
+
+```typescript
+import { setDateHandling } from "@lpdjs/firestore-repo-service";
+
+setDateHandling("normalize");
+```
+
+| Mode          | Behavior                                                                       |
+| ------------- | ------------------------------------------------------------------------------ |
+| `"preserve"`  | (default) Firestore `Timestamp` instances are returned as-is                   |
+| `"normalize"` | Recursively convert `Timestamp` → `Date` on every document read                |
+
+This is recommended when using the BigQuery sync (Zod `z.date()` → `TIMESTAMP`) so the
+schema validation and SQL serialization both see proper `Date` instances.
+
+Helpers `coerceToDate(value)` and `normalizeTimestamps(value)` are also exported for
+manual conversion (e.g. inside custom mappers).
 
 ## Custom SQL Adapter
 

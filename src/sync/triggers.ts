@@ -79,6 +79,55 @@ export function createSyncTriggers<M extends Record<string, any>>(
   const topicPrefix = config?.topicPrefix ?? DEFAULT_TOPIC_PREFIX;
   const triggers: Record<string, any> = {};
 
+  // ---- Ordering setup ---------------------------------------------------
+  const orderingOpt = config?.ordering;
+  const orderingEnabled = Boolean(orderingOpt);
+  const orderingKeyFn: ((event: SyncEvent) => string) | null =
+    typeof orderingOpt === "function"
+      ? orderingOpt
+      : orderingOpt === true
+        ? (evt) => evt.docId
+        : null;
+
+  // Cache topic clients so the publisher reuses the same batching/ordering
+  // state for a given (topic, ordering) pair across invocations.
+  const topicCache = new Map<string, any>();
+  function getTopic(topicName: string): any {
+    let t = topicCache.get(topicName);
+    if (t) return t;
+    t = orderingEnabled
+      ? (pubsub as any).topic(topicName, { messageOrdering: true })
+      : (pubsub as any).topic(topicName);
+    topicCache.set(topicName, t);
+    return t;
+  }
+
+  /**
+   * Publish a SyncEvent. When ordering is enabled and the publish fails,
+   * the publisher pauses further messages with the same ordering key until
+   * `resumePublishing(key)` is called — otherwise the next event for that
+   * document would be silently dropped.
+   */
+  async function publish(
+    topicName: string,
+    syncEvent: SyncEvent,
+  ): Promise<void> {
+    const topic = getTopic(topicName);
+    const key = orderingKeyFn ? orderingKeyFn(syncEvent) : undefined;
+    try {
+      await topic.publishMessage(
+        key !== undefined
+          ? { json: syncEvent, orderingKey: key }
+          : { json: syncEvent },
+      );
+    } catch (err) {
+      if (key !== undefined && typeof topic.resumePublishing === "function") {
+        topic.resumePublishing(key);
+      }
+      throw err;
+    }
+  }
+
   for (const [repoName, repo] of Object.entries(repoMapping) as [
     string,
     any,
@@ -130,7 +179,7 @@ export function createSyncTriggers<M extends Record<string, any>>(
           timestamp: new Date().toISOString(),
         };
 
-        await pubsub.topic(topicName).publishMessage({ json: syncEvent });
+        await publish(topicName, syncEvent);
       },
     );
 
@@ -158,7 +207,7 @@ export function createSyncTriggers<M extends Record<string, any>>(
           timestamp: new Date().toISOString(),
         };
 
-        await pubsub.topic(topicName).publishMessage({ json: syncEvent });
+        await publish(topicName, syncEvent);
       },
     );
 
@@ -180,7 +229,7 @@ export function createSyncTriggers<M extends Record<string, any>>(
           timestamp: new Date().toISOString(),
         };
 
-        await pubsub.topic(topicName).publishMessage({ json: syncEvent });
+        await publish(topicName, syncEvent);
       },
     );
   }

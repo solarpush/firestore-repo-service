@@ -60,8 +60,8 @@ const postSchema = zod_1.default.object({
     documentPath: zod_1.default.string(),
     userId: zod_1.default.string().nullish(),
     address: zod_1.default.object({ street: zod_1.default.string(), city: zod_1.default.string() }),
-    title: zod_1.default.string(),
-    content: zod_1.default.string(),
+    title: zod_1.default.string().nullish(),
+    content: zod_1.default.string().nullish(),
     status: zod_1.default.enum(["draft", "published"]),
     views: zod_1.default.number(),
     createdAt: zod_1.default.date(),
@@ -382,6 +382,12 @@ exports.sync = (0, sync_1.createFirestoreSync)(repos, {
             manualSync: true,
             healthCheck: true,
             configCheck: true,
+        },
+        pubsubSetup: {
+            ordering: true,
+            ackDeadlineSeconds: 60,
+            includeDLQ: true,
+            subscriptionSuffix: "sync-sub",
         },
     },
     repos: {
