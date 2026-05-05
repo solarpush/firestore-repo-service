@@ -5,6 +5,12 @@
  * Dependencies (`firebase-functions`, `@google-cloud/pubsub`) are injected
  * via the `deps` config property — no lazy loading or module resolution issues.
  *
+ * Out-of-order delivery is handled at the application level: every event
+ * carries a `version` (publish-time `Date.now()` in ms) which is propagated
+ * to SQL as the `__sync_version` column. The worker's MERGE only updates a
+ * row when the incoming `version` is strictly greater than the stored one —
+ * so a stale event delivered after a newer one is silently skipped.
+ *
  * @example
  * ```typescript
  * import { createSyncTriggers } from "@lpdjs/firestore-repo-service/sync";
@@ -23,10 +29,6 @@
 
 import { serializeDocument } from "./serializer";
 import type { RepoSyncConfig, SyncEvent, SyncTriggersConfig } from "./types";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 const DEFAULT_TOPIC_PREFIX = "firestore-sync";
 
@@ -48,10 +50,6 @@ function buildDocumentPath(repoName: string, repo: any): string | null {
   return `${collectionPath}/{docId}`;
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
 /**
  * Create Firestore Cloud Functions (v2) triggers that publish
  * {@link SyncEvent}s to PubSub for each repository in `repoMapping`.
@@ -61,12 +59,8 @@ function buildDocumentPath(repoName: string, repo: any): string | null {
  * - `{repoName}_onUpdate` → publishes an `UPSERT` event
  * - `{repoName}_onDelete` → publishes a `DELETE` event
  *
- * @param repoMapping - Object whose keys are repo names and values are
- *   `ConfiguredRepository` instances.
- * @param config - Required `deps` + optional overrides for topic naming and
- *   per-repo serialization.
- * @returns An object of Cloud Functions keyed by
- *   `{repoName}_onCreate / onUpdate / onDelete`.
+ * Each event carries a monotonic `version` (`Date.now()` in ms) used by
+ * the worker to discard out-of-order PubSub deliveries.
  */
 export function createSyncTriggers<M extends Record<string, any>>(
   repoMapping: M,
@@ -79,53 +73,23 @@ export function createSyncTriggers<M extends Record<string, any>>(
   const topicPrefix = config?.topicPrefix ?? DEFAULT_TOPIC_PREFIX;
   const triggers: Record<string, any> = {};
 
-  // ---- Ordering setup ---------------------------------------------------
-  const orderingOpt = config?.ordering;
-  const orderingEnabled = Boolean(orderingOpt);
-  const orderingKeyFn: ((event: SyncEvent) => string) | null =
-    typeof orderingOpt === "function"
-      ? orderingOpt
-      : orderingOpt === true
-        ? (evt) => evt.docId
-        : null;
-
-  // Cache topic clients so the publisher reuses the same batching/ordering
-  // state for a given (topic, ordering) pair across invocations.
+  // Cache topic clients so the publisher reuses the same batching state
+  // for a given topic across invocations.
   const topicCache = new Map<string, any>();
   function getTopic(topicName: string): any {
     let t = topicCache.get(topicName);
     if (t) return t;
-    t = orderingEnabled
-      ? (pubsub as any).topic(topicName, { messageOrdering: true })
-      : (pubsub as any).topic(topicName);
+    t = (pubsub as any).topic(topicName);
     topicCache.set(topicName, t);
     return t;
   }
 
-  /**
-   * Publish a SyncEvent. When ordering is enabled and the publish fails,
-   * the publisher pauses further messages with the same ordering key until
-   * `resumePublishing(key)` is called — otherwise the next event for that
-   * document would be silently dropped.
-   */
   async function publish(
     topicName: string,
     syncEvent: SyncEvent,
   ): Promise<void> {
     const topic = getTopic(topicName);
-    const key = orderingKeyFn ? orderingKeyFn(syncEvent) : undefined;
-    try {
-      await topic.publishMessage(
-        key !== undefined
-          ? { json: syncEvent, orderingKey: key }
-          : { json: syncEvent },
-      );
-    } catch (err) {
-      if (key !== undefined && typeof topic.resumePublishing === "function") {
-        topic.resumePublishing(key);
-      }
-      throw err;
-    }
+    await topic.publishMessage({ json: syncEvent });
   }
 
   for (const [repoName, repo] of Object.entries(repoMapping) as [
@@ -155,7 +119,6 @@ export function createSyncTriggers<M extends Record<string, any>>(
     const documentKey: string = (repo as any)._systemKeys?.[0] ?? "docId";
     const topicName = `${topicPrefix}-${repoName}`;
 
-    // -- onCreate ---------------------------------------------------------
     triggers[`${repoName}_onCreate`] = onDocumentCreated(
       documentPath,
       async (event: any) => {
@@ -177,13 +140,13 @@ export function createSyncTriggers<M extends Record<string, any>>(
           docId,
           data: serialized,
           timestamp: new Date().toISOString(),
+          version: Date.now(),
         };
 
         await publish(topicName, syncEvent);
       },
     );
 
-    // -- onUpdate ---------------------------------------------------------
     triggers[`${repoName}_onUpdate`] = onDocumentUpdated(
       documentPath,
       async (event: any) => {
@@ -205,13 +168,13 @@ export function createSyncTriggers<M extends Record<string, any>>(
           docId,
           data: serialized,
           timestamp: new Date().toISOString(),
+          version: Date.now(),
         };
 
         await publish(topicName, syncEvent);
       },
     );
 
-    // -- onDelete ---------------------------------------------------------
     triggers[`${repoName}_onDelete`] = onDocumentDeleted(
       documentPath,
       async (event: any) => {
@@ -227,6 +190,7 @@ export function createSyncTriggers<M extends Record<string, any>>(
           docId,
           data: null,
           timestamp: new Date().toISOString(),
+          version: Date.now(),
         };
 
         await publish(topicName, syncEvent);

@@ -367,6 +367,12 @@ exports.sync = (0, sync_1.createFirestoreSync)(repos, {
     }),
     topicPrefix: "firestore-sync",
     autoMigrate: true,
+    batchSize: 500,
+    flushIntervalMs: 10000,
+    workerOptions: {
+        concurrency: 5,
+        maxInstances: 10,
+    },
     admin: {
         onRequest: https_1.onRequest,
         httpsOptions: { invoker: "public" },
@@ -382,12 +388,6 @@ exports.sync = (0, sync_1.createFirestoreSync)(repos, {
             manualSync: true,
             healthCheck: true,
             configCheck: true,
-        },
-        pubsubSetup: {
-            ordering: true,
-            ackDeadlineSeconds: 60,
-            includeDLQ: true,
-            subscriptionSuffix: "sync-sub",
         },
     },
     repos: {

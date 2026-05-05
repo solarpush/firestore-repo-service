@@ -31,7 +31,6 @@ const sync = createFirestoreSync(repos, {
   }),
   topicPrefix: "firestore-sync",
   autoMigrate: true,
-  ordering: true, // strict per-document ordering on Pub/Sub
   admin: {
     onRequest,
     httpsOptions: { invoker: "public" },
@@ -42,7 +41,6 @@ const sync = createFirestoreSync(repos, {
       viewQueue: true,
       configCheck: true,
     },
-    pubsubSetup: { ordering: true },
   },
   repos: {
     users: {
@@ -82,7 +80,7 @@ The unified wrapper that creates triggers, workers, and the optional admin serve
 | `batchSize`       | `number`                                              | `100`              | Max rows per flush batch                                          |
 | `flushIntervalMs` | `number`                                              | `5000`             | Flush interval in ms                                              |
 | `autoMigrate`     | `boolean`                                             | `false`            | Auto-create/migrate tables on first event                         |
-| `ordering`        | `boolean \| (event) => string`                        | `false`            | Enable Pub/Sub message ordering (per-`docId` when `true`)         |
+| `workerOptions`   | `Record<string, unknown>`                             | —                  | CF v2 options for the worker (`concurrency`, `maxInstances`, …)   |
 | `admin`           | `adminsyncConfig`                                     | —                  | Optional admin endpoint config                                    |
 | `repos`           | `TypedRepoSyncConfigs`                                | —                  | Per-repo overrides                                                |
 
@@ -133,88 +131,111 @@ repos: {
 
 This tells Firebase where to listen for document changes since collection groups span multiple paths.
 
-## Pub/Sub Message Ordering
+## Out-of-Order Delivery Protection
 
-By default, Pub/Sub does not guarantee message order. For Firestore sync this means rapid
-successive writes to the same document (e.g. `create` then `update`) can be flushed to SQL
-out of order, leaving stale data.
+Pub/Sub does **not** guarantee message order, and Cloud Functions v2 deliberately
+exposes no way to enable `enableMessageOrdering` on the auto-created push subscription
+behind `onMessagePublished`. For Firestore sync this means rapid successive writes to
+the same document (e.g. `create` then `update`) could otherwise be flushed to SQL out
+of order, leaving stale data.
 
-Pass `ordering: true` to publish each message with the document id as the **ordering key**.
-The Pub/Sub broker then delivers messages with the same key sequentially to the worker.
+The library handles this **at the application level**:
 
-```typescript
-const sync = createFirestoreSync(repos, {
-  // ...
-  ordering: true, // per-docId ordering (recommended)
-  // ordering: (event) => `${event.repo}:${event.docId}`, // custom key
-});
-```
+1. Every `SyncEvent` published by a trigger carries a `version` field — the publish
+   time `Date.now()` in milliseconds.
+2. The worker stamps the row with this value in a hidden `__sync_version` column
+   (auto-added by `zodSchemaToColumns` and `autoMigrate`).
+3. The BigQuery `MERGE` only updates the row when the incoming version is strictly
+   greater than the stored one:
 
-::: warning Subscription must be created with `enableMessageOrdering: true`
-The flag is **immutable** on a Pub/Sub subscription after creation. Cloud Functions v2
-auto-creates subscriptions **without** ordering enabled, so you must pre-create them
-before `firebase deploy` (or delete + recreate them). Use the `ensureSyncInfra` helper
-below or the **Setup Pub/Sub** button on the admin Config Check page.
+   ```sql
+   WHEN MATCHED
+     AND (T.`__sync_version` IS NULL OR S.`__sync_version` > T.`__sync_version`)
+   THEN UPDATE SET …
+   ```
+
+4. Within a single batch, the queue dedupes upserts per `docId` keeping only the row
+   with the highest `version` — which avoids the BigQuery error
+   *"UPDATE/MERGE must match at most one source row for each target row"* when several
+   updates to the same document are flushed together.
+
+**You don't need to configure anything.** Out-of-order updates are silently dropped,
+the most recent write always wins. Existing tables get the `__sync_version` column
+added automatically on the next worker invocation when `autoMigrate: true`.
+
+::: tip Older deployments
+Rows that pre-date this version have `__sync_version = NULL`. The MERGE treats `NULL`
+as "always update", so the first incoming event after upgrade fills it in. After that
+the version comparison kicks in normally.
 :::
 
-On publish errors the publisher automatically calls `resumePublishing(orderingKey)` —
-without that, all subsequent messages for the same key would be silently dropped.
+::: warning DELETE races
+A `DELETE` event arriving after a newer `UPSERT` for the same document **will** delete
+the row. Firestore deletes are usually terminal so this is rarely a problem in practice,
+but if your domain re-creates documents under the same id you should add an
+application-level tombstone column.
+:::
 
-## Pre-creating Topics & Subscriptions (`ensureSyncInfra`)
+## BigQuery Topic & Subscription Setup
 
-Helper that idempotently creates the Pub/Sub topics and push subscriptions used by the
-sync pipeline, with the correct `enableMessageOrdering` flag.
+You don't need to pre-create anything. On first deploy:
+
+- Cloud Functions v2 creates the trigger topic (`{topicPrefix}-{repoName}`) via Eventarc.
+- The worker creates the dead-letter topic (`{topicPrefix}-{repoName}-dlq`) the first
+  time a flush fails.
+
+::: info Why the library doesn't pre-create subscriptions
+A previous version exposed an `ensureSyncInfra` helper that created pull subscriptions
+with `enableMessageOrdering: true`. It was a dead-end — Cloud Functions v2 ignores
+pre-created subscriptions and always uses its own Eventarc-managed push subscription.
+The helper has been removed in favour of application-level versioning (see above).
+:::
+
+## Tuning & Scaling
+
+Three knobs let you trade latency, throughput and BigQuery quota pressure:
+
+| Option              | Where                  | Default | What it controls                                                            |
+| ------------------- | ---------------------- | ------- | --------------------------------------------------------------------------- |
+| `batchSize`         | top-level config       | `100`   | Max rows merged per BigQuery `MERGE` statement                              |
+| `flushIntervalMs`   | top-level config       | `5000`  | Max time a row sits in the in-memory queue before being flushed             |
+| `workerOptions`     | top-level config       | —       | Cloud Functions v2 options for every worker handler (concurrency, scaling…) |
 
 ```typescript
-import { ensureSyncInfra } from "@lpdjs/firestore-repo-service/sync";
-import { PubSub } from "@google-cloud/pubsub";
-
-await ensureSyncInfra(repoMapping, {
-  pubsub: new PubSub(),
-  topicPrefix: "firestore-sync",
-  ordering: true,
-  subscriptionSuffix: "-sub",
-  includeDLQ: true,
-  ackDeadlineSeconds: 60,
-  messageRetentionDuration: 7 * 24 * 60 * 60, // 7 days
+createFirestoreSync(repos, {
+  // ...
+  batchSize: 500,         // bigger batches → fewer DML statements → less quota pressure
+  flushIntervalMs: 10_000, // wait longer to fill batches (higher latency, higher throughput)
+  workerOptions: {
+    concurrency: 10,       // process up to 10 messages in parallel per instance
+    maxInstances: 10,      // cap horizontal scaling
+    minInstances: 0,       // set to 1 to avoid cold starts (costs ~$5-15/mo)
+    memory: "512MiB",
+    timeoutSeconds: 120,
+    region: "europe-west1",
+  },
 });
 ```
 
-| Option                     | Type      | Default        | Description                                           |
-| -------------------------- | --------- | -------------- | ----------------------------------------------------- |
-| `pubsub`                   | `PubSub`  | required       | Google Cloud Pub/Sub client                           |
-| `topicPrefix`              | `string`  | required       | Same value as in `createFirestoreSync`                |
-| `ordering`                 | `boolean` | `false`        | Create topics/subscriptions with ordering enabled     |
-| `subscriptionSuffix`       | `string`  | `"-sub"`       | Subscription name suffix per topic                    |
-| `includeDLQ`               | `boolean` | `false`        | Also create `{topic}-dlq` topics                      |
-| `ackDeadlineSeconds`       | `number`  | provider-default | Subscription ack deadline                          |
-| `messageRetentionDuration` | `number`  | provider-default | Retention in seconds                               |
+`workerOptions` is forwarded as-is to `onMessagePublished({ topic, ...workerOptions }, …)`.
+Any [`PubSubOptions`](https://firebase.google.com/docs/reference/functions/2nd-gen/node/firebase-functions.v2.pubsub.pubsuboptions)
+field is accepted (`cpu`, `vpcConnector`, `serviceAccount`, `secrets`, etc.).
 
-Existing topics and subscriptions are left untouched (the result reports `created` /
-`existing` counts). When ordering is enabled but an existing subscription was created
-without it, a warning is emitted — you must delete and recreate that subscription.
+::: warning BigQuery DML quota
+The default BigQuery quota is **2 concurrent DML statements per table**. With
+`concurrency: 10` and `maxInstances: 10` you can have up to 100 in-flight MERGEs;
+make sure they target distinct tables (i.e. distinct repos) or you'll hit
+`quotaExceeded` and Pub/Sub will retry. Larger `batchSize` + longer `flushIntervalMs`
+is the simplest fix.
+:::
 
-### Wired into the admin dashboard (`pubsubSetup`)
-
-When `pubsubSetup` is set under `admin`, a **⚙ Setup Pub/Sub** button appears on the
-`/config-check` page (gated by `featuresFlag.configCheck`). Clicking it runs
-`ensureSyncInfra` with the provided options and renders the result inline.
-
-```typescript
-admin: {
-  // ...
-  featuresFlag: { configCheck: true /* required */ },
-  pubsubSetup: {
-    ordering: true,
-    subscriptionSuffix: "-sub",
-    includeDLQ: true,
-    ackDeadlineSeconds: 60,
-  },
-}
-```
-
-The same action is available as `POST /config-check/setup-pubsub` and supports
-`Accept: application/json` for scripting.
+::: tip Recommended defaults for production
+- Low traffic (< 10 writes/s/repo): defaults are fine.
+- Medium (10-100 writes/s/repo): `batchSize: 500`, `flushIntervalMs: 10_000`,
+  `concurrency: 5`, `maxInstances: 10`.
+- High (> 100 writes/s/repo): consider one repo per Cloud Function (already the case)
+  and/or migrate inserts to the BigQuery Storage Write API.
+:::
 
 ## BigQuery Adapter
 

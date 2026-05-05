@@ -1,3 +1,4 @@
+import { SYNC_VERSION_COLUMN } from "../constants";
 import type {
   LogicalType,
   SqlAdapter,
@@ -154,7 +155,9 @@ export class BigQueryAdapter implements SqlAdapter {
 
     const source = selects.join(" UNION ALL\n    ");
 
-    // UPDATE SET clause (non-PK columns)
+    // UPDATE SET clause (non-PK columns).
+    // Note: when __sync_version is present we still update it so the row
+    // tracks the latest applied version.
     const updateSet = nonPkCols
       .map((c) => `T.${qi(c)} = S.${qi(c)}`)
       .join(", ");
@@ -163,11 +166,18 @@ export class BigQueryAdapter implements SqlAdapter {
     const insertCols = allKeys.map((c) => qi(c)).join(", ");
     const insertVals = allKeys.map((c) => `S.${qi(c)}`).join(", ");
 
+    // Out-of-order protection: only UPDATE when the incoming version is
+    // strictly greater than the stored one (NULL stored version means the
+    // row pre-dates versioning → always update).
+    const versionGuard = allKeys.includes(SYNC_VERSION_COLUMN)
+      ? ` AND (T.${qi(SYNC_VERSION_COLUMN)} IS NULL OR S.${qi(SYNC_VERSION_COLUMN)} > T.${qi(SYNC_VERSION_COLUMN)})`
+      : "";
+
     const query = [
       `MERGE ${this.fqn(tableName)} AS T`,
       `USING (\n    ${source}\n  ) AS S`,
       `ON T.${qi(primaryKey)} = S.${qi(primaryKey)}`,
-      `WHEN MATCHED THEN UPDATE SET ${updateSet}`,
+      `WHEN MATCHED${versionGuard} THEN UPDATE SET ${updateSet}`,
       `WHEN NOT MATCHED THEN INSERT (${insertCols}) VALUES (${insertVals});`,
     ].join("\n");
 

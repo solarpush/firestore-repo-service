@@ -27,7 +27,6 @@ import { MiniRouter } from "../servers/admin/router";
 import type { SyncQueue } from "./queue";
 import { zodSchemaToColumns } from "./schema-mapper";
 import { serializeDocument } from "./serializer";
-import { ensureSyncInfra } from "./setup";
 import type {
   adminsyncConfig,
   PubSubClientDep,
@@ -847,20 +846,6 @@ export function createadminsyncServer(
         ? '<span class="badge badge-ok">All checks passed</span>'
         : '<span class="badge badge-warn">Some issues found</span>';
 
-      // "Setup Pub/Sub" action — shown only when a PubSub client is available.
-      // Re-runs ensureSyncInfra() to create missing topics + subscriptions
-      // (with enableMessageOrdering set per `pubsubSetup.ordering`).
-      const setupBtn = pubsub
-        ? `<form method="POST" action="${lb}/config-check/setup-pubsub" style="display:inline">
-            <button type="submit" class="btn btn-primary">⚙ Setup Pub/Sub (topics + subscriptions)</button>
-          </form>
-          <p class="muted" style="margin-top:.5rem">
-            Idempotent. Creates missing topics and subscriptions with
-            <code>enableMessageOrdering=${config.pubsubSetup?.ordering ?? true}</code>.
-            Existing subscriptions are kept as-is (the ordering flag is immutable).
-          </p>`
-        : "";
-
       const html = page(
         "Config Check",
         lb,
@@ -869,105 +854,10 @@ export function createadminsyncServer(
           ${renderSection("BigQuery", grouped.bigquery)}
           ${renderSection("Pub/Sub", grouped.pubsub)}
           ${renderSection("Firestore", grouped.firestore)}
-          ${setupBtn ? `<hr style="margin:1.5rem 0"><h2>Actions</h2>${setupBtn}` : ""}
         </div>`,
       );
       sendHtml(res, html);
     });
-
-    // -- Setup Pub/Sub (POST) -------------------------------------------
-    if (pubsub) {
-      router.post(
-        `${basePath}/config-check/setup-pubsub`,
-        async (req, res) => {
-          const lb = getLinkBase(req, basePath);
-          const setupOpts = config.pubsubSetup ?? {};
-          try {
-            const result = await ensureSyncInfra(repoMapping, {
-              pubsub,
-              topicPrefix: topicPrefix ?? "firestore-sync",
-              ordering: setupOpts.ordering ?? true,
-              subscriptionSuffix: setupOpts.subscriptionSuffix ?? "sync-sub",
-              includeDLQ: setupOpts.includeDLQ ?? true,
-              ackDeadlineSeconds: setupOpts.ackDeadlineSeconds ?? 60,
-              ...(setupOpts.messageRetentionDuration && {
-                messageRetentionDuration: setupOpts.messageRetentionDuration,
-              }),
-            });
-
-            if (isJsonRequest(req)) {
-              sendJson(res, { ok: true, ...result });
-              return;
-            }
-
-            const topicRows = result.topics
-              .map(
-                (t) =>
-                  `<tr><td><code>${t.name}</code></td><td>${
-                    t.created
-                      ? '<span class="badge badge-ok">created</span>'
-                      : '<span class="badge">already exists</span>'
-                  }</td></tr>`,
-              )
-              .join("\n");
-
-            const subRows = result.subscriptions
-              .map(
-                (s) =>
-                  `<tr>
-                    <td><code>${s.name}</code></td>
-                    <td><code>${s.topic}</code></td>
-                    <td>${
-                      s.created
-                        ? '<span class="badge badge-ok">created</span>'
-                        : '<span class="badge">already exists</span>'
-                    }</td>
-                    <td>${s.orderingEnabled ? "✓" : "✗"}</td>
-                    <td>${s.warning ? `<span class="badge badge-warn">${s.warning}</span>` : ""}</td>
-                  </tr>`,
-              )
-              .join("\n");
-
-            sendHtml(
-              res,
-              page(
-                "Pub/Sub Setup",
-                lb,
-                `<div class="card">
-                  <p><span class="badge badge-ok">Setup complete</span></p>
-                  <h2>Topics</h2>
-                  <table><thead><tr><th>Name</th><th>Status</th></tr></thead>
-                    <tbody>${topicRows}</tbody></table>
-                  <h2>Subscriptions</h2>
-                  <table><thead><tr><th>Name</th><th>Topic</th><th>Status</th><th>Ordering</th><th>Notes</th></tr></thead>
-                    <tbody>${subRows}</tbody></table>
-                  <p style="margin-top:1rem"><a class="btn" href="${lb}/config-check">← Back to Config Check</a></p>
-                </div>`,
-              ),
-            );
-          } catch (e: any) {
-            const msg = e?.message ?? String(e);
-            if (isJsonRequest(req)) {
-              sendJson(res, { ok: false, error: msg }, 500);
-              return;
-            }
-            sendHtml(
-              res,
-              page(
-                "Pub/Sub Setup — Error",
-                lb,
-                `<div class="card">
-                  <p><span class="badge badge-err">Setup failed</span></p>
-                  <pre>${msg}</pre>
-                  <p><a class="btn" href="${lb}/config-check">← Back</a></p>
-                </div>`,
-              ),
-              500,
-            );
-          }
-        },
-      );
-    }
   }
 
   // -- Request handler ----------------------------------------------------

@@ -4,6 +4,7 @@ import {
   getInnerType,
   getShape,
 } from "../shared/zod-compat";
+import { SYNC_VERSION_COLUMN } from "./constants";
 import type { SqlColumn, SqlDialect, LogicalType } from "./types";
 
 const WRAPPER_TYPES = new Set(["ZodOptional", "ZodNullable", "ZodDefault"]);
@@ -120,6 +121,18 @@ export function zodSchemaToColumns(
   const columns: SqlColumn[] = [];
 
   flattenSchema(shape, dialect, "", false, excludeSet, columnMap, primaryKey, columns);
+
+  // Internal version column used by the worker to discard out-of-order
+  // PubSub deliveries (added unconditionally — never excluded).
+  if (!columns.some((c) => c.name === SYNC_VERSION_COLUMN)) {
+    columns.push({
+      name: SYNC_VERSION_COLUMN,
+      sqlType: dialect.mapType("bigint"),
+      nullable: true,
+      isPrimaryKey: false,
+      description: "Monotonic publish version (Date.now() ms). Internal.",
+    });
+  }
 
   return columns;
 }

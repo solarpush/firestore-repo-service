@@ -8,6 +8,7 @@
  */
 
 import { z } from "zod";
+import { SYNC_VERSION_COLUMN } from "./constants";
 import { SyncQueue } from "./queue";
 import { zodSchemaToColumns } from "./schema-mapper";
 import type {
@@ -80,6 +81,7 @@ export function createSyncWorker<M extends Record<string, any>>(
     flushIntervalMs = 5_000,
     autoMigrate = false,
     topicPrefix = "firestore-sync",
+    workerOptions,
     repos: repoConfigs = {} as Record<
       string,
       RepoSyncConfig<string> | undefined
@@ -171,26 +173,39 @@ export function createSyncWorker<M extends Record<string, any>>(
     }
 
     const queue = getQueue(repoName, primaryKey);
+
+    // Stamp the row with the publish version so the SQL adapter can skip
+    // stale (out-of-order) updates. Force-sync events without a version
+    // fall back to the wall clock — still monotonic per-process.
+    if (syncEvent.data) {
+      syncEvent.data[SYNC_VERSION_COLUMN] = syncEvent.version ?? Date.now();
+    }
+
     queue.enqueue(syncEvent);
   }
 
   // Cloud Function v2 PubSub handler (sync — deps are already available)
   function createHandler(topicName: string) {
-    return deps.pubsubHandler.onMessagePublished(
-      topicName,
-      async (event: any) => {
-        const data: SyncEvent = event.data?.message?.json ?? event.data?.json;
-        if (!data) {
-          console.warn("[SyncWorker] Received empty PubSub message");
-          return;
-        }
-        await handleMessage(data);
-        // Flush so data is persisted before the Cloud Function container shuts down.
-        // Force-sync (admin) handles its own flush after the batch loop.
-        const q = queues.get(data.repoName);
-        if (q) await q.flush();
-      },
-    );
+    const handlerFn = async (event: any) => {
+      const data: SyncEvent = event.data?.message?.json ?? event.data?.json;
+      if (!data) {
+        console.warn("[SyncWorker] Received empty PubSub message");
+        return;
+      }
+      await handleMessage(data);
+      // Flush so data is persisted before the Cloud Function container shuts down.
+      // Force-sync (admin) handles its own flush after the batch loop.
+      const q = queues.get(data.repoName);
+      if (q) await q.flush();
+    };
+
+    if (workerOptions) {
+      return deps.pubsubHandler.onMessagePublished(
+        { topic: topicName, ...workerOptions },
+        handlerFn,
+      );
+    }
+    return deps.pubsubHandler.onMessagePublished(topicName, handlerFn);
   }
 
   return {

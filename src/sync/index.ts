@@ -41,10 +41,5 @@ export { SyncQueue } from "./queue";
 export type { SyncQueueOptions } from "./queue";
 export { zodSchemaToColumns, zodTypeToLogical } from "./schema-mapper";
 export { serializeDocument, serializeValue } from "./serializer";
-export { ensureSyncInfra } from "./setup";
-export type {
-  EnsureSyncInfraOptions,
-  EnsureSyncInfraResult,
-} from "./setup";
 export { createSyncTriggers } from "./triggers";
 export { createSyncWorker } from "./worker";

@@ -74,8 +74,8 @@ export function createFirestoreSync<M extends Record<string, any>>(
     flushIntervalMs,
     autoMigrate,
     admin: adminConfig,
+    workerOptions,
     repos: repoConfigs,
-    ordering,
   } = config;
 
   // Resolve lazy deps — instances are returned as-is, factories are wrapped
@@ -88,7 +88,6 @@ export function createFirestoreSync<M extends Record<string, any>>(
     deps: { firestoreTriggers: deps.firestoreTriggers, pubsub },
     topicPrefix,
     repos: repoConfigs,
-    ...(ordering !== undefined && { ordering }),
   });
 
   // Create worker (PubSub → SQL)
@@ -99,6 +98,7 @@ export function createFirestoreSync<M extends Record<string, any>>(
     flushIntervalMs,
     autoMigrate,
     topicPrefix,
+    workerOptions,
     repos: repoConfigs,
   });
 
