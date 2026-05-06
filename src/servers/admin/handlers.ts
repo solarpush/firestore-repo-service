@@ -859,33 +859,42 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       }
     }
 
-    const result = await entry.repo.query
-      .paginate({
-        pageSize: currentPageSize,
-        cursor: cursorSnapshot,
-        // direction + where + orderBy are supported at runtime but not in the strict typed interface
-        ...{ direction: dir },
-        ...(whereFilters.length > 0 ? { where: whereFilters } : {}),
-        ...(sortState
-          ? {
-              orderBy: [
-                { field: sortState.field as any, direction: sortState.dir },
-              ],
-            }
-          : {}),
-      })
-      .catch(
-        (err: unknown) =>
-          ({
-            queryError: toQueryError(err, {
-              ref: entry.repo.ref,
-              path: entry.path,
-              isGroup: !!entry.isGroup,
-              filters: activeFilters,
-              sort: sortState,
-            }),
-          }) as const,
-      );
+    const [result, totalCount] = await Promise.all([
+      entry.repo.query
+        .paginate({
+          pageSize: currentPageSize,
+          cursor: cursorSnapshot,
+          // direction + where + orderBy are supported at runtime but not in the strict typed interface
+          ...{ direction: dir },
+          ...(whereFilters.length > 0 ? { where: whereFilters } : {}),
+          ...(sortState
+            ? {
+                orderBy: [
+                  { field: sortState.field as any, direction: sortState.dir },
+                ],
+              }
+            : {}),
+        })
+        .catch(
+          (err: unknown) =>
+            ({
+              queryError: toQueryError(err, {
+                ref: entry.repo.ref,
+                path: entry.path,
+                isGroup: !!entry.isGroup,
+                filters: activeFilters,
+                sort: sortState,
+              }),
+            }) as const,
+        ),
+      entry.repo.aggregate
+        .count(
+          (whereFilters.length > 0
+            ? { where: whereFilters as any }
+            : {}) as any,
+        )
+        .catch(() => undefined as number | undefined),
+    ]);
 
     // Discriminate between success and error results
     const isError = "queryError" in result;
@@ -917,6 +926,9 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
         currentPageSize,
         queryError,
         entry.isGroup,
+        totalCount,
+        entry.mutableFields,
+        entry.schema,
       ),
     );
   };
@@ -1207,6 +1219,333 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     }
   };
 
+  // ── Relation right-panel preview (HTML fragment, no shell) ───────────────
+  const handlePanel = async (
+    req: AnyReq & { params: RouteParams },
+    res: AnyRes,
+  ): Promise<void> => {
+    const repoName = req.params["repoName"];
+    if (!repoName) {
+      sendHtml(res, "Bad request", 400);
+      return;
+    }
+    const entry = registry[repoName];
+    if (!entry) {
+      sendHtml(res, "Repository not found", 404);
+      return;
+    }
+    const lb = getLinkBase(req, basePath);
+    const query = (req as any).query as Record<string, string> | undefined;
+    const type = query?.["type"] === "many" ? "many" : "one";
+    const ps = Math.max(1, Math.min(100, Number(query?.["ps"] ?? 25) || 25));
+    const allColumns = entry.listColumns ?? Object.keys(getShape(entry.schema));
+
+    // Lazy import the panel components — they're only used by this route.
+    const { PanelOne, PanelMany } = await import("./components/right-panel");
+    const { renderToString } = await import("hono/jsx/dom/server");
+
+    if (type === "one") {
+      const id = String(query?.["id"] ?? "");
+      if (!id) {
+        sendHtml(res, "<div class='p-6 text-error'>Missing id parameter.</div>", 400);
+        return;
+      }
+      try {
+        const doc = await fetchDocById(entry, id);
+        const html = renderToString(
+          PanelOne({
+            doc,
+            repoName: entry.name,
+            basePath: lb,
+            schema: entry.schema,
+            columns: allColumns,
+          }) as any,
+        );
+        sendHtml(res, html);
+      } catch (err) {
+        sendHtml(
+          res,
+          `<div class='p-6 text-error text-sm'>Error: ${(err as Error).message}</div>`,
+          500,
+        );
+      }
+      return;
+    }
+
+    // many
+    const fk = String(query?.["fk"] ?? "");
+    const fv = String(query?.["fv"] ?? "");
+    if (!fk || !fv) {
+      sendHtml(res, "<div class='p-6 text-error'>Missing fk/fv parameters.</div>", 400);
+      return;
+    }
+    const cursorStr = query?.["cursor"] ?? "";
+    const dir = query?.["dir"] === "prev" ? "prev" : "next";
+    let cursorSnapshot:
+      | import("firebase-admin/firestore").DocumentSnapshot
+      | undefined;
+    if (cursorStr) {
+      try {
+        const colRef = entry.repo.ref as any;
+        if (typeof colRef.doc === "function") {
+          cursorSnapshot = await colRef.doc(cursorStr).get();
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      const result = await entry.repo.query.paginate({
+        pageSize: ps,
+        cursor: cursorSnapshot,
+        ...{ direction: dir },
+        ...{ where: [[fk, "==", coerceFilterValue(fv)]] },
+      } as any);
+      const html = renderToString(
+        PanelMany({
+          docs: result.data as Record<string, unknown>[],
+          repoName: entry.name,
+          basePath: lb,
+          fk,
+          fv,
+          columns: allColumns,
+          schema: entry.schema,
+          pagination: {
+            hasPrev: result.hasPrevPage,
+            hasNext: result.hasNextPage,
+            prevCursor: result.prevCursor?.id ?? "",
+            nextCursor: result.nextCursor?.id ?? "",
+            pageSize: ps,
+          },
+        }) as any,
+      );
+      sendHtml(res, html);
+    } catch (err) {
+      sendHtml(
+        res,
+        `<div class='p-6 text-error text-sm'>Error: ${(err as Error).message}</div>`,
+        500,
+      );
+    }
+  };
+
+  // ── Bulk operations ──────────────────────────────────────────────────────
+  /** Build DocumentReferences for a list of docIds, handling subcollections via fetchDocById. */
+  const resolveRefs = async (
+    entry: AdminRepoEntry,
+    ids: string[],
+  ): Promise<import("firebase-admin/firestore").DocumentReference[]> => {
+    const refs: import("firebase-admin/firestore").DocumentReference[] = [];
+    for (const id of ids) {
+      let pathArgs: string[] | undefined;
+      if (entry.isGroup || entry.parentKeys?.length) {
+        const doc = await fetchDocById(entry, id);
+        pathArgs = doc ? extractPathArgs(doc, entry.pathKey) : undefined;
+      }
+      if (!pathArgs) pathArgs = [id];
+      try {
+        const ref = (entry.repo as any).documentRef(...pathArgs);
+        if (ref) refs.push(ref);
+      } catch {
+        /* ignore */
+      }
+    }
+    return refs;
+  };
+
+  /** Resolve all docIds matching a set of filters by streaming the query in pages. */
+  const resolveAllIds = async (
+    entry: AdminRepoEntry,
+    filters: FilterState[],
+  ): Promise<string[]> => {
+    const where = filtersToWhere(filters);
+    const docKey = entry.documentKey ?? "docId";
+    const ids: string[] = [];
+    let cursor: import("firebase-admin/firestore").DocumentSnapshot | undefined;
+    // Stream in pages of 500
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const page: any = await entry.repo.query.paginate({
+        pageSize: 500,
+        cursor,
+        ...{ direction: "next" },
+        ...(where.length > 0 ? { where } : {}),
+      } as any);
+      for (const d of page.data as Record<string, unknown>[]) {
+        const id = String(d[docKey] ?? d["id"] ?? "");
+        if (id) ids.push(id);
+      }
+      if (!page.hasNextPage || !page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    return ids;
+  };
+
+  const handleBulkDelete = async (
+    req: AnyReq & { params: RouteParams },
+    res: AnyRes,
+  ): Promise<void> => {
+    const repoName = req.params["repoName"];
+    if (!repoName) {
+      sendJson(res, { error: "Bad request" }, 400);
+      return;
+    }
+    const entry = registry[repoName];
+    if (!entry) {
+      sendJson(res, { error: "Repository not found" }, 404);
+      return;
+    }
+    if (!entry.allowDelete) {
+      sendJson(res, { error: "Delete is not allowed for this repository" }, 403);
+      return;
+    }
+    const body = ((req as any).body ?? {}) as {
+      ids?: unknown;
+      selectAll?: unknown;
+      filters?: unknown;
+    };
+    try {
+      const ids = await collectTargetIds(entry, body);
+      if (ids.length === 0) {
+        sendJson(res, { deleted: 0 });
+        return;
+      }
+      const refs = await resolveRefs(entry, ids);
+      // Chunk to 500 per Firestore batched-write limit
+      for (let i = 0; i < refs.length; i += 500) {
+        await entry.repo.bulk.delete(refs.slice(i, i + 500));
+      }
+      sendJson(res, { deleted: refs.length });
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 500);
+    }
+  };
+
+  const handleBulkUpdate = async (
+    req: AnyReq & { params: RouteParams },
+    res: AnyRes,
+  ): Promise<void> => {
+    const repoName = req.params["repoName"];
+    if (!repoName) {
+      sendJson(res, { error: "Bad request" }, 400);
+      return;
+    }
+    const entry = registry[repoName];
+    if (!entry) {
+      sendJson(res, { error: "Repository not found" }, 404);
+      return;
+    }
+    const body = ((req as any).body ?? {}) as {
+      ids?: unknown;
+      selectAll?: unknown;
+      filters?: unknown;
+      field?: unknown;
+      value?: unknown;
+    };
+    const field = String(body.field ?? "");
+    if (!field) {
+      sendJson(res, { error: "Missing 'field'" }, 400);
+      return;
+    }
+    // SECURITY: Strict allow-list of fields
+    if (!entry.mutableFields || !entry.mutableFields.includes(field)) {
+      sendJson(res, { error: `Field '${field}' is not bulk-updatable` }, 403);
+      return;
+    }
+    // Parse value through the field's Zod schema for validation/coercion
+    const fieldSchema = (entry.schema as any).shape?.[field] as
+      | z.ZodType
+      | undefined;
+    let parsedValue: unknown = body.value;
+    if (fieldSchema) {
+      const parsed = fieldSchema.safeParse(body.value);
+      if (!parsed.success) {
+        sendJson(
+          res,
+          { error: `Invalid value for '${field}': ${parsed.error.message}` },
+          400,
+        );
+        return;
+      }
+      parsedValue = parsed.data;
+    }
+    try {
+      const ids = await collectTargetIds(entry, body);
+      if (ids.length === 0) {
+        sendJson(res, { updated: 0 });
+        return;
+      }
+      const refs = await resolveRefs(entry, ids);
+      const items = refs.map((docRef) => ({
+        docRef,
+        data: { [field]: parsedValue } as any,
+      }));
+      for (let i = 0; i < items.length; i += 500) {
+        await entry.repo.bulk.update(items.slice(i, i + 500));
+      }
+      sendJson(res, { updated: items.length });
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 500);
+    }
+  };
+
+  /** Shared logic: extract target IDs from a request body (`ids[]` OR `selectAll + filters`). */
+  async function collectTargetIds(
+    entry: AdminRepoEntry,
+    body: { ids?: unknown; selectAll?: unknown; filters?: unknown },
+  ): Promise<string[]> {
+    if (body.selectAll) {
+      const filters = sanitizeFilters(body.filters, entry);
+      return await resolveAllIds(entry, filters);
+    }
+    if (Array.isArray(body.ids)) {
+      return body.ids.filter((x): x is string => typeof x === "string" && !!x);
+    }
+    return [];
+  }
+
+  function sanitizeFilters(
+    raw: unknown,
+    entry: AdminRepoEntry,
+  ): FilterState[] {
+    if (!Array.isArray(raw)) return [];
+    const validFields = new Set(
+      (entry.filterableFields ?? Object.keys(getShape(entry.schema))).map((s) =>
+        String(s),
+      ),
+    );
+    const validOps = new Set([
+      "==",
+      "!=",
+      "<",
+      "<=",
+      ">",
+      ">=",
+      "in",
+      "not-in",
+      "array-contains",
+      "array-contains-any",
+    ]);
+    const out: FilterState[] = [];
+    for (const f of raw) {
+      if (
+        f &&
+        typeof f === "object" &&
+        typeof (f as any).field === "string" &&
+        validFields.has((f as any).field) &&
+        typeof (f as any).value === "string" &&
+        validOps.has(String((f as any).op))
+      ) {
+        out.push({
+          field: (f as any).field,
+          op: (f as any).op,
+          value: (f as any).value,
+        });
+      }
+    }
+    return out;
+  }
+
   return {
     handleDashboard,
     handleList,
@@ -1215,5 +1554,23 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     handleEditForm,
     handleEditSubmit,
     handleDelete,
+    handlePanel,
+    handleBulkDelete,
+    handleBulkUpdate,
   };
+}
+
+function sendJson(res: AnyRes, payload: unknown, status = 200): void {
+  res
+    .status(status)
+    .set("Content-Type", "application/json; charset=utf-8")
+    .send(JSON.stringify(payload));
+}
+
+/** Coerce a string filter value to the most likely runtime type for a Firestore where clause. */
+function coerceFilterValue(v: string): unknown {
+  if (v === "true") return true;
+  if (v === "false") return false;
+  if (v !== "" && !isNaN(Number(v))) return Number(v);
+  return v;
 }

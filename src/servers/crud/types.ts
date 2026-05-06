@@ -3,9 +3,31 @@
  */
 
 import type { z } from "zod";
+import type { HttpsOptions } from "firebase-functions/v2/https";
 import type { ConfiguredRepository } from "../../repositories/types";
 import type { FieldPath, RepositoryConfig } from "../../shared/types";
-import type { OpenAPISpecOptions } from "./openapi";
+
+// ---------------------------------------------------------------------------
+// OpenAPI options
+// ---------------------------------------------------------------------------
+
+/**
+ * Options to control OpenAPI 3.1 spec generation for the CRUD server.
+ * Defined here (rather than in `./openapi`) to avoid a circular import:
+ * `openapi.ts` imports types from this module.
+ */
+export interface OpenAPISpecOptions {
+  /** Document title (default: "CRUD API") */
+  title?: string;
+  /** API version (default: "1.0.0") */
+  version?: string;
+  /** Description shown in Scalar UI / Swagger */
+  description?: string;
+  /** Server URLs */
+  servers?: { url: string; description?: string }[];
+  /** Whether the API requires auth — adds securitySchemes */
+  auth?: "basic" | "bearer" | false;
+}
 
 // ---------------------------------------------------------------------------
 // Public option types
@@ -13,13 +35,16 @@ import type { OpenAPISpecOptions } from "./openapi";
 
 /**
  * Extracts the model type `T` from a `ConfiguredRepository`.
+ * Uses a two-step inference so it survives intersection types
+ * (e.g. `RepositoryConfig<...> & { schema: ZodObject }` produced by
+ * `createRepositoryConfig(schema)`).
  * @internal
  */
 export type RepoModelType<TRepo> =
-  TRepo extends ConfiguredRepository<
-    RepositoryConfig<infer T, any, any, any, any, any, any, any, any, any>
-  >
-    ? T
+  TRepo extends ConfiguredRepository<infer C>
+    ? C extends RepositoryConfig<infer T, any, any, any, any, any, any, any, any, any>
+      ? T
+      : never
     : never;
 
 /**
@@ -28,25 +53,25 @@ export type RepoModelType<TRepo> =
  * @internal
  */
 export type RepoSystemKeys<TRepo> =
-  TRepo extends ConfiguredRepository<
-    RepositoryConfig<
-      any,
-      any,
-      any,
-      any,
-      any,
-      any,
-      infer TDocKey,
-      infer TPathKey,
-      infer TCreatedKey,
-      infer TUpdatedKey
-    >
-  >
-    ?
-        | (TDocKey extends string ? TDocKey : never)
-        | (TPathKey extends string ? TPathKey : never)
-        | (TCreatedKey extends string ? TCreatedKey : never)
-        | (TUpdatedKey extends string ? TUpdatedKey : never)
+  TRepo extends ConfiguredRepository<infer C>
+    ? C extends RepositoryConfig<
+        any,
+        any,
+        any,
+        any,
+        any,
+        any,
+        infer TDocKey,
+        infer TPathKey,
+        infer TCreatedKey,
+        infer TUpdatedKey
+      >
+      ?
+          | (TDocKey extends string ? TDocKey : never)
+          | (TPathKey extends string ? TPathKey : never)
+          | (TCreatedKey extends string ? TCreatedKey : never)
+          | (TUpdatedKey extends string ? TUpdatedKey : never)
+      : never
     : never;
 
 /**
@@ -324,12 +349,11 @@ export interface CrudServerOptions<
    * export const crud = onRequest(handler.httpsOptions!, handler);
    * ```
    */
-  httpsOptions?: Record<string, unknown>;
+  httpsOptions?: HttpsOptions;
 }
 
 // ---------------------------------------------------------------------------
 // Response types
-// ---------------------------------------------------------------------------
 
 /**
  * Standard API response wrapper.

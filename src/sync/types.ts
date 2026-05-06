@@ -6,6 +6,30 @@
  * touches the database SDK; everything else works with these abstractions.
  */
 
+import type {
+  onDocumentCreated,
+  onDocumentDeleted,
+  onDocumentUpdated,
+} from "firebase-functions/v2/firestore";
+import type { HttpsOptions, onRequest } from "firebase-functions/v2/https";
+import type {
+  PubSubOptions,
+  onMessagePublished,
+} from "firebase-functions/v2/pubsub";
+
+/**
+ * Cloud Functions v2 options forwarded to `onMessagePublished()` for every
+ * sync worker handler. The `topic` field is omitted because the library sets
+ * it itself from `topicPrefix` + repo name.
+ */
+export type SyncWorkerOptions = Omit<PubSubOptions, "topic">;
+
+/**
+ * Cloud Functions v2 options forwarded to `onRequest()` for the admin handler.
+ * Re-export of `HttpsOptions` from `firebase-functions/v2/https`.
+ */
+export type AdminHttpsOptions = HttpsOptions;
+
 // ---------------------------------------------------------------------------
 // Lazy factory utility
 // ---------------------------------------------------------------------------
@@ -222,14 +246,14 @@ export type TypedRepoSyncConfigs<M> = {
 
 /** Firestore trigger constructors from `firebase-functions/v2/firestore`. */
 export interface FirestoreTriggersDep {
-  onDocumentCreated: Function;
-  onDocumentUpdated: Function;
-  onDocumentDeleted: Function;
+  onDocumentCreated: typeof onDocumentCreated;
+  onDocumentUpdated: typeof onDocumentUpdated;
+  onDocumentDeleted: typeof onDocumentDeleted;
 }
 
 /** PubSub handler from `firebase-functions/v2/pubsub`. */
 export interface PubSubHandlerDep {
-  onMessagePublished: Function;
+  onMessagePublished: typeof onMessagePublished;
 }
 
 /** PubSub client instance (e.g. `new PubSub()`). */
@@ -289,7 +313,7 @@ export interface SyncWorkerConfig<M = Record<string, any>> {
    * workerOptions: { concurrency: 10, maxInstances: 10, memory: "512MiB" }
    * ```
    */
-  workerOptions?: Record<string, unknown>;
+  workerOptions?: SyncWorkerOptions;
   /** Per-repo overrides */
   repos?: TypedRepoSyncConfigs<M>;
 }
@@ -344,16 +368,17 @@ export interface adminsyncConfig {
   /** Feature flags controlling which endpoints are enabled */
   featuresFlag?: adminsyncFeaturesFlag;
   /**
-   * `onRequest` from `firebase-functions/https` (or `firebase-functions/v2/https`).
+   * `onRequest` from `firebase-functions/v2/https` (or `firebase-functions/https`,
+   * which re-exports the v2 version in `firebase-functions` ≥ 5).
    * When provided, the admin handler is automatically wrapped as a Cloud Function.
    * If omitted, the raw `(req, res) => void` handler is exposed instead.
    */
-  onRequest?: (...args: any[]) => any;
+  onRequest?: typeof onRequest;
   /**
    * Options forwarded to `onRequest()` as the first argument (e.g. `{ invoker: "public" }`).
    * Only used when `onRequest` is also provided.
    */
-  httpsOptions?: Record<string, unknown>;
+  httpsOptions?: AdminHttpsOptions;
 }
 
 /** Options for `createFirestoreSync()` — the unified wrapper. */
@@ -384,7 +409,7 @@ export interface FirestoreSyncConfig<M = Record<string, any>> {
    * worker handler. Use to tune `concurrency`, `maxInstances`, `minInstances`,
    * `memory`, `timeoutSeconds`, `region`, `cpu`, etc.
    */
-  workerOptions?: Record<string, unknown>;
+  workerOptions?: SyncWorkerOptions;
   /**
    * Optional sync admin endpoint. When provided, a `adminsync` handler is
    * added to `sync.functions` exposing health-check, force-sync, and queue

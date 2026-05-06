@@ -1,12 +1,61 @@
 import type { Child, FC, PropsWithChildren } from "hono/jsx";
 import { renderToString } from "hono/jsx/dom/server";
 import { ClientScript } from "./client-script";
+import { RightPanel } from "./right-panel";
 import type { PageOptions } from "./types";
 
 /** Render a JSX element to a complete HTML string (includes <!DOCTYPE html>) */
 export function renderHtml(element: Child): string {
   return "<!DOCTYPE html>" + renderToString(element);
 }
+
+/** Available themes (DaisyUI 5). Order matters — first is the default. */
+const THEMES = ["corporate", "silk", "dark"] as const;
+
+const ThemeSwitcher: FC = () => (
+  <div class="dropdown dropdown-end" data-frs-theme-switcher>
+    <button
+      type="button"
+      tabIndex={0}
+      class="btn btn-sm btn-ghost text-neutral-content gap-1.5"
+      aria-label="Switch theme"
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="size-4"
+      >
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+      </svg>
+      <span class="text-xs hidden sm:inline" data-frs-theme-current>
+        Theme
+      </span>
+    </button>
+    <ul
+      tabIndex={0}
+      class="dropdown-content menu menu-sm bg-base-100 text-base-content rounded-box z-50 mt-2 w-40 p-1 shadow-lg border border-base-300"
+    >
+      {THEMES.map((t) => (
+        <li key={t}>
+          <button
+            type="button"
+            data-frs-theme={t}
+            class="capitalize justify-between"
+          >
+            <span>{t}</span>
+            <span class="hidden text-primary" data-frs-theme-check={t}>
+              ✓
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  </div>
+);
 
 export const PageShell: FC<PropsWithChildren<{ opts: PageOptions }>> = ({
   opts,
@@ -20,6 +69,13 @@ export const PageShell: FC<PropsWithChildren<{ opts: PageOptions }>> = ({
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{title} — FRS Admin</title>
+        {/* Early theme hydration — runs before paint to avoid flash of unstyled theme */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{var t=localStorage.getItem('frs-admin-theme');if(t){document.documentElement.setAttribute('data-theme',t);}}catch(_){}})();",
+          }}
+        />
         <link
           href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css"
           rel="stylesheet"
@@ -42,6 +98,9 @@ export const PageShell: FC<PropsWithChildren<{ opts: PageOptions }>> = ({
             >
               FRS Admin
             </a>
+          </div>
+          <div class="flex-none">
+            <ThemeSwitcher />
           </div>
         </div>
 
@@ -97,6 +156,7 @@ export const PageShell: FC<PropsWithChildren<{ opts: PageOptions }>> = ({
           {children}
         </main>
 
+        <RightPanel basePath={basePath} />
         <ClientScript />
       </body>
     </html>

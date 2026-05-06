@@ -1,3 +1,488 @@
+// ── Shared helpers ──────────────────────────────────────────────────────────
+function frsGetBasePath() {
+  var root = document.querySelector("[data-frs-panel-root]");
+  var bp = root && root.getAttribute("data-frs-base-path");
+  if (typeof bp === "string") return bp.replace(/\/$/, "");
+  return window.location.pathname.replace(/\/[^/]*\/?$/, "");
+}
+
+// ── Right panel (relations preview) ─────────────────────────────────────────
+(function () {
+  function panelEls() {
+    return {
+      root: document.querySelector("[data-frs-panel-root]"),
+      backdrop: document.querySelector("[data-frs-panel-backdrop]"),
+      panel: document.querySelector("[data-frs-panel]"),
+      title: document.querySelector("[data-frs-panel-title]"),
+      body: document.querySelector("[data-frs-panel-body]"),
+    };
+  }
+  function openPanel(label) {
+    var els = panelEls();
+    if (!els.root || !els.panel) return;
+    els.root.classList.remove("hidden");
+    els.root.setAttribute("aria-hidden", "false");
+    requestAnimationFrame(function () {
+      if (els.backdrop) els.backdrop.style.opacity = "1";
+      if (els.panel) {
+        els.panel.classList.remove("translate-x-full");
+        els.panel.style.transform = "translateX(0)";
+        els.panel.style.translate = "0 0";
+      }
+    });
+    if (els.title) els.title.textContent = label || "Relation";
+    if (els.body) {
+      els.body.innerHTML =
+        '<div class="flex items-center justify-center py-12 text-base-content/40"><span class="loading loading-spinner loading-md"></span></div>';
+    }
+  }
+  function closePanel() {
+    var els = panelEls();
+    if (!els.root || !els.panel) return;
+    if (els.backdrop) els.backdrop.style.opacity = "0";
+    if (els.panel) {
+      els.panel.style.transform = "translateX(100%)";
+      els.panel.style.translate = "100% 0";
+      els.panel.classList.add("translate-x-full");
+    }
+    setTimeout(function () {
+      els.root.classList.add("hidden");
+      els.root.setAttribute("aria-hidden", "true");
+    }, 200);
+  }
+  function getBasePath() {
+    return frsGetBasePath();
+  }
+  function fetchPanel(url, label) {
+    openPanel(label);
+    fetch(url, { credentials: "same-origin" })
+      .then(function (r) {
+        return r.text();
+      })
+      .then(function (html) {
+        var els = panelEls();
+        if (els.body) els.body.innerHTML = html;
+      })
+      .catch(function (err) {
+        var els = panelEls();
+        if (els.body) {
+          els.body.innerHTML =
+            '<div class="p-6 text-error text-sm">Error: ' +
+            (err && err.message ? err.message : String(err)) +
+            "</div>";
+        }
+      });
+  }
+  document.addEventListener("click", function (e) {
+    var trigger = e.target.closest("[data-frs-relation]");
+    if (trigger) {
+      e.preventDefault();
+      var type = trigger.getAttribute("data-frs-rel-type");
+      var repo = trigger.getAttribute("data-frs-rel-repo");
+      var fk = trigger.getAttribute("data-frs-rel-fk");
+      var val = trigger.getAttribute("data-frs-rel-val");
+      var label = trigger.getAttribute("data-frs-rel-label") || "Relation";
+      var bp = getBasePath();
+      var url;
+      if (type === "one") {
+        url =
+          bp +
+          "/" +
+          encodeURIComponent(repo) +
+          "/_panel?type=one&id=" +
+          encodeURIComponent(val);
+      } else {
+        url =
+          bp +
+          "/" +
+          encodeURIComponent(repo) +
+          "/_panel?type=many&fk=" +
+          encodeURIComponent(fk) +
+          "&fv=" +
+          encodeURIComponent(val);
+      }
+      fetchPanel(url, repo + " · " + label);
+      return;
+    }
+    if (e.target.closest("[data-frs-panel-close]")) {
+      closePanel();
+      return;
+    }
+    if (e.target.closest("[data-frs-panel-backdrop]")) {
+      closePanel();
+      return;
+    }
+    var pageBtn = e.target.closest("[data-frs-panel-page]");
+    if (pageBtn) {
+      // Recompute URL by inspecting the current open panel context — encoded in the body's first anchor "Full view →"
+      // Simpler: rebuild via the previous URL stored in data-attr.
+      var fullViewLink = document.querySelector(
+        "[data-frs-panel-body] a.btn-outline[href]",
+      );
+      if (!fullViewLink) return;
+      var dir = pageBtn.getAttribute("data-frs-panel-page");
+      var cursor = pageBtn.getAttribute("data-cursor") || "";
+      var fullViewUrl = new URL(fullViewLink.href, window.location.href);
+      var repo = fullViewUrl.pathname.split("/").filter(Boolean).pop();
+      var bp = fullViewUrl.pathname.replace(/\/[^/]+\/?$/, "");
+      var fk = "";
+      var fv = "";
+      fullViewUrl.searchParams.forEach(function (v, k) {
+        if (k.indexOf("fv_") === 0) {
+          fk = k.slice(3);
+          fv = v;
+        }
+      });
+      var url =
+        bp +
+        "/" +
+        encodeURIComponent(repo) +
+        "/_panel?type=many&fk=" +
+        encodeURIComponent(fk) +
+        "&fv=" +
+        encodeURIComponent(fv) +
+        "&cursor=" +
+        encodeURIComponent(cursor) +
+        "&dir=" +
+        encodeURIComponent(dir);
+      fetchPanel(url, repo);
+    }
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") closePanel();
+  });
+})();
+
+// ── Bulk selection + actions ────────────────────────────────────────────────
+(function () {
+  var state = {
+    selectAllAcrossQuery: false,
+    // Keep a Set of selected ids on the current page (cleared on navigation).
+    selected: new Set(),
+  };
+
+  function bar() {
+    return document.querySelector("[data-frs-bulk-bar]");
+  }
+  function summarize() {
+    var b = bar();
+    if (!b) return;
+    var total = parseInt(b.getAttribute("data-frs-total") || "0", 10);
+    var summary = b.querySelector("[data-frs-bulk-summary]");
+    var selectAllBtn = b.querySelector("[data-frs-bulk-select-all]");
+    var allActive = b.querySelector("[data-frs-bulk-all-active]");
+    var pageSize = parseInt(b.getAttribute("data-frs-page-size") || "0", 10);
+    var n = state.selected.size;
+    if (state.selectAllAcrossQuery) {
+      if (allActive) allActive.classList.remove("hidden");
+      if (selectAllBtn) selectAllBtn.classList.add("hidden");
+      if (summary) summary.textContent = "";
+      b.classList.remove("hidden");
+      return;
+    }
+    if (n === 0) {
+      b.classList.add("hidden");
+      if (selectAllBtn) selectAllBtn.classList.add("hidden");
+      if (allActive) allActive.classList.add("hidden");
+      return;
+    }
+    b.classList.remove("hidden");
+    if (allActive) allActive.classList.add("hidden");
+    if (summary) {
+      summary.textContent =
+        n + " selected" + (pageSize ? " on this page" : "");
+    }
+    if (selectAllBtn && total > n) {
+      selectAllBtn.classList.remove("hidden");
+    } else if (selectAllBtn) {
+      selectAllBtn.classList.add("hidden");
+    }
+  }
+  function syncHeader() {
+    var head = document.querySelector("[data-frs-select-page]");
+    if (!head) return;
+    var rows = document.querySelectorAll("[data-frs-select-row]");
+    var checked = 0;
+    rows.forEach(function (r) {
+      if (r.checked) checked++;
+    });
+    head.indeterminate = checked > 0 && checked < rows.length;
+    head.checked = rows.length > 0 && checked === rows.length;
+  }
+  document.addEventListener("change", function (e) {
+    if (e.target.matches("[data-frs-select-row]")) {
+      var id = e.target.value;
+      if (e.target.checked) state.selected.add(id);
+      else state.selected.delete(id);
+      state.selectAllAcrossQuery = false;
+      syncHeader();
+      summarize();
+    } else if (e.target.matches("[data-frs-select-page]")) {
+      var rows = document.querySelectorAll("[data-frs-select-row]");
+      rows.forEach(function (r) {
+        r.checked = e.target.checked;
+        if (e.target.checked) state.selected.add(r.value);
+        else state.selected.delete(r.value);
+      });
+      state.selectAllAcrossQuery = false;
+      summarize();
+    }
+  });
+  document.addEventListener("click", function (e) {
+    var sa = e.target.closest("[data-frs-bulk-select-all]");
+    if (sa) {
+      state.selectAllAcrossQuery = true;
+      summarize();
+      return;
+    }
+    var clear = e.target.closest("[data-frs-bulk-clear]");
+    if (clear) {
+      state.selectAllAcrossQuery = false;
+      state.selected.clear();
+      document
+        .querySelectorAll("[data-frs-select-row]")
+        .forEach(function (r) {
+          r.checked = false;
+        });
+      syncHeader();
+      summarize();
+      return;
+    }
+    var actBtn = e.target.closest("[data-frs-bulk-action]");
+    if (actBtn) {
+      var action = actBtn.getAttribute("data-frs-bulk-action");
+      if (action === "delete") doBulkDelete();
+      else if (action === "update") openBulkUpdateModal();
+    }
+  });
+
+  function buildPayload() {
+    var b = bar();
+    if (!b) return null;
+    if (state.selectAllAcrossQuery) {
+      var filters = [];
+      try {
+        filters = JSON.parse(b.getAttribute("data-frs-filters") || "[]");
+      } catch (_) {}
+      return { selectAll: true, filters: filters };
+    }
+    return { ids: Array.from(state.selected) };
+  }
+
+  function repoEndpoint(action) {
+    var b = bar();
+    if (!b) return null;
+    var repo = b.getAttribute("data-frs-repo");
+    var bp = frsGetBasePath();
+    return bp + "/" + encodeURIComponent(repo) + "/_bulk/" + action;
+  }
+
+  function doBulkDelete() {
+    var payload = buildPayload();
+    if (!payload) return;
+    var n = state.selectAllAcrossQuery
+      ? "all matching"
+      : payload.ids.length + "";
+    if (!confirm("Delete " + n + " documents? This cannot be undone.")) return;
+    var url = repoEndpoint("delete");
+    if (!url) return;
+    fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          return { ok: r.ok, body: j };
+        });
+      })
+      .then(function (res) {
+        if (!res.ok) {
+          alert("Bulk delete failed: " + (res.body && res.body.error));
+          return;
+        }
+        window.location.reload();
+      })
+      .catch(function (err) {
+        alert("Bulk delete failed: " + err.message);
+      });
+  }
+
+  function openBulkUpdateModal() {
+    var b = bar();
+    var dialog = document.getElementById("frs-bulk-update-modal");
+    if (!b || !dialog) return;
+    var fields = [];
+    try {
+      fields = JSON.parse(b.getAttribute("data-frs-fields") || "[]");
+    } catch (_) {}
+    if (fields.length === 0) return;
+    var summary = dialog.querySelector(
+      "[data-frs-bulk-update-summary]",
+    );
+    if (summary) {
+      summary.textContent = state.selectAllAcrossQuery
+        ? "Update one field on all matching documents."
+        : "Update one field on " +
+          state.selected.size +
+          " selected document" +
+          (state.selected.size !== 1 ? "s" : "") +
+          ".";
+    }
+    var select = dialog.querySelector("[data-frs-bulk-field-select]");
+    var valueContainer = dialog.querySelector(
+      "[data-frs-bulk-value-container]",
+    );
+    var renderValueInput = function () {
+      if (!valueContainer || !select) return;
+      var name = select.value;
+      var meta = fields.filter(function (f) {
+        return f.name === name;
+      })[0];
+      if (!meta) {
+        valueContainer.innerHTML = "";
+        return;
+      }
+      var inputHtml = "";
+      var label =
+        '<div class="label"><span class="label-text text-xs uppercase tracking-wide">Value</span></div>';
+      if (meta.type === "boolean") {
+        inputHtml =
+          '<select name="value" class="select select-bordered select-sm w-full">' +
+          '<option value="true">true</option><option value="false">false</option>' +
+          "</select>";
+      } else if (
+        (meta.type === "enum" || meta.type === "literal") &&
+        meta.enumValues &&
+        meta.enumValues.length
+      ) {
+        inputHtml =
+          '<select name="value" class="select select-bordered select-sm w-full">';
+        meta.enumValues.forEach(function (v) {
+          inputHtml +=
+            '<option value="' + escapeAttr(v) + '">' + escapeHtml(v) + "</option>";
+        });
+        inputHtml += "</select>";
+      } else if (meta.type === "number" || meta.type === "bigint") {
+        inputHtml =
+          '<input type="number" step="any" name="value" class="input input-bordered input-sm w-full" />';
+      } else {
+        inputHtml =
+          '<input type="text" name="value" class="input input-bordered input-sm w-full" />';
+      }
+      valueContainer.innerHTML =
+        '<label class="form-control w-full">' + label + inputHtml + "</label>";
+    };
+    if (select) {
+      select.value = "";
+      select.onchange = renderValueInput;
+    }
+    if (valueContainer) valueContainer.innerHTML = "";
+    var form = dialog.querySelector("[data-frs-bulk-update-form]");
+    if (form) {
+      form.onsubmit = function (e) {
+        e.preventDefault();
+        if (!select || !select.value) return;
+        var meta = fields.filter(function (f) {
+          return f.name === select.value;
+        })[0];
+        if (!meta) return;
+        var input = valueContainer.querySelector(
+          'input[name="value"], select[name="value"]',
+        );
+        if (!input) return;
+        var raw = input.value;
+        var typed;
+        if (meta.type === "boolean") typed = raw === "true";
+        else if (meta.type === "number") typed = raw === "" ? null : Number(raw);
+        else if (meta.type === "bigint") typed = raw === "" ? null : Number(raw);
+        else typed = raw;
+        var payload = buildPayload();
+        if (!payload) return;
+        payload.field = select.value;
+        payload.value = typed;
+        var url = repoEndpoint("update");
+        if (!url) return;
+        fetch(url, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+          .then(function (r) {
+            return r.json().then(function (j) {
+              return { ok: r.ok, body: j };
+            });
+          })
+          .then(function (res) {
+            if (!res.ok) {
+              alert("Bulk update failed: " + (res.body && res.body.error));
+              return;
+            }
+            dialog.close();
+            window.location.reload();
+          })
+          .catch(function (err) {
+            alert("Bulk update failed: " + err.message);
+          });
+      };
+    }
+    var cancel = dialog.querySelector("[data-frs-bulk-update-cancel]");
+    if (cancel)
+      cancel.onclick = function () {
+        dialog.close();
+      };
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[
+          c
+        ] || c
+      );
+    });
+  }
+  function escapeAttr(s) {
+    return escapeHtml(s);
+  }
+})();
+
+// ── Theme switcher ──────────────────────────────────────────────────────────
+(function () {
+  function syncThemeUI() {
+    var current =
+      document.documentElement.getAttribute("data-theme") || "corporate";
+    var label = document.querySelector("[data-frs-theme-current]");
+    if (label) label.textContent = current;
+    document.querySelectorAll("[data-frs-theme-check]").forEach(function (el) {
+      el.classList.toggle(
+        "hidden",
+        el.getAttribute("data-frs-theme-check") !== current,
+      );
+    });
+  }
+  document.addEventListener("DOMContentLoaded", syncThemeUI);
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-frs-theme]");
+    if (!btn) return;
+    var theme = btn.getAttribute("data-frs-theme");
+    if (!theme) return;
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      localStorage.setItem("frs-admin-theme", theme);
+    } catch (_) {}
+    syncThemeUI();
+    // Close the dropdown by blurring focus (DaisyUI dropdown closes on focusout)
+    if (document.activeElement && document.activeElement.blur) {
+      document.activeElement.blur();
+    }
+  });
+})();
+
 // ── Form validation + array serialization ───────────────────────────────────
 document.addEventListener("submit", function (e) {
   var form = e.target;
@@ -228,7 +713,12 @@ function initColumnVisibility(table) {
   if (dataThs.length === 0) return;
 
   var wrap = table.closest("[data-frs-table-wrap]");
-  var toolbar = wrap && wrap.previousElementSibling;
+  var toolbar =
+    (wrap &&
+      (wrap.parentElement
+        ? wrap.parentElement.querySelector("[data-frs-toolbar]")
+        : null)) ||
+    (wrap && wrap.previousElementSibling);
   if (!toolbar) return;
 
   var repo = table.getAttribute("data-frs-repo") || "default";

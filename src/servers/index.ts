@@ -36,8 +36,19 @@
  * ```
  */
 
-// ── Admin ORM ───────────────────────────────────────────────────────────────
-export { MiniRouter, createAdminServer } from "./admin/index";
+// ── Unified factory (auto-binds repos to all server builders) ───────────────
+export { createServers } from "./create-servers";
+export type {
+  BoundAdminRepoConfig,
+  BoundAdminServerOptions,
+  BoundCrudRepoConfig,
+  BoundCrudServerOptions,
+  BoundFirestoreSyncConfig,
+  CreateServersDeps,
+} from "./create-servers";
+
+// ── Admin ORM (types only — use `createServers().admin()` to build) ─────────
+export { MiniRouter } from "./admin/index";
 export type {
   AdminRepoConfig,
   AdminRepoEntry,
@@ -48,8 +59,7 @@ export type {
   RouteHandler,
 } from "./admin/index";
 
-// ── CRUD API ────────────────────────────────────────────────────────────────
-export { createCrudServer } from "./crud/index";
+// ── CRUD API (types only — use `createServers().crud()` to build) ───────────
 export type {
   ApiResponse,
   CrudRepoConfig,

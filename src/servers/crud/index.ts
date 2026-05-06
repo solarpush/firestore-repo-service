@@ -84,6 +84,7 @@
  */
 
 import { MiniRouter } from "../admin/router";
+import type { HttpsOptions } from "firebase-functions/v2/https";
 import type { HttpRequest, HttpResponse } from "../http-types";
 import type { ConfiguredRepository } from "../../repositories/types";
 import { createCrudHandlers } from "./handlers";
@@ -255,7 +256,7 @@ export function createCrudServer<
   TRepos extends Record<string, ConfiguredRepository<any>>,
 >(
   options: CrudServerOptions<TRepos>,
-): ((req: any, res: any) => Promise<void>) & { spec: () => OpenAPIDocument; httpsOptions?: Record<string, unknown> } {
+): ((req: any, res: any) => Promise<void>) & { spec: () => OpenAPIDocument; httpsOptions?: HttpsOptions } {
   const {
     basePath = "/",
     repos,
@@ -502,7 +503,7 @@ export function createCrudServer<
     /** Return the generated OpenAPI 3.1 document. */
     spec: () => OpenAPIDocument;
     /** Options to forward to `onRequest()` from firebase-functions. */
-    httpsOptions?: Record<string, unknown>;
+    httpsOptions?: HttpsOptions;
   };
 }
 

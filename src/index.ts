@@ -419,8 +419,7 @@ export function createRepositoryMapping<T extends Record<string, any>>(
 // Servers (admin ORM & CRUD API)
 // ============================================
 export {
-  createAdminServer,
-  createCrudServer,
+  createServers,
   MiniRouter,
 } from "./servers/index";
 export type {
@@ -429,6 +428,12 @@ export type {
   AdminServerOptions,
   ApiResponse,
   BasicAuthConfig,
+  BoundAdminRepoConfig,
+  BoundAdminServerOptions,
+  BoundCrudRepoConfig,
+  BoundCrudServerOptions,
+  BoundFirestoreSyncConfig,
+  CreateServersDeps,
   CrudRepoConfig,
   CrudServerOptions,
   FieldRole,

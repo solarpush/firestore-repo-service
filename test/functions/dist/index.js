@@ -87,6 +87,15 @@ const CommentModel = zod_1.default.object({
     createdAt: zod_1.default.date(),
     updatedAt: zod_1.default.date(),
 });
+const ComputeSchema = zod_1.default.object({
+    docId: zod_1.default.string(),
+    documentPath: zod_1.default.string(),
+    value1: zod_1.default.number(),
+    value2: zod_1.default.number(),
+    result: zod_1.default.number(),
+    createdAt: zod_1.default.date(),
+    updatedAt: zod_1.default.date(),
+});
 // ============================================
 // Repository Configuration
 // ============================================
@@ -125,6 +134,17 @@ const repositoryMapping = {
         updatedKey: "updatedAt",
         refCb: (db, postId, docId) => db.collection("posts").doc(postId).collection("comments").doc(docId),
     }),
+    compute: (0, firestore_repo_service_1.createRepositoryConfig)(ComputeSchema)({
+        path: "compute",
+        isGroup: false,
+        foreignKeys: ["docId"],
+        queryKeys: ["value1", "value2"],
+        documentKey: "docId",
+        pathKey: "documentPath",
+        createdKey: "createdAt",
+        updatedKey: "updatedAt",
+        refCb: (db, docId) => db.collection("compute").doc(docId),
+    }),
 };
 // Step 2: Build relations with full type validation
 const repositoryMappingWithRelations = (0, firestore_repo_service_1.buildRepositoryRelations)(repositoryMapping, {
@@ -147,6 +167,7 @@ const repositoryMappingWithRelations = (0, firestore_repo_service_1.buildReposit
 const repos = (0, firestore_repo_service_1.createRepositoryMapping)(db, repositoryMappingWithRelations);
 exports.server = (0, https_1.onRequest)(async (req, res) => {
     try {
+        const ressourcesSizes = 1;
         // 1. Création d'un user
         const user = await repos.users.create({
             age: 28,
@@ -162,7 +183,7 @@ exports.server = (0, https_1.onRequest)(async (req, res) => {
         console.log("Fetched User:", fetchedUser);
         // 3. Création de 5 posts associés à ce user via batch
         const postBatch = repos.posts.batch.create();
-        for (let i = 1; i <= 5; i++) {
+        for (let i = 1; i <= 5 * ressourcesSizes; i++) {
             const postId = `post-${i}-${Date.now()}`;
             const postData = {
                 address: { street: `${i * 100} Main St`, city: "Anytown" },
@@ -181,7 +202,7 @@ exports.server = (0, https_1.onRequest)(async (req, res) => {
         }
         const commentBatch = repos.comments.batch.create();
         const commentsData = [];
-        for (let i = 1; i <= 3; i++) {
+        for (let i = 1; i <= 3 * ressourcesSizes; i++) {
             const commentId = `comment-${i}-${Date.now()}`;
             const commentData = {
                 postId: firstPost?.docId,
@@ -200,39 +221,11 @@ exports.server = (0, https_1.onRequest)(async (req, res) => {
         // 6. Récupération des comments par postId
         const postComments = await repos.comments.get.byPostId(firstPost.docId);
         console.log("Post Comments:", postComments);
-        // 7. Récupération du user avec populate pour obtenir ses posts associés
-        const userWithPosts = await repos.users.populate({ docId: user.docId }, {
-            relation: "docId",
-            select: ["docId", "title", "status"],
-        });
-        console.log("User with populated posts:", userWithPosts);
-        console.log("Populated posts data:", userWithPosts.populated.docId);
-        // 8. Récupération d'un post avec ses comments via populate
-        const postWithComments = await repos.posts.populate(firstPost, "docId");
-        console.log("Post with populated comments:", postWithComments);
-        console.log("Populated comments:", postWithComments.populated.docId);
-        // 9. Pagination des posts avec include pour récupérer les comments de chaque post
-        const paginatedPostsWithComments = await repos.posts.query.paginate({
-            pageSize: 10,
-            include: ["docId", { relation: "userId", select: ["docId"] }], // Inclure comments ET user
-            orWhere: [["userId", "==", user.docId]], // Filtrer pour n'avoir que les posts de notre user
-        });
-        console.log("Paginated posts with comments and user:", paginatedPostsWithComments.data);
-        // 10. Pagination des comments avec include pour récupérer le post et l'user
-        const paginatedCommentsWithRelations = await repos.comments.query.paginate({
-            pageSize: 10,
-            include: ["postId", { relation: "userId", select: ["email"] }], // Inclure le post ET l'user
-        });
-        console.log("Paginated comments with post and user:", paginatedCommentsWithRelations.data);
         res.json({
             message: "Success!",
             user: fetchedUser,
             posts: userPosts,
             comments: postComments,
-            userWithPopulatedPosts: userWithPosts,
-            postWithPopulatedComments: postWithComments,
-            paginatedPostsWithComments: paginatedPostsWithComments.data,
-            paginatedCommentsWithRelations: paginatedCommentsWithRelations.data,
         });
     }
     catch (error) {
@@ -240,8 +233,19 @@ exports.server = (0, https_1.onRequest)(async (req, res) => {
         res.status(500).json({ error: String(error) });
     }
 });
-const adminHandler = (0, firestore_repo_service_1.createAdminServer)({
-    httpsOptions: { invoker: "public" },
+// ============================================
+// Servers — unified factory (admin UI, CRUD API, sync) all bound to `repos`
+// ============================================
+const bigquery_1 = require("@google-cloud/bigquery");
+const pubsub_1 = require("@google-cloud/pubsub");
+const bigquery_2 = require("@lpdjs/firestore-repo-service/sync/bigquery");
+const firestoreTriggers = __importStar(require("firebase-functions/v2/firestore"));
+const pubsubHandler = __importStar(require("firebase-functions/v2/pubsub"));
+const servers = (0, firestore_repo_service_1.createServers)(repos, {
+    onRequest: https_1.onRequest,
+    httpsOptions: { ingressSettings: "ALLOW_ALL", invoker: "public" },
+});
+exports.admin = servers.admin({
     auth: {
         type: "basic",
         realm: "Admin Area",
@@ -251,7 +255,6 @@ const adminHandler = (0, firestore_repo_service_1.createAdminServer)({
     basePath: "/",
     repos: {
         posts: {
-            repo: repos.posts,
             path: "posts",
             fieldsConfig: {
                 docId: ["filterable"],
@@ -269,7 +272,6 @@ const adminHandler = (0, firestore_repo_service_1.createAdminServer)({
             allowDelete: true,
         },
         users: {
-            repo: repos.users,
             path: "users",
             allowDelete: false,
             fieldsConfig: {
@@ -282,7 +284,6 @@ const adminHandler = (0, firestore_repo_service_1.createAdminServer)({
             relationalFields: [{ key: "docId", column: "Associated posts" }],
         },
         comments: {
-            repo: repos.comments,
             path: "comments",
             allowDelete: true,
             fieldsConfig: {
@@ -293,15 +294,22 @@ const adminHandler = (0, firestore_repo_service_1.createAdminServer)({
             },
             relationalFields: [{ key: "postId", column: "Associated posts" }],
         },
+        compute: {
+            path: "compute",
+            allowDelete: true,
+            fieldsConfig: {
+                docId: ["filterable"],
+                value1: ["create", "mutable", "filterable"],
+                value2: ["create", "mutable", "filterable"],
+                result: ["mutable", "filterable"],
+            },
+        },
     },
 });
-exports.admin = (0, https_1.onRequest)(adminHandler.httpsOptions, adminHandler);
-const crudServer = (0, firestore_repo_service_1.createCrudServer)({
-    httpsOptions: { invoker: "public" },
+exports.crud = servers.crud({
     basePath: "/",
     repos: {
         posts: {
-            repo: repos.posts,
             path: "posts",
             fieldsConfig: {
                 title: ["create", "mutable", "filterable"],
@@ -314,7 +322,6 @@ const crudServer = (0, firestore_repo_service_1.createCrudServer)({
             allowDelete: true,
         },
         users: {
-            repo: repos.users,
             path: "users",
             allowDelete: true,
             fieldsConfig: {
@@ -326,7 +333,6 @@ const crudServer = (0, firestore_repo_service_1.createCrudServer)({
             },
         },
         comments: {
-            repo: repos.comments,
             path: "comments",
             allowDelete: true,
             fieldsConfig: {
@@ -347,15 +353,8 @@ const crudServer = (0, firestore_repo_service_1.createCrudServer)({
         auth: "bearer",
     },
 });
-exports.crud = (0, https_1.onRequest)(crudServer.httpsOptions ?? {}, crudServer);
 // Firestore → BigQuery sync
-const bigquery_1 = require("@google-cloud/bigquery");
-const pubsub_1 = require("@google-cloud/pubsub");
-const sync_1 = require("@lpdjs/firestore-repo-service/sync");
-const bigquery_2 = require("@lpdjs/firestore-repo-service/sync/bigquery");
-const firestoreTriggers = __importStar(require("firebase-functions/v2/firestore"));
-const pubsubHandler = __importStar(require("firebase-functions/v2/pubsub"));
-exports.sync = (0, sync_1.createFirestoreSync)(repos, {
+exports.sync = servers.sync({
     deps: {
         firestoreTriggers,
         pubsubHandler,
@@ -374,8 +373,6 @@ exports.sync = (0, sync_1.createFirestoreSync)(repos, {
         maxInstances: 10,
     },
     admin: {
-        onRequest: https_1.onRequest,
-        httpsOptions: { invoker: "public" },
         auth: {
             type: "basic",
             realm: "Admin Area",

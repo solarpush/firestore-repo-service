@@ -1,6 +1,6 @@
 # Serveur Admin
 
-`createAdminServer` génère une interface admin zéro-JS servie depuis une Firebase HTTPS Function.
+L'UI admin se construit via `createServers(repos).admin(...)` — une fabrique unifiée qui auto-injecte le repository depuis la clé du registre (et infère ainsi les chemins de champs typés dans `fieldsConfig`).
 
 **Fonctionnalités :**
 - Dashboard listant tous les repositories
@@ -14,55 +14,56 @@
 
 ```typescript
 import { onRequest } from "firebase-functions/https";
-import { createAdminServer } from "@lpdjs/firestore-repo-service/servers/admin";
+import { createServers } from "@lpdjs/firestore-repo-service";
 
-const adminHandler = createAdminServer({
-    httpsOptions: { invoker: "public" },
-    basePath: "/admin",
-    auth: {
-      type:     "basic",
-      realm:    "Admin",
-      username: "admin",
-      password: process.env.ADMIN_PASSWORD!,
-    },
-    repos: {
-      users: {
-        repo: repos.users,
-        path: "users",
-        fieldsConfig: {
-          name:     ["create", "mutable", "filterable"],
-          email:    ["create", "mutable", "filterable"],
-          age:      ["create", "mutable", "filterable"],
-          isActive: ["create", "mutable", "filterable"],
-          docId:    ["filterable"],
-        },
-        allowDelete: true,
-      },
-      posts: {
-        repo: repos.posts,
-        path: "posts",
-        fieldsConfig: {
-          title:   ["create", "mutable"],
-          content: ["create", "mutable"],
-          status:  ["create", "mutable", "filterable"],
-          userId:  ["create", "filterable"],
-        },
-        relationalFields: [
-          { key: "userId", column: "Auteur" },
-        ],
-        allowDelete: false,
-      },
-    },
-  });
+const servers = createServers(repos, {
+  onRequest,
+  httpsOptions: { invoker: "public" },
+});
 
-export const admin = onRequest(adminHandler.httpsOptions!, adminHandler);
+export const admin = servers.admin({
+  basePath: "/admin",
+  auth: {
+    type:     "basic",
+    realm:    "Admin",
+    username: "admin",
+    password: process.env.ADMIN_PASSWORD!,
+  },
+  repos: {
+    users: {
+      path: "users",
+      fieldsConfig: {
+        name:     ["create", "mutable", "filterable"],
+        email:    ["create", "mutable", "filterable"],
+        age:      ["create", "mutable", "filterable"],
+        isActive: ["create", "mutable", "filterable"],
+        docId:    ["filterable"],
+      },
+      allowDelete: true,
+    },
+    posts: {
+      path: "posts",
+      fieldsConfig: {
+        title:   ["create", "mutable"],
+        content: ["create", "mutable"],
+        status:  ["create", "mutable", "filterable"],
+        userId:  ["create", "filterable"],
+      },
+      relationalFields: [
+        { key: "userId", column: "Auteur" },
+      ],
+      allowDelete: false,
+    },
+  },
+});
 ```
+
+Lorsque `onRequest` est passé à `createServers`, `servers.admin()` retourne directement une Cloud Function prête à exporter. Sinon, vous récupérez un handler HTTP brut (avec ses `.httpsOptions` attachées) que vous pouvez wrapper vous-même.
 
 ## Options AdminRepoConfig
 
 | Champ                | Type                             | Défaut    | Description                                             |
 |----------------------|----------------------------------|-----------|---------------------------------------------------------|
-| `repo`               | `ConfiguredRepository`           | requis    | Instance du repository                                  |
 | `path`               | `string`                         | requis    | Chemin affiché dans l'UI                                |
 | `schema`             | `ZodObject`                      | auto      | Schéma Zod (auto-détecté avec `createRepositoryConfig(schema)`) |
 | `documentKey`        | `string`                         | `"docId"` | Champ utilisé comme ID de document                      |
@@ -122,20 +123,27 @@ auth: async (req, res, next) => {
 
 ## Firebase HttpsOptions
 
-Passez n'importe quelle option `HttpsOptions` (invoker, region, memory, etc.) via `httpsOptions`.
-Les options sont attachées au handler retourné pour un usage facile avec `onRequest()` :
+Passez n'importe quelle option `HttpsOptions` (invoker, region, memory, etc.) au niveau de `createServers` (appliquée à tous les serveurs) ou par serveur. Quand `onRequest` est fourni à `createServers`, la valeur retournée est déjà une Cloud Function prête à déployer :
 
 ```typescript
-const handler = createAdminServer({
+const servers = createServers(repos, {
+  onRequest,
+  httpsOptions: { invoker: "public", memory: "512MiB" },
+});
+
+export const admin = servers.admin({ /* ... */ });
+```
+
+Sans `onRequest`, vous récupérez le handler brut (`.httpsOptions` reste attaché) :
+
+```typescript
+const handler = createServers(repos).admin({
   httpsOptions: { invoker: "public", memory: "512MiB" },
   // ...
 });
 
 export const admin = onRequest(handler.httpsOptions!, handler);
 ```
-
-Options disponibles : `invoker`, `region`, `memory`, `timeoutSeconds`, `minInstances`,
-`maxInstances`, `concurrency`, `cors`, `serviceAccount`, `secrets`, etc.
 
 ## Gestion des erreurs d'index composite
 
@@ -167,28 +175,25 @@ interface QueryError {
 
 ## Serveur CRUD API
 
-Pour des endpoints REST client avec validation, pagination et population de relations, utilisez `createCrudServer` :
+Pour des endpoints REST client avec validation, pagination et population de relations, utilisez `createServers(repos).crud(...)` :
 
 ```typescript
-import { createCrudServer } from "@lpdjs/firestore-repo-service/servers/crud";
+const servers = createServers(repos, { onRequest });
 
-export const api = onRequest(
-  createCrudServer({
-    basePath: "/api",
-    repos: {
-      posts: {
-        repo: repos.posts,
-        schema: postSchema,
-        path: "posts",
-        fieldsConfig: {
-          status:   ["filterable"],
-          authorId: ["filterable"],
-        },
-        allowDelete: true,
+export const api = servers.crud({
+  basePath: "/api",
+  repos: {
+    posts: {
+      schema: postSchema,
+      path: "posts",
+      fieldsConfig: {
+        status:   ["filterable"],
+        authorId: ["filterable"],
       },
+      allowDelete: true,
     },
-  }),
-);
+  },
+});
 ```
 
 Supporte GET et POST avec `where`, `orderBy`, `select`, `include`, `cursor` et `pageSize`.

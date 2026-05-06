@@ -15,7 +15,7 @@ Un worker s'abonne à ces topics, regroupe les changements en batch, et les flus
 ## Démarrage rapide
 
 ```typescript
-import { createFirestoreSync } from "@lpdjs/firestore-repo-service/sync";
+import { createServers } from "@lpdjs/firestore-repo-service";
 import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
 import { BigQuery } from "@google-cloud/bigquery";
 import { PubSub } from "@google-cloud/pubsub";
@@ -23,7 +23,9 @@ import * as firestoreTriggers from "firebase-functions/v2/firestore";
 import * as pubsubHandler from "firebase-functions/v2/pubsub";
 import { onRequest } from "firebase-functions/v2/https";
 
-const sync = createFirestoreSync(repos, {
+const servers = createServers(repos, { onRequest });
+
+const sync = servers.sync({
   deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
   adapter: new BigQueryAdapter({
     bigquery: new BigQuery({ projectId: "my-project", location: "us-central1" }),
@@ -32,7 +34,6 @@ const sync = createFirestoreSync(repos, {
   topicPrefix: "firestore-sync",
   autoMigrate: true,
   admin: {
-    onRequest,
     httpsOptions: { invoker: "public" },
     auth: { type: "basic", username: "admin", password: "secret" },
     featuresFlag: {
@@ -66,11 +67,13 @@ export const {
 } = sync.functions;
 ```
 
+> Le `onRequest` partagé est automatiquement transmis à l'admin sync — la Cloud Function `adminsync` est donc générée pour vous. Passez explicitement `admin.onRequest` uniquement pour le surcharger.
+
 ## Configuration
 
-### `createFirestoreSync(repos, config)`
+### `createServers(repos).sync(config)`
 
-Le wrapper unifié qui crée les triggers, les workers et le serveur admin optionnel.
+Le wrapper unifié qui crée les triggers, les workers et le serveur admin optionnel (à partir du registre déjà lié à `createServers`).
 
 | Option            | Type                   | Défaut             | Description                             |
 | ----------------- | ---------------------- | ------------------ | --------------------------------------- |
@@ -80,7 +83,7 @@ Le wrapper unifié qui crée les triggers, les workers et le serveur admin optio
 | `batchSize`       | `number`                       | `100`              | Nombre max de lignes par flush                      |
 | `flushIntervalMs` | `number`                       | `5000`             | Intervalle de flush en ms                           |
 | `autoMigrate`     | `boolean`                      | `false`            | Créer/migrer les tables automatiquement             |
-| `workerOptions`   | `Record<string, unknown>`      | —                  | Options CF v2 du worker (`concurrency`, `maxInstances`, …) |
+| `workerOptions`   | `SyncWorkerOptions`            | —                  | Options CF v2 du worker (`concurrency`, `maxInstances`, …) |
 | `admin`           | `adminsyncConfig`              | —                  | Configuration optionnelle de l'admin                |
 | `repos`           | `TypedRepoSyncConfigs`         | —                  | Surcharges par repo                                 |
 
@@ -203,7 +206,7 @@ Trois leviers pour ajuster latence, throughput et pression sur les quotas BigQue
 | `workerOptions`     | config top-level       | —       | Options Cloud Functions v2 du worker (concurrence, scaling…)                    |
 
 ```typescript
-createFirestoreSync(repos, {
+createServers(repos).sync({
   // ...
   batchSize: 500,         // batches plus gros → moins de DML → moins de quota
   flushIntervalMs: 10_000, // attendre plus pour remplir les batches
@@ -356,7 +359,7 @@ Cloud Logging.
 
 ## Functions générées
 
-`createFirestoreSync` génère ces Cloud Functions :
+`servers.sync(...)` génère ces Cloud Functions :
 
 | Fonction          | Type              | Rôle                                   |
 | ----------------- | ----------------- | -------------------------------------- |

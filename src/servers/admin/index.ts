@@ -37,6 +37,7 @@
  */
 
 import type { z } from "zod";
+import type { HttpsOptions } from "firebase-functions/v2/https";
 import type { ConfiguredRepository } from "../../repositories/types";
 import type { FieldPath, RepositoryConfig } from "../../shared/types";
 import type { FieldRole } from "../crud/types";
@@ -52,13 +53,16 @@ import { type Middleware, MiniRouter } from "./router";
 
 /**
  * Extracts the model type `T` from a `ConfiguredRepository`.
+ * Two-step inference so it survives intersection types
+ * (e.g. `RepositoryConfig<...> & { schema: ZodObject }` produced by
+ * `createRepositoryConfig(schema)`).
  * @internal
  */
 type RepoModelType<TRepo> =
-  TRepo extends ConfiguredRepository<
-    RepositoryConfig<infer T, any, any, any, any, any, any, any, any, any>
-  >
-    ? T
+  TRepo extends ConfiguredRepository<infer C>
+    ? C extends RepositoryConfig<infer T, any, any, any, any, any, any, any, any, any>
+      ? T
+      : never
     : never;
 
 /**
@@ -237,11 +241,8 @@ export interface AdminServerOptions<
    * export const admin = onRequest(handler.httpsOptions!, handler);
    * ```
    */
-  httpsOptions?: Record<string, unknown>;
+  httpsOptions?: HttpsOptions;
 }
-
-// ---------------------------------------------------------------------------
-// Body parser (replaces express.urlencoded in Firebase Functions context)
 // ---------------------------------------------------------------------------
 
 /** Eagerly reads the raw request body as a string */
@@ -395,7 +396,7 @@ export function createAdminServer<
 >(
   options: AdminServerOptions<TRepos>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): ((req: any, res: any) => Promise<void>) & { httpsOptions?: Record<string, unknown> } {
+): ((req: any, res: any) => Promise<void>) & { httpsOptions?: HttpsOptions } {
   const {
     basePath = "/",
     repos,
@@ -553,6 +554,12 @@ export function createAdminServer<
   router.get(`${base}/`, handlers.handleDashboard);
   router.get(`${base}`, handlers.handleDashboard);
 
+  // Specific routes (with literal "_panel" / "_bulk" segments) MUST come before
+  // the generic ":repoName/:id/..." routes so they take precedence.
+  router.get(`${base}/:repoName/_panel`, handlers.handlePanel as any);
+  router.post(`${base}/:repoName/_bulk/delete`, handlers.handleBulkDelete as any);
+  router.post(`${base}/:repoName/_bulk/update`, handlers.handleBulkUpdate as any);
+
   router.get(`${base}/:repoName`, handlers.handleList);
 
   router.get(`${base}/:repoName/create`, handlers.handleCreateForm);
@@ -568,7 +575,7 @@ export function createAdminServer<
     await router.handle(req as any, res as any);
   };
   if (httpsOptions) (handler as any).httpsOptions = httpsOptions;
-  return handler as ((req: any, res: any) => Promise<void>) & { httpsOptions?: Record<string, unknown> };
+  return handler as ((req: any, res: any) => Promise<void>) & { httpsOptions?: HttpsOptions };
 }
 
 // Re-exports for convenience

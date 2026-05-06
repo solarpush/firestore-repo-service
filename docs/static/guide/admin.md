@@ -1,6 +1,6 @@
 # Admin Server
 
-`createAdminServer` generates a zero-JS admin UI served as a Firebase HTTPS function.
+The admin UI is built via `createServers(repos).admin(...)` — a unified factory that auto-binds the repository registry so each entry's `repo` field is inferred from its key (and so are model field paths in `fieldsConfig`).
 
 **Features:**
 - Dashboard listing all repositories
@@ -15,55 +15,56 @@
 
 ```typescript
 import { onRequest } from "firebase-functions/https";
-import { createAdminServer } from "@lpdjs/firestore-repo-service/servers/admin";
+import { createServers } from "@lpdjs/firestore-repo-service";
 
-const adminHandler = createAdminServer({
-    httpsOptions: { invoker: "public" },
-    basePath: "/admin",
-    auth: {
-      type: "basic",
-      realm: "Admin",
-      username: "admin",
-      password: process.env.ADMIN_PASSWORD!,
-    },
-    repos: {
-      users: {
-        repo: repos.users,
-        path: "users",
-        fieldsConfig: {
-          name:     ["create", "mutable", "filterable"],
-          email:    ["create", "mutable", "filterable"],
-          age:      ["create", "mutable", "filterable"],
-          isActive: ["create", "mutable", "filterable"],
-          docId:    ["filterable"],
-        },
-        allowDelete: true,
-      },
-      posts: {
-        repo: repos.posts,
-        path: "posts",
-        fieldsConfig: {
-          title:   ["create", "mutable"],
-          content: ["create", "mutable"],
-          status:  ["create", "mutable", "filterable"],
-          userId:  ["create", "filterable"],
-        },
-        relationalFields: [
-          { key: "userId", column: "Author" },   // button → /users?fv_docId=<value>
-        ],
-        allowDelete: false,
-      },
-    },
-  });
+const servers = createServers(repos, {
+  onRequest,
+  httpsOptions: { invoker: "public" },
+});
 
-export const admin = onRequest(adminHandler.httpsOptions!, adminHandler);
+export const admin = servers.admin({
+  basePath: "/admin",
+  auth: {
+    type: "basic",
+    realm: "Admin",
+    username: "admin",
+    password: process.env.ADMIN_PASSWORD!,
+  },
+  repos: {
+    users: {
+      path: "users",
+      fieldsConfig: {
+        name:     ["create", "mutable", "filterable"],
+        email:    ["create", "mutable", "filterable"],
+        age:      ["create", "mutable", "filterable"],
+        isActive: ["create", "mutable", "filterable"],
+        docId:    ["filterable"],
+      },
+      allowDelete: true,
+    },
+    posts: {
+      path: "posts",
+      fieldsConfig: {
+        title:   ["create", "mutable"],
+        content: ["create", "mutable"],
+        status:  ["create", "mutable", "filterable"],
+        userId:  ["create", "filterable"],
+      },
+      relationalFields: [
+        { key: "userId", column: "Author" },   // button → /users?fv_docId=<value>
+      ],
+      allowDelete: false,
+    },
+  },
+});
 ```
+
+When `onRequest` is passed to `createServers`, `servers.admin()` returns a ready-to-export Cloud Function. Without it, it returns a raw HTTP handler that you can wrap yourself (its `.httpsOptions` are forwarded for convenience).
 
 ## AdminRepoConfig options
 
 | Field                | Type                             | Default   | Description                                         |
 |----------------------|----------------------------------|-----------|-----------------------------------------------------|
-| `repo`               | `ConfiguredRepository`           | required  | The repository instance                             |
 | `path`               | `string`                         | required  | Display path in the UI                              |
 | `schema`             | `ZodObject`                      | auto      | Zod schema (auto-detected when using `createRepositoryConfig(schema)`) |
 | `documentKey`        | `string`                         | `"docId"` | Field used as document ID                           |
@@ -72,6 +73,8 @@ export const admin = onRequest(adminHandler.httpsOptions!, adminHandler);
 | `fieldsConfig`       | `Record<FieldPath, FieldRole[]>` | all keys  | Per-field role config: `"create"`, `"mutable"`, `"filterable"` |
 | `allowDelete`        | `boolean`                        | `false`   | Show Delete button in the list                      |
 | `relationalFields`   | `{ key, column }[]`              | none      | Relational action button columns                    |
+
+> The `repo` field is **not** part of `AdminRepoConfig` anymore — it is automatically injected from the registry key (e.g. `posts:` → `repos.posts`).
 
 ## fieldsConfig with dot-notation
 
@@ -140,7 +143,7 @@ auth: async (req, res, next) => {
 ### Additional middleware
 
 ```typescript
-createAdminServer({
+createServers(repos).admin({
   middleware: [
     (req, res, next) => {
       console.log(req.method, req.url);
@@ -153,16 +156,25 @@ createAdminServer({
 
 ## Firebase HttpsOptions
 
-Pass any `HttpsOptions` (invoker, region, memory, etc.) through `httpsOptions`.
-The options are attached to the returned handler for easy forwarding to `onRequest()`:
+Pass any `HttpsOptions` (invoker, region, memory, etc.) at the `createServers` level (applied to every server) or per-server. When `onRequest` is provided to `createServers`, the returned value is already a ready-to-deploy Cloud Function:
 
 ```typescript
-const handler = createAdminServer({
+const servers = createServers(repos, {
+  onRequest,
+  httpsOptions: { invoker: "public", memory: "512MiB" },
+});
+
+export const admin = servers.admin({ /* ... */ });
+```
+
+If you don't pass `onRequest`, you get the raw handler back (its `.httpsOptions` are still attached for convenience):
+
+```typescript
+const handler = createServers(repos).admin({
   httpsOptions: { invoker: "public", memory: "512MiB" },
   // ...
 });
 
-// Forward options to onRequest
 export const admin = onRequest(handler.httpsOptions!, handler);
 ```
 
@@ -199,28 +211,25 @@ interface QueryError {
 
 ## CRUD API Server
 
-For client-facing REST endpoints with validation, pagination, and relation population, use `createCrudServer`:
+For client-facing REST endpoints with validation, pagination, and relation population, use `createServers(repos).crud(...)`:
 
 ```typescript
-import { createCrudServer } from "@lpdjs/firestore-repo-service/servers/crud";
+const servers = createServers(repos, { onRequest });
 
-export const api = onRequest(
-  createCrudServer({
-    basePath: "/api",
-    repos: {
-      posts: {
-        repo: repos.posts,
-        schema: postSchema,
-        path: "posts",
-        fieldsConfig: {
-          status:   ["filterable"],
-          authorId: ["filterable"],
-        },
-        allowDelete: true,
+export const api = servers.crud({
+  basePath: "/api",
+  repos: {
+    posts: {
+      schema: postSchema,
+      path: "posts",
+      fieldsConfig: {
+        status:   ["filterable"],
+        authorId: ["filterable"],
       },
+      allowDelete: true,
     },
-  }),
-);
+  },
+});
 ```
 
 Supports GET and POST with `where`, `orderBy`, `select`, `include`, `cursor`, and `pageSize`.

@@ -27,13 +27,14 @@ export type {
   SyncOperation,
   SyncTriggersConfig,
   SyncWorkerConfig,
+  SyncWorkerOptions,
+  AdminHttpsOptions,
   adminsyncBasicAuth,
   adminsyncConfig,
   adminsyncFeaturesFlag,
 } from "./types";
 
 export { createadminsyncServer } from "./admin";
-export { createFirestoreSync } from "./create-sync";
 export { addColumnsDDL, createTableDDL, generateDDL } from "./ddl-generator";
 export { autoMigrate } from "./migration";
 export type { MigrateResult } from "./migration";

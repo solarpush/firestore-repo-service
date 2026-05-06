@@ -15,7 +15,7 @@ A worker subscribes to these topics, batches the changes, and flushes them to SQ
 ## Quick Start
 
 ```typescript
-import { createFirestoreSync } from "@lpdjs/firestore-repo-service/sync";
+import { createServers } from "@lpdjs/firestore-repo-service";
 import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
 import { BigQuery } from "@google-cloud/bigquery";
 import { PubSub } from "@google-cloud/pubsub";
@@ -23,7 +23,9 @@ import * as firestoreTriggers from "firebase-functions/v2/firestore";
 import * as pubsubHandler from "firebase-functions/v2/pubsub";
 import { onRequest } from "firebase-functions/v2/https";
 
-const sync = createFirestoreSync(repos, {
+const servers = createServers(repos, { onRequest });
+
+const sync = servers.sync({
   deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
   adapter: new BigQueryAdapter({
     bigquery: new BigQuery({ projectId: "my-project", location: "us-central1" }),
@@ -32,7 +34,6 @@ const sync = createFirestoreSync(repos, {
   topicPrefix: "firestore-sync",
   autoMigrate: true,
   admin: {
-    onRequest,
     httpsOptions: { invoker: "public" },
     auth: { type: "basic", username: "admin", password: "secret" },
     featuresFlag: {
@@ -66,11 +67,13 @@ export const {
 } = sync.functions;
 ```
 
+> The shared `onRequest` is automatically forwarded to the sync admin so the bundled `adminsync` Cloud Function is generated for you. You only need to pass `admin.onRequest` explicitly if you want to override it.
+
 ## Configuration
 
-### `createFirestoreSync(repos, config)`
+### `createServers(repos).sync(config)`
 
-The unified wrapper that creates triggers, workers, and the optional admin server.
+The unified wrapper that creates triggers, workers, and the optional admin server (using the repository registry already bound to `createServers`).
 
 | Option            | Type                                                  | Default            | Description                                                       |
 | ----------------- | ----------------------------------------------------- | ------------------ | ----------------------------------------------------------------- |
@@ -80,7 +83,7 @@ The unified wrapper that creates triggers, workers, and the optional admin serve
 | `batchSize`       | `number`                                              | `100`              | Max rows per flush batch                                          |
 | `flushIntervalMs` | `number`                                              | `5000`             | Flush interval in ms                                              |
 | `autoMigrate`     | `boolean`                                             | `false`            | Auto-create/migrate tables on first event                         |
-| `workerOptions`   | `Record<string, unknown>`                             | —                  | CF v2 options for the worker (`concurrency`, `maxInstances`, …)   |
+| `workerOptions`   | `SyncWorkerOptions`                                   | —                  | CF v2 options for the worker (`concurrency`, `maxInstances`, …)   |
 | `admin`           | `adminsyncConfig`                                     | —                  | Optional admin endpoint config                                    |
 | `repos`           | `TypedRepoSyncConfigs`                                | —                  | Per-repo overrides                                                |
 
@@ -202,7 +205,7 @@ Three knobs let you trade latency, throughput and BigQuery quota pressure:
 | `workerOptions`     | top-level config       | —       | Cloud Functions v2 options for every worker handler (concurrency, scaling…) |
 
 ```typescript
-createFirestoreSync(repos, {
+createServers(repos).sync({
   // ...
   batchSize: 500,         // bigger batches → fewer DML statements → less quota pressure
   flushIntervalMs: 10_000, // wait longer to fill batches (higher latency, higher throughput)
@@ -373,7 +376,7 @@ so they appear in Cloud Logging.
 
 ## Generated Functions
 
-`createFirestoreSync` generates these Cloud Functions:
+`servers.sync(...)` generates these Cloud Functions:
 
 | Function          | Type              | Purpose                               |
 | ----------------- | ----------------- | ------------------------------------- |

@@ -8,7 +8,9 @@
  */
 
 import { z } from "zod";
-import type { CrudRepoEntry, CrudRepoRegistry } from "./types";
+import type { CrudRepoEntry, CrudRepoRegistry, OpenAPISpecOptions } from "./types";
+
+export type { OpenAPISpecOptions };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,19 +34,6 @@ export interface OpenAPIInfo {
   title: string;
   version: string;
   description?: string;
-}
-
-export interface OpenAPISpecOptions {
-  /** Document title (default: "CRUD API") */
-  title?: string;
-  /** API version (default: "1.0.0") */
-  version?: string;
-  /** Description shown in Scalar UI / Swagger */
-  description?: string;
-  /** Server URLs */
-  servers?: { url: string; description?: string }[];
-  /** Whether the API requires auth — adds securitySchemes */
-  auth?: "basic" | "bearer" | false;
 }
 
 interface OpenAPIOperation {

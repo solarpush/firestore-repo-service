@@ -85,6 +85,7 @@ import {
   renderListJsx,
   renderPageJsx,
 } from "./components";
+import type { z } from "zod";
 
 export function renderPage(content: string, opts: PageOptions): string {
   return renderPageJsx(content, opts);
@@ -117,6 +118,10 @@ export function renderList(
   currentPageSize?: number,
   queryError?: QueryError,
   isGroup?: boolean,
+  totalCount?: number,
+  mutableFields?: string[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  schema?: z.ZodObject<any>,
 ): string {
   return renderListJsx(
     repoName,
@@ -133,6 +138,9 @@ export function renderList(
     currentPageSize,
     queryError,
     isGroup,
+    totalCount,
+    mutableFields,
+    schema,
   );
 }
 

@@ -6,7 +6,45 @@ function CellDate({ val }: { val: Date }) {
   );
 }
 
-export function CellValue({ val }: { val: unknown }) {
+/** Small warning icon with tooltip — rendered next to a cell when its value's runtime type doesn't match the schema. */
+function TypeMismatchBadge({ message }: { message: string }) {
+  return (
+    <span
+      class="tooltip tooltip-warning tooltip-right inline-flex align-middle ml-1 text-warning"
+      data-tip={message}
+      role="img"
+      aria-label={message}
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        class="size-3.5"
+      >
+        <path d="M12 2 1 22h22L12 2zm0 6 7.5 13h-15L12 8zm-1 4v4h2v-4h-2zm0 5v2h2v-2h-2z" />
+      </svg>
+    </span>
+  );
+}
+
+export function CellValue({
+  val,
+  mismatch,
+}: {
+  val: unknown;
+  mismatch?: string | null;
+}) {
+  const inner = renderInner(val);
+  if (!mismatch) return inner;
+  return (
+    <span class="inline-flex items-start gap-0.5">
+      {inner}
+      <TypeMismatchBadge message={mismatch} />
+    </span>
+  );
+}
+
+function renderInner(val: unknown) {
   if (val === null || val === undefined) {
     return <span class="opacity-30 italic text-xs">—</span>;
   }
