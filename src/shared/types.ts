@@ -247,6 +247,7 @@ export interface RepositoryConfig<
   TPathKey extends keyof T | undefined = undefined,
   TCreatedKey extends keyof T | undefined = undefined,
   TUpdatedKey extends keyof T | undefined = undefined,
+  THistoryEnabled extends boolean = false,
 > {
   path: string;
   isGroup: TIsGroup;
@@ -262,6 +263,16 @@ export interface RepositoryConfig<
   schema?: import("zod").ZodObject<any>;
   refCb?: TRefCb;
   relationalKeys?: TRelationalKeys;
+  /**
+   * Optional change-history configuration. When `enabled: true`, the
+   * `repo.history.*` read API is exposed and `createHistoryTriggers(...)`
+   * will register Firestore triggers for this repo.
+   *
+   * @see import("../history/types").HistoryConfigForModel
+   */
+  history?: import("../history/types").HistoryConfigForModel<T> & {
+    enabled: THistoryEnabled;
+  };
   documentRef: TRefCb extends undefined
     ? TIsGroup extends true
       ? (...pathSegments: string[]) => DocumentReference

@@ -7,7 +7,7 @@
     "declaration": true,
     "sourceMap": true,
     "outDir": "./dist",
-    "rootDir": "./",
+    "noEmit": true,
     "removeComments": false,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
@@ -21,8 +21,12 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": false,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "paths": {
+      "@lpdjs/firestore-repo-service": ["../../src/index.ts"],
+      "@lpdjs/firestore-repo-service/*": ["../../src/*"]
+    }
   },
   "include": ["index.ts"],
-  "exclude": ["node_modules", "dist","../../node_modules"]
+  "exclude": ["node_modules", "dist", "../../node_modules"]
 }

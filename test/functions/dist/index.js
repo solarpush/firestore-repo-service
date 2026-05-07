@@ -111,6 +111,7 @@ const repositoryMapping = {
         createdKey: "createdAt",
         updatedKey: "updatedAt",
         refCb: (db, docId) => db.collection("users").doc(docId),
+        history: { enabled: false },
     }),
     posts: (0, firestore_repo_service_1.createRepositoryConfig)(postSchema)({
         path: "posts",
@@ -122,6 +123,7 @@ const repositoryMapping = {
         createdKey: "createdAt",
         updatedKey: "updatedAt",
         refCb: (db, docId) => db.collection("posts").doc(docId),
+        history: { enabled: false },
     }),
     comments: (0, firestore_repo_service_1.createRepositoryConfig)(CommentModel)({
         path: "comments",
@@ -133,6 +135,7 @@ const repositoryMapping = {
         createdKey: "createdAt",
         updatedKey: "updatedAt",
         refCb: (db, postId, docId) => db.collection("posts").doc(postId).collection("comments").doc(docId),
+        history: { enabled: false },
     }),
     compute: (0, firestore_repo_service_1.createRepositoryConfig)(ComputeSchema)({
         path: "compute",
@@ -144,6 +147,7 @@ const repositoryMapping = {
         createdKey: "createdAt",
         updatedKey: "updatedAt",
         refCb: (db, docId) => db.collection("compute").doc(docId),
+        history: { enabled: false },
     }),
 };
 // Step 2: Build relations with full type validation

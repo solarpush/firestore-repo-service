@@ -85,6 +85,7 @@ const repositoryMapping = {
     createdKey: "createdAt",
     updatedKey: "updatedAt",
     refCb: (db: Firestore, docId: string) => db.collection("users").doc(docId),
+    history: { enabled: false },
   }),
 
   posts: createRepositoryConfig(postSchema)({
@@ -97,6 +98,7 @@ const repositoryMapping = {
     createdKey: "createdAt",
     updatedKey: "updatedAt",
     refCb: (db: Firestore, docId: string) => db.collection("posts").doc(docId),
+    history: { enabled: false },
   }),
 
   comments: createRepositoryConfig(CommentModel)({
@@ -110,6 +112,7 @@ const repositoryMapping = {
     updatedKey: "updatedAt",
     refCb: (db: Firestore, postId: string, docId: string) =>
       db.collection("posts").doc(postId).collection("comments").doc(docId),
+    history: { enabled: false },
   }),
   compute: createRepositoryConfig(ComputeSchema)({
     path: "compute",
@@ -122,6 +125,7 @@ const repositoryMapping = {
     updatedKey: "updatedAt",
     refCb: (db: Firestore, docId: string) =>
       db.collection("compute").doc(docId),
+    history: { enabled: false },
   }),
 };
 // Step 2: Build relations with full type validation
@@ -151,6 +155,7 @@ const repos = createRepositoryMapping(db, repositoryMappingWithRelations);
 export const server = onRequest(async (req, res) => {
   try {
     const ressourcesSizes = 1;
+
     // 1. Création d'un user
     const user = await repos.users.create({
       age: 28,

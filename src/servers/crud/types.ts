@@ -214,7 +214,7 @@ export interface CrudRepoEntry {
   name: string;
   path: string;
   repo: ConfiguredRepository<
-    RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
+    RepositoryConfig<any, any, any, any, any, any, any, any, any, any, any>
   >;
   schema: z.ZodObject<any>;
   /** Keys automatically managed by Firestore (docId, path, timestamps) — excluded from create/update payloads */

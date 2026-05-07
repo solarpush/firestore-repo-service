@@ -42,7 +42,7 @@ export interface AdminRepoEntry {
   path: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   repo: ConfiguredRepository<
-    RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
+    RepositoryConfig<any, any, any, any, any, any, any, any, any, any, any>
   >;
   schema: z.ZodObject<any>;
   /** document key field name (default: "docId") */

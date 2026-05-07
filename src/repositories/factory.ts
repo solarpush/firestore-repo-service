@@ -3,6 +3,7 @@ import type {
   Firestore,
   Query,
 } from "firebase-admin/firestore";
+import { createHistoryMethods, type HistoryMethods } from "../history/read";
 import { createAggregateMethods } from "../methods/aggregate";
 import { createBatchMethods } from "../methods/batch";
 import { createBulkMethods } from "../methods/bulk";
@@ -40,7 +41,7 @@ function extractParentKeys(refCb: unknown): string[] {
  * Creates a configured repository instance with all methods
  */
 export function createRepository<
-  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>,
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any, any>,
 >(
   db: Firestore,
   config: T,
@@ -96,6 +97,25 @@ export function createRepository<
   );
   const populateMethods = createPopulateMethods(config, allRepositories);
 
+  // History namespace (opt-in via config.history.enabled)
+  const historyConfig = (config as any).history as
+    | { enabled: boolean; [k: string]: any }
+    | undefined;
+  const history: HistoryMethods<any> | null =
+    historyConfig?.enabled
+      ? (createHistoryMethods(
+          documentRef,
+          [
+            config.documentKey as string,
+            config.pathKey as string | undefined,
+            config.createdKey as string | undefined,
+            config.updatedKey as string | undefined,
+          ].filter((k): k is string => typeof k === "string"),
+          (config as any).path ?? "(unknown)",
+          historyConfig as any,
+        ) as HistoryMethods<any>)
+      : null;
+
   return {
     ref: collectionRef,
     documentRef,
@@ -107,6 +127,7 @@ export function createRepository<
     transaction: transactionMethods,
     bulk: bulkMethods,
     ...populateMethods,
+    ...(history ? { history } : {}),
     // Pass through the Zod schema if one was attached via createRepositoryConfig(schema)
     schema: (config as any).schema,
     // Pass through relational keys built by buildRepositoryRelations

@@ -96,7 +96,7 @@ export interface PaginationWithIncludeOptionsTyped<
  * @internal
  */
 type SystemKeys<
-  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>,
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any, any>,
 > =
   | T["documentKey"]
   | Extract<T["pathKey"], keyof T["type"]>
@@ -107,7 +107,7 @@ type SystemKeys<
  * @internal
  */
 type UpdatableData<
-  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>,
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any, any>,
 > = Omit<Partial<T["type"]>, SystemKeys<T>>;
 
 /**
@@ -115,7 +115,7 @@ type UpdatableData<
  * @internal
  */
 type CreateData<
-  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>,
+  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any, any>,
 > = Omit<
   T["type"],
   | T["documentKey"]
@@ -211,7 +211,19 @@ export type GenerateQueryMethods<
  * Configured repository with organized methods
  */
 export type ConfiguredRepository<
-  T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any>,
+  T extends RepositoryConfig<
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any
+  >,
 > = {
   /** @internal Phantom property to expose the model type for generic extraction */
   readonly _modelType: T["type"];
@@ -371,4 +383,12 @@ export type ConfiguredRepository<
       >;
     }
   >;
+
+  /**
+   * Change-history namespace. Present at the type level when the repo is
+   * configured with `history.enabled: true`, otherwise `undefined` at runtime.
+   * Kept optional (rather than conditional) so `ConfiguredRepository<any>`
+   * stays assignable from any concrete repo config.
+   */
+  history?: import("../history/read").HistoryMethods<T["type"]>;
 };

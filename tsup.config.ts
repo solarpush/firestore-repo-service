@@ -8,6 +8,7 @@ export default defineConfig({
     "servers/crud/index": "src/servers/crud/index.ts",
     "sync/index": "src/sync/index.ts",
     "sync/bigquery": "src/sync/adapters/bigquery.ts",
+    "history/index": "src/history/index.ts",
   },
   format: ["cjs", "esm"],
   dts: true,

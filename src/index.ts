@@ -132,6 +132,7 @@ export function createRepositoryConfig<TSchema extends z.ZodObject<any>>(
   const TPathKey extends keyof z.infer<TSchema> | undefined = undefined,
   const TCreatedKey extends keyof z.infer<TSchema> | undefined = undefined,
   const TUpdatedKey extends keyof z.infer<TSchema> | undefined = undefined,
+  const THistoryEnabled extends boolean = false,
   TRefCb = undefined,
 >(config: {
   path: string;
@@ -143,6 +144,14 @@ export function createRepositoryConfig<TSchema extends z.ZodObject<any>>(
   createdKey?: TCreatedKey;
   updatedKey?: TUpdatedKey;
   refCb: TRefCb;
+  /**
+   * Optional change-history configuration. Set `enabled: true` to expose
+   * `repo.history.*` and have `createHistoryTriggers(...)` register a trigger
+   * for this repo.
+   */
+  history?: import("./history/types").HistoryConfigForModel<
+    z.infer<TSchema>
+  > & { enabled: THistoryEnabled };
 }) => RepositoryConfig<
   z.infer<TSchema>,
   TForeignKeys,
@@ -153,7 +162,8 @@ export function createRepositoryConfig<TSchema extends z.ZodObject<any>>(
   TDocumentKey,
   TPathKey,
   TCreatedKey,
-  TUpdatedKey
+  TUpdatedKey,
+  THistoryEnabled
 > & { schema: TSchema } {
   return (config: any): any => ({
     ...config,
@@ -258,7 +268,8 @@ export function buildRepositoryRelations<
         infer TDocumentKey,
         infer TPathKey,
         infer TCreatedKey,
-        infer TUpdatedKey
+        infer TUpdatedKey,
+        infer THistoryEnabled
       >
       ? RepositoryConfig<
           T,
@@ -275,7 +286,8 @@ export function buildRepositoryRelations<
           TDocumentKey,
           TPathKey,
           TCreatedKey,
-          TUpdatedKey
+          TUpdatedKey,
+          THistoryEnabled
         >
       : TMapping[K]
     : TMapping[K];

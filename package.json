@@ -1,6 +1,6 @@
 {
   "name": "@lpdjs/firestore-repo-service",
-  "version": "2.2.6",
+  "version": "2.2.7",
   "description": "⚡ Type-safe Firestore ORM with auto-generated repositories, advanced queries, relations with typed select, pagination with include, batch/bulk operations, aggregations and transactions.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -35,6 +35,16 @@
       "import": {
         "types": "./dist/sync/bigquery.d.ts",
         "default": "./dist/sync/bigquery.js"
+      }
+    },
+    "./history": {
+      "require": {
+        "types": "./dist/history/index.d.cts",
+        "default": "./dist/history/index.cjs"
+      },
+      "import": {
+        "types": "./dist/history/index.d.ts",
+        "default": "./dist/history/index.js"
       }
     },
     "./servers": {
@@ -84,6 +94,9 @@
       ],
       "sync/bigquery": [
         "./dist/sync/bigquery.d.ts"
+      ],
+      "history": [
+        "./dist/history/index.d.ts"
       ]
     }
   },

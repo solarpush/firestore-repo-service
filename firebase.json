@@ -13,7 +13,7 @@
             "tsconfig.json"
         ],
         "predeploy": [
-            "npm --prefix \"$RESOURCE_DIR\" run build"
+            "npm --prefix \"$RESOURCE_DIR\" run build:prod"
         ]
     },
     "emulators": {
