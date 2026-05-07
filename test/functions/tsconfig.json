@@ -4,7 +4,6 @@
     "module": "commonjs",
     "lib": ["ES2020"],
     "moduleResolution": "node",
-    "declaration": true,
     "sourceMap": true,
     "outDir": "./dist",
     "noEmit": true,
@@ -22,6 +21,8 @@
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": false,
     "resolveJsonModule": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
     "paths": {
       "@lpdjs/firestore-repo-service": ["../../src/index.ts"],
       "@lpdjs/firestore-repo-service/*": ["../../src/*"]
