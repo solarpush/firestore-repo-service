@@ -130,10 +130,10 @@ export interface HistoryConfigBase {
   subcollection?: string;
   /**
    * Optional Firestore TTL configuration. When set, every written history doc
-   * gets a Timestamp field (default name: `expiresAt`) at `now + days`.
-   * You still need to enable the TTL policy on that field via gcloud / console.
+   * gets an `expiresAt` Timestamp at `now + days`. You still need to enable
+   * the TTL policy on the `expiresAt` field via gcloud / console.
    */
-  ttl?: { field?: string; days: number };
+  ttl?: { days: number };
 }
 
 /**
@@ -219,7 +219,7 @@ export interface HistoryTriggerRepoOverride {
 export interface HistoryTriggersConfig<M = Record<string, any>> {
   deps: HistoryFirestoreTriggersDep;
   /** Defaults applied to every repo unless overridden. */
-  defaults?: { ttl?: { field?: string; days: number } };
+  defaults?: { ttl?: { days: number } };
   /** Per-repo overrides keyed by repo name in the mapping. */
   repos?: Partial<Record<keyof M & string, HistoryTriggerRepoOverride>>;
 }

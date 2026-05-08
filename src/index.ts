@@ -227,6 +227,7 @@ export function buildRepositoryRelations<
       any,
       any,
       any,
+      any,
       any
     >
       ? {
@@ -234,6 +235,7 @@ export function buildRepositoryRelations<
             [R in keyof TMapping]: TMapping[R] extends RepositoryConfig<
               infer TTargetModel,
               infer TForeignKeys,
+              any,
               any,
               any,
               any,

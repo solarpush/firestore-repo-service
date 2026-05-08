@@ -25,7 +25,7 @@ export interface BuildEntryParams<T> {
   changes: Record<string, HistoryFieldChange>;
   meta: HistoryMeta;
   config: HistoryConfigForModel<T>;
-  ttlOverride?: { field?: string; days: number };
+  ttlOverride?: { days: number };
 }
 
 /** Soft size guard — leave ~300 KiB headroom under Firestore's 1 MiB limit. */
@@ -46,12 +46,9 @@ export function buildHistoryEntry<T>(
     changes: params.changes,
   };
   if (ttl) {
-    const fieldName = ttl.field ?? "expiresAt";
-    const expiresAt = Timestamp.fromMillis(
+    entry.expiresAt = Timestamp.fromMillis(
       Date.now() + ttl.days * 24 * 60 * 60 * 1000,
     );
-    (entry as unknown as Record<string, unknown>)[fieldName] = expiresAt;
-    if (fieldName === "expiresAt") entry.expiresAt = expiresAt;
   }
 
   // Soft size guard — if the JSON projection of `changes` is too large,

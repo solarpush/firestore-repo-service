@@ -1,4 +1,4 @@
-.PHONY: publish deploy-docs
+.PHONY: publish deploy-docs beta deploy
 
 
 deploy-docs:  ## Deploy documentation to MinIO
@@ -7,3 +7,9 @@ deploy-docs:  ## Deploy documentation to MinIO
 
 publish: deploy-docs  ## Publish package to npm
 	npm publish
+beta:
+	@VERSION=$$(npm version prerelease --preid=beta --no-git-tag-version | tr -d 'v') && \
+	npm pkg set --prefix test/functions dependencies["@lpdjs/firestore-repo-service"]=$$VERSION && \
+	npm publish --tag beta --access public
+deploy:
+	bun run deploy

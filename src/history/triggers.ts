@@ -12,7 +12,7 @@
  *
  * const triggers = createHistoryTriggers(repos, {
  *   deps: { onDocumentWritten: firestoreTriggers.onDocumentWritten },
- *   defaults: { ttl: { field: "expiresAt", days: 365 } },
+ *   defaults: { ttl: { days: 365 } },
  * });
  *
  * export const { residences_onHistory, prevention_workshops_onHistory } = triggers;

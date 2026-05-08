@@ -168,6 +168,7 @@ export type GenerateGetMethods<
     any,
     any,
     any,
+    any,
     any
   >,
 > = {
@@ -187,6 +188,7 @@ export type GenerateGetMethods<
  */
 export type GenerateQueryMethods<
   TConfig extends RepositoryConfig<
+    any,
     any,
     any,
     any,

@@ -98,7 +98,19 @@ const repositoryMapping = {
     createdKey: "createdAt",
     updatedKey: "updatedAt",
     refCb: (db: Firestore, docId: string) => db.collection("posts").doc(docId),
-    history: { enabled: false },
+    history: {
+      enabled: true,
+      include: ["address"],
+      exclude: ["address"],
+      onBeforeWrite: (data, context) => {
+        return data;
+      },
+      ttl: {
+        days: 30,
+      },
+      meta: { userId: "views", comment: "status" },
+      subcollection: "post_history",
+    },
   }),
 
   comments: createRepositoryConfig(CommentModel)({
@@ -167,7 +179,10 @@ export const server = onRequest(async (req, res) => {
     console.log("Created User:", user);
     console.log("User docId:", user.docId);
     console.log("User documentPath:", user.documentPath);
-
+    const g = await repos.posts.history?.list();
+    g?.forEach((h) => console.log("Post history entry:", h));
+    const r = await repos.posts.history?.byField(g);
+    r?.forEach((h) => console.log("Post history by field:", h));
     // 2. Récupération de ce user par docId
     const fetchedUser = await repos.users.get.byDocId(user.docId);
     console.log("Fetched User:", fetchedUser);

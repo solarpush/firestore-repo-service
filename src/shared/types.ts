@@ -211,6 +211,9 @@ export type RelationalKeys<T = any, TMapping = any> = {
           any,
           any,
           any,
+          any,
+          any,
+          any,
           any
         >
           ? {

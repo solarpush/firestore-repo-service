@@ -42,7 +42,19 @@ export interface OpenAPISpecOptions {
  */
 export type RepoModelType<TRepo> =
   TRepo extends ConfiguredRepository<infer C>
-    ? C extends RepositoryConfig<infer T, any, any, any, any, any, any, any, any, any>
+    ? C extends RepositoryConfig<
+    infer T,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any
+  >
       ? T
       : never
     : never;
@@ -64,7 +76,8 @@ export type RepoSystemKeys<TRepo> =
         infer TDocKey,
         infer TPathKey,
         infer TCreatedKey,
-        infer TUpdatedKey
+        infer TUpdatedKey,
+        any
       >
       ?
           | (TDocKey extends string ? TDocKey : never)
@@ -130,6 +143,7 @@ export type RepoRelationKeys<TRepo> =
             any,
             any,
             infer TRelKeys,
+            any,
             any,
             any,
             any,

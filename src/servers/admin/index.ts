@@ -60,7 +60,19 @@ import { type Middleware, MiniRouter } from "./router";
  */
 type RepoModelType<TRepo> =
   TRepo extends ConfiguredRepository<infer C>
-    ? C extends RepositoryConfig<infer T, any, any, any, any, any, any, any, any, any>
+    ? C extends RepositoryConfig<
+    infer T,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any
+  >
       ? T
       : never
     : never;
