@@ -432,10 +432,7 @@ export function createRepositoryMapping<T extends Record<string, any>>(
 // ============================================
 // Servers (admin ORM & CRUD API)
 // ============================================
-export {
-  createServers,
-  MiniRouter,
-} from "./servers/index";
+export { createServers, MiniRouter } from "./servers/index";
 export type {
   AdminRepoConfig,
   AdminRepoEntry,
