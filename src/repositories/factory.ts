@@ -128,6 +128,16 @@ export function createRepository<
     bulk: bulkMethods,
     ...populateMethods,
     ...(history ? { history } : {}),
+    // Expose the configured history subcollection name (when history is enabled)
+    // so external consumers (admin UI, etc.) can display / link it correctly.
+    _historySubcollection: history
+      ? (historyConfig?.subcollection ?? "history")
+      : undefined,
+    // Expose the raw history config so trigger builders (createHistoryTriggers)
+    // can introspect `enabled`, `meta`, `include`, `exclude`, `ttl`, `subcollection`.
+    // The public `history` key is intentionally the methods namespace, not the
+    // config — this private field bridges the two without breaking that API.
+    _historyConfig: historyConfig,
     // Pass through the Zod schema if one was attached via createRepositoryConfig(schema)
     schema: (config as any).schema,
     // Pass through relational keys built by buildRepositoryRelations

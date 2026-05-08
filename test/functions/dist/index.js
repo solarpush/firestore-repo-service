@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sync = exports.crud = exports.admin = exports.server = void 0;
+exports.history = exports.sync = exports.crud = exports.admin = exports.server = void 0;
 const firestore_repo_service_1 = require("@lpdjs/firestore-repo-service");
 const app_1 = require("firebase-admin/app");
 const firestore_1 = require("firebase-admin/firestore");
@@ -194,9 +194,9 @@ exports.server = (0, https_1.onRequest)(async (req, res) => {
         console.log("Created User:", user);
         console.log("User docId:", user.docId);
         console.log("User documentPath:", user.documentPath);
-        const g = await repos.posts.history?.list();
+        const g = await repos.posts.history?.list("examplePostId");
         g?.forEach((h) => console.log("Post history entry:", h));
-        const r = await repos.posts.history?.byField(g);
+        const r = await repos.posts.history?.byField("examplePostId", "address");
         r?.forEach((h) => console.log("Post history by field:", h));
         // 2. Récupération de ce user par docId
         const fetchedUser = await repos.users.get.byDocId(user.docId);
@@ -418,5 +418,10 @@ exports.sync = servers.sync({
             triggerPath: "posts/{postId}/comments/{docId}",
         },
     },
+});
+// History triggers (Firestore document triggers — not HTTPS)
+exports.history = servers.history({
+    deps: { onDocumentWritten: firestoreTriggers.onDocumentWritten },
+    defaults: { ttl: { days: 365 } },
 });
 //# sourceMappingURL=index.js.map

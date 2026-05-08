@@ -58,7 +58,14 @@ export function createHistoryTriggers<M extends Record<string, any>>(
     string,
     any,
   ][]) {
-    const repoCfg = (repo as any).history as
+    const repoCfg = ((repo as any)._historyConfig ??
+      // Backward-compat: older repos exposed the config under `.history`
+      // (before that key became the methods namespace).
+      (typeof (repo as any).history === "object" &&
+      (repo as any).history !== null &&
+      "enabled" in (repo as any).history
+        ? (repo as any).history
+        : undefined)) as
       | (HistoryConfigForModel<unknown> & { enabled: boolean })
       | undefined;
     if (!repoCfg?.enabled) continue;

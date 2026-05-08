@@ -122,6 +122,7 @@ export function renderList(
   mutableFields?: string[],
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schema?: z.ZodObject<any>,
+  historyEnabled?: boolean,
 ): string {
   return renderListJsx(
     repoName,
@@ -141,6 +142,7 @@ export function renderList(
     totalCount,
     mutableFields,
     schema,
+    historyEnabled,
   );
 }
 

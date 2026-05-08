@@ -53,25 +53,44 @@ export const residenceRepoConfig = createRepositoryConfig(residenceSchema)({
 
 ### 2. Wire the triggers (Cloud Functions entry point)
 
+Two equivalent ways:
+
+#### Via `createServers` (recommended)
+
+`servers.history()` lives next to `servers.api()` / `servers.sync()` and reuses the same `repos` instance. Note that history is built on Firestore triggers, so it does **not** inherit `httpsOptions` from the API server.
+
+```typescript
+import { createServers } from "@lpdjs/firestore-repo-service";
+import * as firestoreTriggers from "firebase-functions/v2/firestore";
+import { repos } from "./repos";
+
+const servers = createServers({ repos /* …other deps */ });
+
+export const historyTriggers = servers.history({
+  deps: { onDocumentWritten: firestoreTriggers.onDocumentWritten },
+  defaults: { ttl: { field: "expiresAt", days: 365 } },
+  repos: {
+    residences: { exclude: ["internalState"] },
+  },
+});
+
+// One trigger per history-enabled repo, named `{repoName}_onHistory`.
+export const { residences_onHistory } = historyTriggers;
+```
+
+#### Via the standalone factory
+
 ```typescript
 import { createHistoryTriggers } from "@lpdjs/firestore-repo-service/history";
 import * as firestoreTriggers from "firebase-functions/v2/firestore";
 import { repos } from "./repos";
 
 const triggers = createHistoryTriggers(repos, {
-  deps: { firestoreTriggers },
-  // optional global defaults applied to every history-enabled repo
-  defaults: {
-    ttl: { field: "expiresAt", days: 365 },
-  },
-  // optional per-repo overrides
-  repos: {
-    residences: { exclude: ["internalState"] },
-  },
+  deps: { onDocumentWritten: firestoreTriggers.onDocumentWritten },
+  defaults: { ttl: { field: "expiresAt", days: 365 } },
 });
 
-// One trigger is generated per history-enabled repo, named `{repoName}_onHistory`.
-export const { residences_onHistory, prevention_workshops_onHistory } = triggers;
+export const { residences_onHistory } = triggers;
 ```
 
 For `collectionGroup` repos, set `triggerPath` in the per-repo override (same constraint as sync triggers).
@@ -95,6 +114,16 @@ for (const entry of entries) {
 ```
 
 For deeper subcollections, pass parent path segments before the docId, just like the rest of the repo API.
+
+## Admin UI integration
+
+When a repo has `history.enabled: true`, the admin server **automatically**:
+
+- Detects the history namespace on the repo (`repo.history` presence).
+- Shows a **History** button on every row of the list view.
+- Exposes a dedicated route `GET /:repoName/:id/history` that renders the timeline as a table (timestamp, operation badge, user, reason/comment, per-field `oldValue → newValue`).
+
+No extra wiring required — the moment you enable history on a repo, it shows up in the admin.
 
 ## Stored schema (v2)
 

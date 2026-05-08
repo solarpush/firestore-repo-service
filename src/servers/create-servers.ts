@@ -40,6 +40,8 @@
  */
 
 import type { HttpsOptions, onRequest as OnRequestFn } from "firebase-functions/v2/https";
+import { createHistoryTriggers } from "../history/triggers";
+import type { HistoryTriggersConfig } from "../history/types";
 import type { ConfiguredRepository } from "../repositories/types";
 import type { FirestoreSyncConfig } from "../sync/types";
 import { createFirestoreSync } from "../sync/create-sync";
@@ -236,6 +238,32 @@ export function createServers<
         };
       }
       return createFirestoreSync(repos, merged);
+    },
+
+    /**
+     * Build Firestore history (change-log) triggers for every repo whose
+     * config has `history.enabled === true`. Returns the trigger map
+     * (keys: `${repoName}_onHistory`).
+     *
+     * Note: history triggers are Firestore document triggers, not HTTPS
+     * functions, so they do **not** inherit the `httpsOptions` declared on
+     * `createServers`. Region / runtime options must be configured via the
+     * Firebase Functions `setGlobalOptions(...)` API or by post-wrapping
+     * the returned trigger.
+     *
+     * @example
+     * ```ts
+     * import * as firestoreTriggers from "firebase-functions/v2/firestore";
+     *
+     * export const historyTriggers = servers.history({
+     *   deps: { onDocumentWritten: firestoreTriggers.onDocumentWritten },
+     *   defaults: { ttl: { days: 365 } },
+     * });
+     * // export const { posts_onHistory } = historyTriggers;
+     * ```
+     */
+    history(config: HistoryTriggersConfig<TRepos>): Record<string, any> {
+      return createHistoryTriggers(repos, config);
     },
   };
 }

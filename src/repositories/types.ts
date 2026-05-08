@@ -392,5 +392,8 @@ export type ConfiguredRepository<
    * Kept optional (rather than conditional) so `ConfiguredRepository<any>`
    * stays assignable from any concrete repo config.
    */
-  history?: import("../history/read").HistoryMethods<T["type"]>;
+  history?: import("../history/read").HistoryMethods<
+    T["type"],
+    Parameters<T["documentRef"]>
+  >;
 };

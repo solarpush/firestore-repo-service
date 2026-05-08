@@ -72,6 +72,14 @@ export interface AdminRepoEntry {
    * Populated automatically from the repo's relationalKeys.
    */
   relationalMeta?: RelationalFieldMeta[];
+  /**
+   * Auto-detected from `repo.history`. When true, the admin renders an
+   * extra "History" button on each row and exposes a dedicated route at
+   * `GET /:repoName/:id/history` that lists the change-log entries.
+   */
+  historyEnabled?: boolean;
+  /** Subcollection name used to store history docs (display only). */
+  historySubcollection?: string;
 }
 
 export type RepoRegistry = Record<string, AdminRepoEntry>;
@@ -929,6 +937,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
         totalCount,
         entry.mutableFields,
         entry.schema,
+        entry.historyEnabled,
       ),
     );
   };
@@ -1546,6 +1555,148 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     return out;
   }
 
+  // ── History list ──────────────────────────────────────────────────────────
+  const handleHistory = async (
+    req: AnyReq & { params: RouteParams },
+    res: AnyRes,
+  ): Promise<void> => {
+    const repoName = req.params["repoName"];
+    const docId = req.params["id"];
+    if (!repoName || !docId) {
+      sendHtml(res, "Bad request", 400);
+      return;
+    }
+    const entry = registry[repoName];
+    if (!entry) {
+      sendHtml(res, "Repository not found", 404);
+      return;
+    }
+    if (!entry.historyEnabled || !(entry.repo as any).history) {
+      sendHtml(res, "History not enabled for this repository", 404);
+      return;
+    }
+
+    const lb = getLinkBase(req, basePath);
+    const subcollection = entry.historySubcollection ?? "history";
+
+    let pathArgs: string[] = [docId];
+    try {
+      const doc = await fetchDocById(entry, docId);
+      const extracted = doc ? extractPathArgs(doc, entry.pathKey) : undefined;
+      if (extracted && extracted.length > 0) pathArgs = extracted;
+    } catch {
+      // best-effort: fall back to [docId]
+    }
+
+    const limitRaw = parseInt(String((req.query as any)?.limit ?? ""));
+    const limit =
+      Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 100;
+
+    let entries: any[] = [];
+    let errorMsg: string | undefined;
+    try {
+      entries = await (entry.repo as any).history.list(...pathArgs, { limit });
+    } catch (err) {
+      errorMsg = (err as Error).message;
+    }
+
+    const escape = (s: unknown): string =>
+      String(s ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+
+    const fmtVal = (v: unknown): string => {
+      if (v === undefined) return '<span class="opacity-40">undefined</span>';
+      if (v === null) return '<span class="opacity-40">null</span>';
+      if (typeof v === "object") {
+        try {
+          return `<code class="text-xs">${escape(JSON.stringify(v))}</code>`;
+        } catch {
+          return escape(String(v));
+        }
+      }
+      return escape(String(v));
+    };
+
+    const fmtTs = (ts: any): string => {
+      if (!ts) return "";
+      if (typeof ts.toDate === "function") return ts.toDate().toISOString();
+      if (ts instanceof Date) return ts.toISOString();
+      return escape(String(ts));
+    };
+
+    const opBadge = (op: string): string => {
+      const cls =
+        op === "create"
+          ? "badge-success"
+          : op === "delete"
+            ? "badge-error"
+            : "badge-info";
+      return `<span class="badge badge-sm ${cls}">${escape(op)}</span>`;
+    };
+
+    let body = "";
+    body += `<div class="flex items-center justify-between mb-4">`;
+    body += `<h1 class="text-2xl font-semibold">History — ${escape(entry.name)} / ${escape(docId)}</h1>`;
+    body += `<a href="${lb}/${entry.name}/${encodeURIComponent(docId)}/edit" class="btn btn-sm btn-outline">← Back to edit</a>`;
+    body += `</div>`;
+    body += `<p class="text-sm text-base-content/60 mb-4">Subcollection: <code>${escape(subcollection)}</code> · Showing up to ${limit} entries.</p>`;
+
+    if (errorMsg) {
+      body += `<div class="alert alert-error mb-4">${escape(errorMsg)}</div>`;
+    } else if (entries.length === 0) {
+      body += `<div class="alert">No history entries found.</div>`;
+    } else {
+      body += `<div class="overflow-x-auto"><table class="table table-zebra table-sm">`;
+      body += `<thead><tr><th>When</th><th>Op</th><th>User</th><th>Reason / Comment</th><th>Changes</th></tr></thead><tbody>`;
+      for (const e of entries) {
+        const meta = e.meta ?? {};
+        const reasonComment = [meta.reason, meta.comment]
+          .filter((x: unknown) => x != null && x !== "")
+          .map((x: unknown) => escape(String(x)))
+          .join(" — ");
+        let changesHtml = "";
+        const changeKeys = Object.keys(e.changes ?? {});
+        if (changeKeys.length === 0) {
+          changesHtml = '<span class="opacity-40">—</span>';
+        } else {
+          changesHtml =
+            '<ul class="space-y-1">' +
+            changeKeys
+              .map((k) => {
+                const c = e.changes[k];
+                return `<li><strong>${escape(k)}</strong>: ${fmtVal(c.oldValue)} → ${fmtVal(c.newValue)}</li>`;
+              })
+              .join("") +
+            "</ul>";
+        }
+        body += `<tr>`;
+        body += `<td class="whitespace-nowrap text-xs font-mono">${escape(fmtTs(e.historySetAt))}</td>`;
+        body += `<td>${opBadge(e.operation ?? "update")}</td>`;
+        body += `<td class="text-xs">${escape(meta.userEmail ?? meta.userId ?? "")}</td>`;
+        body += `<td class="text-xs">${reasonComment}</td>`;
+        body += `<td>${changesHtml}</td>`;
+        body += `</tr>`;
+      }
+      body += `</tbody></table></div>`;
+    }
+
+    sendHtml(
+      res,
+      renderPage(body, {
+        title: `History — ${entry.name} / ${docId}`,
+        basePath: lb,
+        breadcrumb: [
+          { label: "Repositories", href: lb },
+          { label: entry.name, href: `${lb}/${entry.name}` },
+          { label: `History ${docId}` },
+        ],
+      }),
+    );
+  };
+
   return {
     handleDashboard,
     handleList,
@@ -1557,6 +1708,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     handlePanel,
     handleBulkDelete,
     handleBulkUpdate,
+    handleHistory,
   };
 }
 

@@ -59,7 +59,7 @@ export function createHistoryMethods<T>(
   systemKeys: string[],
   repoName: string,
   config: HistoryConfigForModel<T> & { enabled: boolean },
-) {
+): HistoryMethods<T> | null {
   if (!config?.enabled) return null;
 
   const subcollection = config.subcollection ?? DEFAULT_SUBCOLLECTION;
@@ -246,9 +246,157 @@ export function createHistoryMethods<T>(
     } as HistoryEntry<T>;
   }
 
-  return { list, raw, byField, byOperation, recordManual };
+  return { list, raw, byField, byOperation, recordManual } as HistoryMethods<T>;
 }
 
-export type HistoryMethods<T> = NonNullable<
-  ReturnType<typeof createHistoryMethods<T>>
->;
+/**
+ * Public, strongly-typed surface of the `repo.history` namespace.
+ *
+ * Exposed on a repository **only when** `history.enabled: true` is set in
+ * its config. Reads from the entity's `history` subcollection (or the custom
+ * name set via `history.subcollection`) and normalises both schema versions
+ * (v1 = one doc per modified field, v2 = one doc per write) into a single
+ * {@link HistoryEntry} shape.
+ *
+ * ### Path arguments
+ *
+ * Every method's leading positional arguments mirror
+ * `Parameters<repo.documentRef>`, so the call signature stays consistent with
+ * the rest of the repo API:
+ *
+ * - **Top-level collection** (`documentRef: (db, docId) => …`)
+ *   → `repo.history.list("doc_42", opts?)`
+ * - **Subcollection** (`documentRef: (db, parentId, docId) => …`)
+ *   → `repo.history.list("parent_1", "doc_42", opts?)`
+ *
+ * The trailing options/payload argument keeps the same position whatever the
+ * depth of the path.
+ *
+ * ### Pagination
+ *
+ * `list` / `byField` / `byOperation` use real Firestore cursors via the
+ * `cursor` + `limit` options on {@link HistoryListOptions} — no in-memory
+ * slicing, safe for large histories.
+ *
+ * @example Basic read
+ * ```ts
+ * const entries = await repos.residences.history!.list("residence_123", {
+ *   limit: 50,
+ *   direction: "desc",
+ * });
+ * for (const e of entries) {
+ *   console.log(e.historySetAt.toDate(), e.operation, e.meta.userId);
+ * }
+ * ```
+ *
+ * @example Filter by field (autocompleted on `keyof T`)
+ * ```ts
+ * const addressChanges = await repos.residences.history!.byField(
+ *   "residence_123",
+ *   "address",
+ * );
+ * ```
+ *
+ * @template T         - The repository's model type. Field-name parameters
+ *                       (e.g. `byField`'s `K`) and `HistoryEntry<T>` payloads
+ *                       are derived from this.
+ * @template PathArgs  - Tuple of path-segment args inherited from the repo's
+ *                       `documentRef`. Defaults to `[string]` (a single
+ *                       `docId`) when used standalone.
+ *
+ * @see {@link createHistoryMethods}  - factory used internally by `createRepository`.
+ * @see {@link HistoryEntry}          - normalised return shape.
+ * @see {@link HistoryListOptions}    - pagination + filter options.
+ */
+export interface HistoryMethods<T, PathArgs extends readonly unknown[] = [string]> {
+  /**
+   * List normalised history entries for a single document.
+   *
+   * Reads both v1 and v2 docs and folds v1 field-per-doc entries that share
+   * the same author + timestamp (±5 ms) into a single logical entry, so the
+   * caller never has to care about the storage version.
+   *
+   * @param args - `[...pathArgs, options?]`. `pathArgs` mirror the repo's
+   *               `documentRef`. `options` accepts `limit`, `cursor`,
+   *               `direction`, `fields`, `operations`.
+   * @returns Array of {@link HistoryEntry} ordered by `historySetAt`
+   *          (`direction` defaults to `"desc"`).
+   */
+  list(
+    ...args: [...PathArgs, HistoryListOptions<T>?]
+  ): Promise<HistoryEntry<T>[]>;
+
+  /**
+   * Escape hatch returning **raw** Firestore documents (v1 or v2) without
+   * normalisation. Use only when {@link list} doesn't expose the field you
+   * need (custom legacy fields, debugging, migrations).
+   *
+   * @param args - `[...pathArgs, options?]`. Supports the same pagination
+   *               options as `list`, minus model-aware filters.
+   */
+  raw(
+    ...args: [...PathArgs, HistoryRawListOptions?]
+  ): Promise<Array<{ id: string; data: V1HistoryDoc | V2HistoryDoc }>>;
+
+  /**
+   * Convenience wrapper around {@link list} that only returns entries
+   * touching a specific field. Field name is checked against `keyof T` at
+   * compile time.
+   *
+   * @typeParam K - A literal key of the model `T`.
+   * @param args  - `[...pathArgs, field, options?]`.
+   *
+   * @example
+   * ```ts
+   * await repos.users.history!.byField("user_42", "email");
+   * ```
+   */
+  byField<K extends keyof T & string>(
+    ...args: [...PathArgs, K, HistoryListOptions<T>?]
+  ): Promise<HistoryEntry<T>[]>;
+
+  /**
+   * Convenience wrapper around {@link list} filtering on the operation type.
+   *
+   * @param args - `[...pathArgs, operation, options?]` where `operation` is
+   *               `"create" | "update" | "delete"`.
+   *
+   * @example
+   * ```ts
+   * await repos.residences.history!.byOperation("residence_123", "delete");
+   * ```
+   */
+  byOperation(
+    ...args: [...PathArgs, HistoryOperation, HistoryListOptions<T>?]
+  ): Promise<HistoryEntry<T>[]>;
+
+  /**
+   * Synchronously append a custom history entry, bypassing the trigger.
+   *
+   * Useful when:
+   * - You already have richer business context than the trigger can extract
+   *   (e.g. inside an HTTP handler that knows the authenticated user).
+   * - You want to record an event that isn't a Firestore write (e.g.
+   *   `meta.reason = "exported-to-pdf"`).
+   *
+   * Honours the same `include` / `exclude` / meta auto-exclusion rules as
+   * the trigger. Returns `null` when the diff is empty (no changes recorded).
+   *
+   * > ⚠️ Use sparingly — combining manual records with the trigger can
+   * > produce duplicate entries if both fire for the same write.
+   *
+   * @param args - `[...pathArgs, payload]` where `payload` is
+   *               `{ operation, before?, after?, meta? }`.
+   */
+  recordManual(
+    ...args: [
+      ...PathArgs,
+      {
+        operation: HistoryOperation;
+        before?: T | null;
+        after?: T | null;
+        meta?: HistoryMeta;
+      },
+    ]
+  ): Promise<HistoryEntry<T> | null>;
+}

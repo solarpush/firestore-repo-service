@@ -106,6 +106,7 @@ export function renderListJsx(
   mutableFields?: string[],
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schema?: z.ZodObject<any>,
+  historyEnabled = false,
 ): string {
   const listUrl = `${basePath}/${repoName}`;
   const createUrl = `${listUrl}/create`;
@@ -451,6 +452,15 @@ export function renderListJsx(
                         >
                           Edit
                         </a>
+                        {historyEnabled && (
+                          <a
+                            href={`${basePath}/${repoName}/${encodeURIComponent(id)}/history`}
+                            class="btn btn-xs btn-outline"
+                            title="View change history"
+                          >
+                            History
+                          </a>
+                        )}
                         {allowDelete && (
                           <form
                             method="post"

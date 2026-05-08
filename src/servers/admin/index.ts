@@ -481,6 +481,11 @@ export function createAdminServer<
       mutableFields,
       createFields,
       allowDelete: cfg.allowDelete ?? false,
+      historyEnabled: !!(cfg.repo as any).history,
+      historySubcollection:
+        ((cfg.repo as any).history &&
+          ((cfg.repo as any)._historySubcollection as string | undefined)) ??
+        undefined,
       relationalMeta: (() => {
         if (!cfg.relationalFields || cfg.relationalFields.length === 0)
           return undefined;
@@ -579,6 +584,8 @@ export function createAdminServer<
 
   router.get(`${base}/:repoName/:id/edit`, handlers.handleEditForm as any);
   router.post(`${base}/:repoName/:id/edit`, handlers.handleEditSubmit as any);
+
+  router.get(`${base}/:repoName/:id/history`, handlers.handleHistory as any);
 
   router.post(`${base}/:repoName/:id/delete`, handlers.handleDelete as any);
 
