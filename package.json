@@ -1,6 +1,6 @@
 {
   "name": "@lpdjs/firestore-repo-service",
-  "version": "2.2.9-beta.2",
+  "version": "2.2.9-beta.3",
   "workspaces": [
     "test/functions"
   ],
@@ -79,6 +79,16 @@
         "types": "./dist/servers/crud/index.d.ts",
         "default": "./dist/servers/crud/index.js"
       }
+    },
+    "./servers/auth": {
+      "require": {
+        "types": "./dist/servers/auth/index.d.cts",
+        "default": "./dist/servers/auth/index.cjs"
+      },
+      "import": {
+        "types": "./dist/servers/auth/index.d.ts",
+        "default": "./dist/servers/auth/index.js"
+      }
     }
   },
   "typesVersions": {
@@ -91,6 +101,9 @@
       ],
       "servers/crud": [
         "./dist/servers/crud/index.d.ts"
+      ],
+      "servers/auth": [
+        "./dist/servers/auth/index.d.ts"
       ],
       "sync": [
         "./dist/sync/index.d.ts"

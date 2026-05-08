@@ -375,7 +375,77 @@ export function createCrudHandlers(
   registry: CrudRepoRegistry,
   basePath: string,
   verbose: boolean,
+  authEnabled: boolean = false,
 ) {
+  // ── Authorization helpers ───────────────────────────────────────────────
+  /**
+   * Default-deny gate: when the server has `auth` configured, reject any
+   * operation without an explicit rule. When `auth` is absent, rules are
+   * ignored entirely (open API).
+   */
+  async function assertRule<TCtx>(
+    res: any,
+    entry: CrudRepoEntry,
+    op: "list" | "get" | "create" | "update" | "delete",
+    ctx: TCtx,
+  ): Promise<boolean> {
+    if (!authEnabled) return true;
+    const rule = entry.rules?.[op] as
+      | ((c: TCtx) => boolean | Promise<boolean>)
+      | undefined;
+    if (!rule) {
+      sendError(
+        res,
+        `Operation "${op}" is not allowed for this repository`,
+        403,
+      );
+      return false;
+    }
+    try {
+      const ok = await rule(ctx);
+      if (!ok) {
+        sendError(res, "Forbidden", 403);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      const message =
+        verbose && err instanceof Error ? err.message : "Forbidden";
+      sendError(res, message, 403);
+      return false;
+    }
+  }
+
+  /** Apply `rules.filter` to every doc in a list; returns the filtered slice. */
+  async function applyRowFilter<T extends Record<string, unknown>>(
+    entry: CrudRepoEntry,
+    user: any,
+    params: Record<string, string>,
+    docs: T[],
+  ): Promise<T[]> {
+    if (!authEnabled) return docs;
+    const filter = entry.rules?.filter as
+      | ((c: { user: any; doc: T; params: Record<string, string> }) =>
+          | boolean
+          | Promise<boolean>)
+      | undefined;
+    if (!filter) return docs;
+    const out: T[] = [];
+    for (const doc of docs) {
+      try {
+        if (await filter({ user, doc, params })) out.push(doc);
+      } catch {
+        // exclude on error (fail closed)
+      }
+    }
+    return out;
+  }
+
+  /** Pull the authenticated user from the request (may be undefined when auth is off). */
+  function userOf(req: any): any {
+    return req?.user ?? null;
+  }
+
   // ── Helper to get repo entry ────────────────────────────────────────────
   function getRepoEntry(
     repoName: string | undefined,
@@ -439,6 +509,16 @@ export function createCrudHandlers(
     const params = req.params || {};
     const entry = getRepoEntry(params.repoName, res);
     if (!entry) return;
+
+    const user = userOf(req);
+    if (
+      !(await assertRule(res, entry, "list", {
+        user,
+        query: req.query ?? {},
+        params,
+      }))
+    )
+      return;
 
     // Captured for error handling (so the catch can build an index URL)
     let ctxFilters: { field: string; op: any; value: string }[] = [];
@@ -522,9 +602,15 @@ export function createCrudHandlers(
 
       // Execute query
       const result = await entry.repo.query.paginate(queryOptions);
+      const filteredItems = await applyRowFilter(
+        entry,
+        userOf(req),
+        params,
+        result.data,
+      );
 
       const responseData: ListResponseData = {
-        items: result.data,
+        items: filteredItems,
         hasNextPage: result.hasNextPage,
         hasPrevPage: result.hasPrevPage,
         nextCursor: serializeCursor(result.nextCursor),
@@ -558,6 +644,16 @@ export function createCrudHandlers(
     const params = req.params || {};
     const entry = getRepoEntry(params.repoName, res);
     if (!entry) return;
+
+    const user = userOf(req);
+    if (
+      !(await assertRule(res, entry, "list", {
+        user,
+        query: req.body ?? {},
+        params,
+      }))
+    )
+      return;
 
     // Captured for error handling (so the catch can build an index URL)
     let ctxFilters: { field: string; op: any; value: string }[] = [];
@@ -689,9 +785,15 @@ export function createCrudHandlers(
 
       // Execute query
       const result = await entry.repo.query.paginate(queryOptions);
+      const filteredItems = await applyRowFilter(
+        entry,
+        userOf(req),
+        params,
+        result.data,
+      );
 
       const responseData: ListResponseData = {
-        items: result.data,
+        items: filteredItems,
         hasNextPage: result.hasNextPage,
         hasPrevPage: result.hasPrevPage,
         nextCursor: serializeCursor(result.nextCursor),
@@ -739,6 +841,34 @@ export function createCrudHandlers(
         return;
       }
 
+      const user = userOf(req);
+      if (
+        !(await assertRule(res, entry, "get", {
+          user,
+          doc: doc as any,
+          params,
+        }))
+      )
+        return;
+
+      // Apply row-level filter (404 if rejected, to avoid existence leakage)
+      if (authEnabled && entry.rules?.filter) {
+        try {
+          const ok = await entry.rules.filter({
+            user,
+            doc: doc as any,
+            params,
+          });
+          if (!ok) {
+            sendError(res, "Document not found", 404);
+            return;
+          }
+        } catch {
+          sendError(res, "Document not found", 404);
+          return;
+        }
+      }
+
       sendSuccess(res, doc);
     } catch (err) {
       sendQueryError(
@@ -764,6 +894,16 @@ export function createCrudHandlers(
 
     try {
       const body = req.body ?? {};
+
+      const user = userOf(req);
+      if (
+        !(await assertRule(res, entry, "create", {
+          user,
+          body,
+          params,
+        }))
+      )
+        return;
 
       // Validate against schema
       const validation = validateData(
@@ -842,6 +982,24 @@ export function createCrudHandlers(
     try {
       const body = req.body ?? {};
 
+      // Fetch existing doc so the rule can authorize against current state
+      const existingDoc = await fetchDocById(entry, id);
+      if (!existingDoc) {
+        sendError(res, "Document not found", 404);
+        return;
+      }
+
+      const user = userOf(req);
+      if (
+        !(await assertRule(res, entry, "update", {
+          user,
+          doc: existingDoc as any,
+          body,
+          params,
+        }))
+      )
+        return;
+
       // Validate against schema
       const validation = validateData(
         entry.schema,
@@ -864,10 +1022,9 @@ export function createCrudHandlers(
         }
       }
 
-      // Update document — fetch first to get path args for subcollections
-      const existingDoc = await fetchDocById(entry, id);
+      // Update document — derive path args for subcollections
       const pathArgs =
-        (existingDoc && extractPathArgs(existingDoc, entry.pathKey)) ?? [id];
+        extractPathArgs(existingDoc, entry.pathKey) ?? [id];
       const updated = await entry.repo.update(
         ...pathArgs,
         validation.data as any,
@@ -901,10 +1058,24 @@ export function createCrudHandlers(
     }
 
     try {
-      // Fetch first to get path args for subcollections
+      // Fetch first to authorize against current state and get path args
       const doc = await fetchDocById(entry, id);
-      const pathArgs =
-        (doc && extractPathArgs(doc, entry.pathKey)) ?? [id];
+      if (!doc) {
+        sendError(res, "Document not found", 404);
+        return;
+      }
+
+      const user = userOf(req);
+      if (
+        !(await assertRule(res, entry, "delete", {
+          user,
+          doc: doc as any,
+          params,
+        }))
+      )
+        return;
+
+      const pathArgs = extractPathArgs(doc, entry.pathKey) ?? [id];
       await entry.repo.delete(...pathArgs);
       sendSuccess(res, { deleted: true });
     } catch (err) {

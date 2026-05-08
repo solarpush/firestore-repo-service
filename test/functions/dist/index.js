@@ -255,7 +255,9 @@ exports.server = (0, https_1.onRequest)(async (req, res) => {
 // ============================================
 const bigquery_1 = require("@google-cloud/bigquery");
 const pubsub_1 = require("@google-cloud/pubsub");
+const auth_1 = require("@lpdjs/firestore-repo-service/servers/auth");
 const bigquery_2 = require("@lpdjs/firestore-repo-service/sync/bigquery");
+const auth_2 = require("firebase-admin/auth");
 const firestoreTriggers = __importStar(require("firebase-functions/v2/firestore"));
 const pubsubHandler = __importStar(require("firebase-functions/v2/pubsub"));
 const servers = (0, firestore_repo_service_1.createServers)(repos, {
@@ -263,12 +265,11 @@ const servers = (0, firestore_repo_service_1.createServers)(repos, {
     httpsOptions: { ingressSettings: "ALLOW_ALL", invoker: "public" },
 });
 exports.admin = servers.admin({
-    auth: {
-        type: "basic",
-        realm: "Admin Area",
-        username: "admin",
-        password: "password",
-    },
+    auth: (0, auth_1.firebaseAuth)({
+        getAuth: () => (0, auth_2.getAuth)(), // No auth in this example, but you can plug in Firebase Auth here
+        mode: "bearer",
+        allow: () => true,
+    }),
     basePath: "/",
     repos: {
         posts: {
@@ -325,9 +326,22 @@ exports.admin = servers.admin({
 });
 exports.crud = servers.crud({
     basePath: "/",
+    auth: (0, auth_1.firebaseAuth)({
+        getAuth: auth_2.getAuth,
+        mode: "bearer",
+        allow: (u) => ({ uid: u.uid, role: u.claims.role ?? "user" }),
+    }),
     repos: {
         posts: {
             path: "posts",
+            rules: {
+                create: () => true,
+                update: () => true,
+                delete: () => true,
+                list: () => true,
+                get: () => true,
+                filter: () => true,
+            },
             fieldsConfig: {
                 title: ["create", "mutable", "filterable"],
                 content: ["create", "mutable"],
@@ -341,6 +355,14 @@ exports.crud = servers.crud({
         users: {
             path: "users",
             allowDelete: true,
+            rules: {
+                create: () => true,
+                update: () => true,
+                delete: () => true,
+                list: () => true,
+                get: () => true,
+                filter: () => true,
+            },
             fieldsConfig: {
                 name: ["create", "mutable", "filterable"],
                 email: ["create", "mutable", "filterable"],
@@ -352,6 +374,14 @@ exports.crud = servers.crud({
         comments: {
             path: "comments",
             allowDelete: true,
+            rules: {
+                create: () => true,
+                update: () => true,
+                delete: () => true,
+                list: () => true,
+                get: () => true,
+                filter: () => true,
+            },
             fieldsConfig: {
                 postId: ["create", "filterable"],
                 userId: ["create"],

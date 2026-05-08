@@ -84,6 +84,7 @@
  */
 
 import { MiniRouter } from "../admin/router";
+import { isAuthExtension } from "../auth";
 import type { HttpsOptions } from "firebase-functions/v2/https";
 import type { HttpRequest, HttpResponse } from "../http-types";
 import type { ConfiguredRepository } from "../../repositories/types";
@@ -333,12 +334,14 @@ export function createCrudServer<
       allowDelete: cfg.allowDelete ?? false,
       allowedIncludes: cfg.allowedIncludes as string[] | undefined,
       validate: cfg.validate as CrudRepoEntry["validate"],
+      rules: cfg.rules,
     };
 
     registry[name] = entry;
   }
 
-  const handlers = createCrudHandlers(registry, base, verbose);
+  const authEnabled = !!auth;
+  const handlers = createCrudHandlers(registry, base, verbose, authEnabled);
 
   // ── OpenAPI spec (cached) ─────────────────────────────────────────────
   const openapi = options.openapi;
@@ -346,12 +349,11 @@ export function createCrudServer<
   let _specCache: OpenAPIDocument | null = null;
   function getSpec(): OpenAPIDocument {
     if (!_specCache) {
-      const authType =
-        auth && typeof auth !== "function"
-          ? ("basic" as const)
-          : auth
-            ? ("bearer" as const)
-            : false;
+      const authType = !auth
+        ? false
+        : isAuthExtension(auth) || typeof auth === "function"
+          ? ("bearer" as const)
+          : ("basic" as const);
       _specCache = generateOpenAPISpec(registry, base, {
         ...openapiOpts,
         auth: openapiOpts.auth ?? authType,
@@ -397,7 +399,15 @@ export function createCrudServer<
 
   // ── 2. Auth middleware ──────────────────────────────────────────────────
   if (auth) {
-    if (typeof auth === "function") {
+    if (isAuthExtension(auth)) {
+      // Mount login/session/logout routes BEFORE the protected chain.
+      for (const route of auth.routes) {
+        const mountPath = `${base}${route.path}`;
+        if (route.method === "GET") router.get(mountPath, route.handler);
+        else router.post(mountPath, route.handler);
+      }
+      router.use(auth.middleware);
+    } else if (typeof auth === "function") {
       // Custom middleware
       router.use(auth);
     } else {

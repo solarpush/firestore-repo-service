@@ -244,6 +244,7 @@ export const server = onRequest(async (req, res) => {
 // ============================================
 import { BigQuery } from "@google-cloud/bigquery";
 import { PubSub } from "@google-cloud/pubsub";
+import { firebaseAuth } from "@lpdjs/firestore-repo-service/servers/auth";
 import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
 import { getAuth } from "firebase-admin/auth";
 import * as firestoreTriggers from "firebase-functions/v2/firestore";
@@ -255,26 +256,11 @@ const servers = createServers(repos, {
 });
 
 export const admin = servers.admin({
-  auth: (req, res, next) => {
-    const authHeader = req.headers?.authorization;
-    const auth = getAuth();
-    auth.
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      res.setHeader("WWW-Authenticate", 'Basic realm="Admin Area"');
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-    const idToken = authHeader.split("Bearer ")[1];
-    auth
-      .verifyIdToken(idToken)
-      .then((decodedToken) => {
-        (req as any).user = decodedToken;
-        next();
-      })
-      .catch(() => {
-        res.setHeader("WWW-Authenticate", 'Basic realm="Admin Area"');
-        return res.status(401).json({ error: "Unauthorized" });
-      });
-  },
+  auth: firebaseAuth({
+    getAuth: () => getAuth(), // No auth in this example, but you can plug in Firebase Auth here
+    mode: "bearer",
+    allow: () => true,
+  }),
   basePath: "/",
   repos: {
     posts: {
@@ -332,9 +318,24 @@ export const admin = servers.admin({
 
 export const crud = servers.crud({
   basePath: "/",
+
+  auth: firebaseAuth({
+    getAuth,
+    mode: "bearer",
+    allow: (u) => ({ uid: u.uid, role: u.claims.role ?? "user" }),
+  }),
+
   repos: {
     posts: {
       path: "posts",
+      rules: {
+        create: () => true,
+        update: () => true,
+        delete: () => true,
+        list: () => true,
+        get: () => true,
+        filter: () => true,
+      },
       fieldsConfig: {
         title: ["create", "mutable", "filterable"],
         content: ["create", "mutable"],
@@ -348,6 +349,14 @@ export const crud = servers.crud({
     users: {
       path: "users",
       allowDelete: true,
+      rules: {
+        create: () => true,
+        update: () => true,
+        delete: () => true,
+        list: () => true,
+        get: () => true,
+        filter: () => true,
+      },
       fieldsConfig: {
         name: ["create", "mutable", "filterable"],
         email: ["create", "mutable", "filterable"],
@@ -359,6 +368,14 @@ export const crud = servers.crud({
     comments: {
       path: "comments",
       allowDelete: true,
+      rules: {
+        create: () => true,
+        update: () => true,
+        delete: () => true,
+        list: () => true,
+        get: () => true,
+        filter: () => true,
+      },
       fieldsConfig: {
         postId: ["create", "filterable"],
         userId: ["create"],

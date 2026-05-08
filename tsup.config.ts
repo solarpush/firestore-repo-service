@@ -6,6 +6,7 @@ export default defineConfig({
     "servers/index": "src/servers/index.ts",
     "servers/admin/index": "src/servers/admin/index.ts",
     "servers/crud/index": "src/servers/crud/index.ts",
+    "servers/auth/index": "src/servers/auth/index.ts",
     "sync/index": "src/sync/index.ts",
     "sync/bigquery": "src/sync/adapters/bigquery.ts",
     "history/index": "src/history/index.ts",

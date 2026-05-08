@@ -42,6 +42,7 @@ import type { ConfiguredRepository } from "../../repositories/types";
 import type { FieldPath, RepositoryConfig } from "../../shared/types";
 import type { FieldRole } from "../crud/types";
 import type { HttpRequest, HttpResponse } from "../http-types";
+import { type AuthExtension, isAuthExtension } from "../auth";
 import type { AdminRepoEntry, RepoRegistry } from "./handlers";
 import { createAdminHandlers } from "./handlers";
 import type { RelationalFieldMeta } from "./renderer";
@@ -233,10 +234,12 @@ export interface AdminServerOptions<
 
   /**
    * Authentication guard executed before every request.
+   * - Pass an {@link AuthExtension} (e.g. result of `firebaseAuth({...})`) to
+   *   wire Firebase Auth with a bundled `/__login` page and session cookie.
    * - Pass a `BasicAuthConfig` to enable HTTP Basic Auth.
-   * - Pass a `Middleware` function for custom auth logic.
+   * - Pass a `Middleware` function for fully custom auth logic.
    */
-  auth?: BasicAuthConfig | Middleware;
+  auth?: AuthExtension | BasicAuthConfig | Middleware;
 
   /**
    * Additional middleware functions executed after auth, before route handlers.
@@ -538,7 +541,16 @@ export function createAdminServer<
 
   // ── 2. Auth middleware ──────────────────────────────────────────────────
   if (auth) {
-    if (typeof auth === "function") {
+    if (isAuthExtension(auth)) {
+      // Mount auxiliary routes (login page, session, logout) BEFORE pushing
+      // the protected middleware so they remain publicly reachable.
+      for (const route of auth.routes) {
+        const mountPath = `${base}${route.path}`;
+        if (route.method === "GET") router.get(mountPath, route.handler);
+        else router.post(mountPath, route.handler);
+      }
+      router.use(auth.middleware);
+    } else if (typeof auth === "function") {
       // Custom middleware
       router.use(auth);
     } else {

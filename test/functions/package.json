@@ -10,7 +10,7 @@
     "dependencies": {
         "@google-cloud/bigquery": "8.1.1",
         "@google-cloud/pubsub": "^5.3.0",
-        "@lpdjs/firestore-repo-service": "2.2.9-beta.2",
+        "@lpdjs/firestore-repo-service": "2.2.9-beta.3",
         "firebase-admin": "^13.7.0",
         "firebase-functions": "^7.2.2",
         "zod": "^4.3.6"

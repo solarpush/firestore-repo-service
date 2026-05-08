@@ -197,3 +197,64 @@ export const api = servers.crud({
 ```
 
 Supporte GET et POST avec `where`, `orderBy`, `select`, `include`, `cursor` et `pageSize`.
+
+### Firebase Auth (cookie pour l'admin, bearer pour le CRUD)
+
+Un helper intégré branche Firebase Authentication sur `servers.admin()` et `servers.crud()` :
+
+```typescript
+import { firebaseAuth } from "@lpdjs/firestore-repo-service/servers/auth";
+import { getAuth } from "firebase-admin/auth";
+
+// Admin : session cookie + page /__login auto-montée
+auth: firebaseAuth({
+  getAuth,
+  mode: "cookie",                             // défaut pour l'admin
+  allow: (u) => {
+    const role = u.claims.role as string | undefined;
+    if (role === "superAdmin" || role === "admin" || role === "viewer") {
+      return { role };                        // devient req.user.context
+    }
+    return null;                              // → 302 vers /__login
+  },
+})
+```
+
+Modes :
+
+- `"cookie"` — monte automatiquement `GET /__login`, `POST /__session`, `POST /__logout`. Cookies HttpOnly. Idéal pour les UIs admin navigateur.
+- `"bearer"` — vérifie `Authorization: Bearer <idToken>`. Idéal pour les APIs REST/CRUD.
+- `"both"` — accepte les deux ; utile pour les backends hybrides.
+
+Le callback `allow()` mappe un utilisateur Firebase vérifié vers votre contexte métier (retourner `null` rejette). Sa valeur de retour devient `req.user.context` dans les handlers et les règles.
+
+## Règles d'autorisation par repo (CRUD)
+
+Quand `auth` est défini sur `servers.crud()`, chaque repo suit une politique de **default-deny** : toute opération sans `rules.<op>` explicite renvoie `403`. Utilisez `allowAll` ou `() => true` pour ouvrir explicitement une opération.
+
+```typescript
+import { firebaseAuth, allowAll } from "@lpdjs/firestore-repo-service/servers/auth";
+
+export const api = servers.crud({
+  auth: firebaseAuth({ getAuth, mode: "bearer" }),
+  repos: {
+    comments: {
+      path: "comments",
+      allowDelete: true,
+      rules: {
+        list:   allowAll,
+        get:    allowAll,
+        create: ({ user })       => !!user.uid,
+        update: ({ user, doc })  => doc.authorId === user.uid,
+        delete: ({ user, doc })  =>
+          doc.authorId === user.uid || user.context?.role === "moderator",
+        // Filtre row-level appliqué à chaque doc retourné par list/query/get
+        filter: ({ user, doc })  =>
+          doc.public || doc.authorId === user.uid,
+      },
+    },
+  },
+});
+```
+
+Chaque règle reçoit un contexte typé (`user`, plus `doc` / `body` / `query` / `params` selon l'opération) et retourne `boolean | Promise<boolean>`. Les règles sont volontairement **par repo** : chaque collection peut utiliser ses propres rôles métier, indépendamment d'un éventuel trio RBAC admin.
