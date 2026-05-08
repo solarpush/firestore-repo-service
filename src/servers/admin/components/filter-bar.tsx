@@ -221,7 +221,7 @@ function FilterValueInput({
           value={val}
           placeholder="value"
           class="input input-sm input-bordered w-full"
-          readOnly={isNull}
+          readOnly={isNull || undefined}
           style={isNull ? "opacity:0.55" : undefined}
           data-_type={isNull ? "number" : undefined}
         />
@@ -240,7 +240,7 @@ function FilterValueInput({
           name={`fv_${col.name}`}
           value={val}
           class="input input-sm input-bordered w-full"
-          readOnly={isNull}
+          readOnly={isNull || undefined}
           style={isNull ? "opacity:0.55" : undefined}
           data-_type={isNull ? "datetime-local" : undefined}
         />
@@ -259,7 +259,7 @@ function FilterValueInput({
         value={val}
         placeholder="value"
         class="input input-sm input-bordered w-full"
-        readOnly={isNull}
+        readOnly={isNull || undefined}
         style={isNull ? "opacity:0.55" : undefined}
       />
       {col.nullable && <NullToggle inputId={inputId} active={isNull} />}

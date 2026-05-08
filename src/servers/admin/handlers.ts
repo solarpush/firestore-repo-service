@@ -23,15 +23,20 @@ import {
   getTypeName,
 } from "../../shared/zod-compat";
 import { renderForm, zodToFields, type FieldDescriptor } from "./form-gen";
+import { isMissingIndexError, toQueryError } from "./index-url";
 import type {
   ColumnMeta,
   FilterState,
   RelationalFieldMeta,
   WhereOp,
 } from "./renderer";
-import { renderDashboard, renderFormPage, renderList, renderPage } from "./renderer";
+import {
+  renderDashboard,
+  renderFormPage,
+  renderList,
+  renderPage,
+} from "./renderer";
 import type { AnyReq, AnyRes, RouteParams } from "./router";
-import { isMissingIndexError, toQueryError } from "./index-url";
 
 // ---------------------------------------------------------------------------
 // Registry type
@@ -162,7 +167,11 @@ function flashFromDocFetchError(
   entry: AdminRepoEntry,
   docId: string,
   err: unknown,
-): { type: "warning" | "error"; message: string; action?: { href: string; label: string; external?: boolean } } {
+): {
+  type: "warning" | "error";
+  message: string;
+  action?: { href: string; label: string; external?: boolean };
+} {
   const docKey = entry.documentKey ?? "docId";
   const qe = toQueryError(err, {
     ref: entry.repo.ref,
@@ -1169,7 +1178,10 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       const formHtml = renderForm(fields, actionUrl, "POST", "Save changes");
       const flash = isMissingIndexError(err)
         ? flashFromDocFetchError(entry, docId, err)
-        : { type: "error" as const, message: `Save error: ${(err as Error).message}` };
+        : {
+            type: "error" as const,
+            message: `Save error: ${(err as Error).message}`,
+          };
       const status = isMissingIndexError(err) ? 424 : 500;
       sendHtml(
         res,
@@ -1209,7 +1221,10 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     } catch (err) {
       const flash = isMissingIndexError(err)
         ? flashFromDocFetchError(entry, docId, err)
-        : { type: "error" as const, message: `Delete error: ${(err as Error).message}` };
+        : {
+            type: "error" as const,
+            message: `Delete error: ${(err as Error).message}`,
+          };
       const status = isMissingIndexError(err) ? 424 : 500;
       sendHtml(
         res,
@@ -1256,7 +1271,11 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     if (type === "one") {
       const id = String(query?.["id"] ?? "");
       if (!id) {
-        sendHtml(res, "<div class='p-6 text-error'>Missing id parameter.</div>", 400);
+        sendHtml(
+          res,
+          "<div class='p-6 text-error'>Missing id parameter.</div>",
+          400,
+        );
         return;
       }
       try {
@@ -1285,7 +1304,11 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     const fk = String(query?.["fk"] ?? "");
     const fv = String(query?.["fv"] ?? "");
     if (!fk || !fv) {
-      sendHtml(res, "<div class='p-6 text-error'>Missing fk/fv parameters.</div>", 400);
+      sendHtml(
+        res,
+        "<div class='p-6 text-error'>Missing fk/fv parameters.</div>",
+        400,
+      );
       return;
     }
     const cursorStr = query?.["cursor"] ?? "";
@@ -1405,7 +1428,11 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       return;
     }
     if (!entry.allowDelete) {
-      sendJson(res, { error: "Delete is not allowed for this repository" }, 403);
+      sendJson(
+        res,
+        { error: "Delete is not allowed for this repository" },
+        403,
+      );
       return;
     }
     const body = ((req as any).body ?? {}) as {
@@ -1513,10 +1540,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     return [];
   }
 
-  function sanitizeFilters(
-    raw: unknown,
-    entry: AdminRepoEntry,
-  ): FilterState[] {
+  function sanitizeFilters(raw: unknown, entry: AdminRepoEntry): FilterState[] {
     if (!Array.isArray(raw)) return [];
     const validFields = new Set(
       (entry.filterableFields ?? Object.keys(getShape(entry.schema))).map((s) =>
@@ -1639,9 +1663,10 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
 
     let body = "";
     body += `<div class="flex items-center justify-between mb-4">`;
-    body += `<h1 class="text-2xl font-semibold">History — ${escape(entry.name)} / ${escape(docId)}</h1>`;
     body += `<a href="${lb}/${entry.name}/${encodeURIComponent(docId)}/edit" class="btn btn-sm btn-outline">← Back to edit</a>`;
+    body += `<a href="${lb}/${entry.name}" class="btn btn-sm btn-outline">← Back to list</a>`;
     body += `</div>`;
+
     body += `<p class="text-sm text-base-content/60 mb-4">Subcollection: <code>${escape(subcollection)}</code> · Showing up to ${limit} entries.</p>`;
 
     if (errorMsg) {

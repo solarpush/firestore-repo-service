@@ -63,6 +63,7 @@ const postSchema = zod_1.default.object({
     title: zod_1.default.string().nullish(),
     content: zod_1.default.string().nullish(),
     status: zod_1.default.enum(["draft", "published"]),
+    comment: zod_1.default.string().nullish(),
     views: zod_1.default.number(),
     createdAt: zod_1.default.date(),
     updatedAt: zod_1.default.date(),
@@ -125,15 +126,11 @@ const repositoryMapping = {
         refCb: (db, docId) => db.collection("posts").doc(docId),
         history: {
             enabled: true,
-            include: ["address"],
-            exclude: ["address"],
-            onBeforeWrite: (data, context) => {
-                return data;
-            },
             ttl: {
                 days: 30,
             },
-            meta: { userId: "views", comment: "status" },
+            exclude: ["comment"],
+            meta: { userId: "userId", comment: "comment" },
             subcollection: "post_history",
         },
     }),

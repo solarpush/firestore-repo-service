@@ -34,6 +34,7 @@ const postSchema = z.object({
   title: z.string().nullish(),
   content: z.string().nullish(),
   status: z.enum(["draft", "published"]),
+  comment: z.string().nullish(),
   views: z.number(),
   createdAt: z.date(),
   updatedAt: z.date(),
@@ -100,15 +101,11 @@ const repositoryMapping = {
     refCb: (db: Firestore, docId: string) => db.collection("posts").doc(docId),
     history: {
       enabled: true,
-      include: ["address"],
-      exclude: ["address"],
-      onBeforeWrite: (data, context) => {
-        return data;
-      },
       ttl: {
         days: 30,
       },
-      meta: { userId: "views", comment: "status" },
+      exclude: ["comment"] as const,
+      meta: { userId: "userId", comment: "comment" },
       subcollection: "post_history",
     },
   }),
@@ -248,6 +245,7 @@ export const server = onRequest(async (req, res) => {
 import { BigQuery } from "@google-cloud/bigquery";
 import { PubSub } from "@google-cloud/pubsub";
 import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
+import { getAuth } from "firebase-admin/auth";
 import * as firestoreTriggers from "firebase-functions/v2/firestore";
 import * as pubsubHandler from "firebase-functions/v2/pubsub";
 
@@ -257,11 +255,25 @@ const servers = createServers(repos, {
 });
 
 export const admin = servers.admin({
-  auth: {
-    type: "basic",
-    realm: "Admin Area",
-    username: "admin",
-    password: "password",
+  auth: (req, res, next) => {
+    const authHeader = req.headers?.authorization;
+    const auth = getAuth();
+    auth.
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.setHeader("WWW-Authenticate", 'Basic realm="Admin Area"');
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const idToken = authHeader.split("Bearer ")[1];
+    auth
+      .verifyIdToken(idToken)
+      .then((decodedToken) => {
+        (req as any).user = decodedToken;
+        next();
+      })
+      .catch(() => {
+        res.setHeader("WWW-Authenticate", 'Basic realm="Admin Area"');
+        return res.status(401).json({ error: "Unauthorized" });
+      });
   },
   basePath: "/",
   repos: {
