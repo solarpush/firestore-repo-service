@@ -37,6 +37,7 @@ import {
   renderPage,
 } from "./renderer";
 import type { AnyReq, AnyRes, RouteParams } from "./router";
+import { getLinkBase as getLinkBaseShared } from "../utils/link-base";
 
 // ---------------------------------------------------------------------------
 // Registry type
@@ -726,47 +727,10 @@ function getMutableSchema(
 }
 /**
  * Compute the link base for all UI links.
- *
- * ── Emulator (FUNCTIONS_EMULATOR=true) ──────────────────────────────────────
- * Firebase emulator exposes functions at:
- *   http://localhost:5001/{GCLOUD_PROJECT}/{FUNCTION_REGION}/{FUNCTION_TARGET}/...
- * env vars set by the emulator:
- *   GCLOUD_PROJECT / GOOGLE_CLOUD_PROJECT  → project id
- *   FUNCTION_REGION                        → region (default: us-central1)
- *   FUNCTION_TARGET                        → function export name (e.g. "admin")
- *
- * ── Production ──────────────────────────────────────────────────────────────
- * Firebase proxy strips the prefix before reaching the handler, so links
- * are relative to "/" and `staticBasePath` is used as-is.
+ * @see {@link import("../utils/link-base").getLinkBase}
  */
 function getLinkBase(req: AnyReq, staticBasePath: string): string {
-  const base = staticBasePath === "/" ? "" : staticBasePath.replace(/\/$/, "");
-
-  if (process.env["FUNCTIONS_EMULATOR"] === "true") {
-    const project =
-      process.env["GCLOUD_PROJECT"] ??
-      process.env["GOOGLE_CLOUD_PROJECT"] ??
-      "demo-project";
-    const region = process.env["FUNCTION_REGION"] ?? "us-central1";
-    // FUNCTION_TARGET uses dots (e.g. "sync.functions.adminsync") but the
-    // emulator URL uses hyphens ("sync-functions-adminsync").
-    const target = (process.env["FUNCTION_TARGET"] ?? "").replace(/\./g, "-");
-    return `/${project}/${region}/${target}${base}`;
-  }
-
-  // Cloud Functions v2: K_SERVICE = function name = URL path prefix.
-  // Only add it when accessed via cloudfunctions.net (not custom domains).
-  // Cloud Run (Gen 2) lowercases service names, but K_SERVICE may still
-  // carry the original mixed-case export name — normalise to lowercase
-  // so that generated links match the canonical URL.
-  const service = process.env["K_SERVICE"];
-  const host: string =
-    (req as any).hostname ?? (req.headers as any)?.["host"] ?? "";
-  if (service && host.includes("cloudfunctions.net")) {
-    return `/${service.toLowerCase()}${base}`;
-  }
-
-  return base;
+  return getLinkBaseShared(req, staticBasePath);
 }
 
 export function createAdminHandlers(registry: RepoRegistry, basePath: string) {

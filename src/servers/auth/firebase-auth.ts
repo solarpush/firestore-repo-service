@@ -60,6 +60,7 @@
 
 import type { Middleware, RouteHandler, AnyReq } from "../admin/router";
 import { renderLoginPage } from "./login-page";
+import { getLinkBase } from "../utils/link-base";
 import {
   createSessionHandler,
   createLogoutHandler,
@@ -229,7 +230,25 @@ function pathOf(req: AnyReq): string {
   return idx === -1 ? raw : raw.slice(0, idx);
 }
 
-function isPublic(path: string, patterns: (string | RegExp)[] | undefined): boolean {
+function queryAction(req: AnyReq): string | null {
+  const q = (req as { query?: Record<string, unknown> }).query;
+  if (q && typeof q.__action === "string") return q.__action;
+  // Fallback: parse from URL when query parsing isn't done by the runtime.
+  const url = req.url ?? "";
+  const idx = url.indexOf("?");
+  if (idx === -1) return null;
+  const params = new URLSearchParams(url.slice(idx + 1));
+  return params.get("__action");
+}
+
+function methodOf(req: AnyReq): string {
+  return String(req.method ?? "GET").toUpperCase();
+}
+
+function isPublic(
+  path: string,
+  patterns: (string | RegExp)[] | undefined,
+): boolean {
   if (!patterns || patterns.length === 0) return false;
   for (const p of patterns) {
     if (typeof p === "string") {
@@ -243,8 +262,12 @@ function isPublic(path: string, patterns: (string | RegExp)[] | undefined): bool
 
 function wantsHtml(req: AnyReq): boolean {
   const accept = String(req.headers?.accept ?? "");
-  // Browsers send "text/html" early in their Accept header
-  return accept.includes("text/html");
+  // Browsers send "text/html" early in their Accept header.
+  // Fall back: treat GET requests with no Accept as HTML so platforms
+  // that strip the header (or send "*/*") still get the login page.
+  if (accept.includes("text/html")) return true;
+  if (!accept || accept === "*/*") return methodOf(req) === "GET";
+  return false;
 }
 
 function extractBearer(req: AnyReq): string | null {
@@ -313,53 +336,78 @@ export function firebaseAuth<TContext = unknown>(
     }
   }
 
+  // ── Auxiliary handlers (kept in `routes` for hosting deployments
+  // where users can mount them at known paths, AND invoked in-band by the
+  // middleware on `?__action=session|logout` so vanilla Cloud Functions
+  // — where there is no separate URL prefix per route — work too). ──────
+  const sessionHandler = createSessionHandler({
+    getAuth: config.getAuth,
+    cookieName,
+    ttlDays,
+    secure,
+    sameSite,
+  });
+  const logoutHandler = createLogoutHandler({
+    getAuth: config.getAuth,
+    cookieName,
+    secure,
+    sameSite,
+  });
+
+  function renderInlineLogin(
+    req: AnyReq,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    res: any,
+    error: string | null = null,
+  ): void {
+    const pageCfg: FirebaseAuthLoginPageConfig =
+      typeof config.loginPage === "object" ? config.loginPage : {};
+    // Build a same-function absolute URL: the function's external prefix
+    // (Cloud Functions name, emulator project/region/target, or "" for
+    // custom domains) + the in-router request path. The browser otherwise
+    // resolves form actions relative to the public URL, which doesn't
+    // include the function name on Cloud Functions.
+    const prefix = getLinkBase(req, "/");
+    const inner = req.url ?? "/";
+    const fullPath = `${prefix}${inner.startsWith("/") ? inner : `/${inner}`}`;
+    const sep = fullPath.includes("?") ? "&" : "?";
+    const sessionAction = `${fullPath}${sep}__action=session`;
+    const html = renderLoginPage({
+      title: pageCfg.title ?? "Admin sign-in",
+      providers: pageCfg.providers ?? ["password", "google"],
+      apiKey: config.apiKey!,
+      authDomain: config.authDomain!,
+      sessionPath: sessionAction,
+      next: fullPath,
+      error,
+    });
+    res
+      .status(200)
+      .set("Content-Type", "text/html; charset=utf-8")
+      .set("Cache-Control", "no-store")
+      .send(html);
+  }
+
   // ── Auxiliary routes ─────────────────────────────────────────────────────
   const routes: AuthRoute[] = [];
   if (loginEnabled) {
-    const pageCfg: FirebaseAuthLoginPageConfig =
-      typeof config.loginPage === "object" ? config.loginPage : {};
     routes.push({
       method: "GET",
       path: loginPath,
       handler: (req, res) => {
-        const next = (req.query?.next as string | undefined) ?? "/";
         const error = (req.query?.error as string | undefined) ?? null;
-        const html = renderLoginPage({
-          title: pageCfg.title ?? "Admin sign-in",
-          providers: pageCfg.providers ?? ["password", "google"],
-          apiKey: config.apiKey!,
-          authDomain: config.authDomain!,
-          sessionPath,
-          next,
-          error,
-        });
-        res
-          .status(200)
-          .set("Content-Type", "text/html; charset=utf-8")
-          .set("Cache-Control", "no-store")
-          .send(html);
+        renderInlineLogin(req, res, error);
       },
     });
     routes.push({
       method: "POST",
       path: sessionPath,
-      handler: createSessionHandler({
-        getAuth: config.getAuth,
-        cookieName,
-        ttlDays,
-        secure,
-        sameSite,
-      }),
+      handler: sessionHandler,
     });
     routes.push({
       method: "POST",
       path: logoutPath,
-      handler: createLogoutHandler({
-        getAuth: config.getAuth,
-        cookieName,
-        secure,
-        sameSite,
-      }),
+      handler: logoutHandler,
     });
   }
 
@@ -373,6 +421,23 @@ export function firebaseAuth<TContext = unknown>(
   // ── Middleware ───────────────────────────────────────────────────────────
   const middleware: Middleware = async (req, res, next) => {
     const path = pathOf(req);
+
+    // 1. In-band action endpoints (work on ANY URL, no separate route needed).
+    //    Used by the inline login page since the helper can't know the function's
+    //    public URL prefix on Cloud Functions.
+    if (loginEnabled && methodOf(req) === "POST") {
+      const action = queryAction(req);
+      if (action === "session") {
+        await sessionHandler(req, res);
+        return;
+      }
+      if (action === "logout") {
+        await logoutHandler(req, res);
+        return;
+      }
+    }
+
+    // 2. Public paths (mounted login routes, user-supplied allowlist).
     if (isPublic(path, publicPaths)) {
       await next();
       return;
@@ -393,7 +458,9 @@ export function firebaseAuth<TContext = unknown>(
       // Fall back to cookie when allowed.
       if (!decoded && (mode === "cookie" || mode === "both")) {
         const cookieHeader = req.headers?.cookie;
-        const raw = Array.isArray(cookieHeader) ? cookieHeader.join("; ") : cookieHeader;
+        const raw = Array.isArray(cookieHeader)
+          ? cookieHeader.join("; ")
+          : cookieHeader;
         const cookies = parseCookies(typeof raw === "string" ? raw : "");
         const session = cookies[cookieName];
         if (session) {
@@ -405,7 +472,7 @@ export function firebaseAuth<TContext = unknown>(
     }
 
     if (!decoded) {
-      rejectUnauthenticated(req, res, onUnauth, loginPath);
+      rejectUnauthenticated(req, res);
       return;
     }
 
@@ -418,13 +485,15 @@ export function firebaseAuth<TContext = unknown>(
 
     let context: TContext | null;
     try {
-      context = config.allow ? await config.allow(baseUser) : (null as TContext | null);
+      context = config.allow
+        ? await config.allow(baseUser)
+        : (null as TContext | null);
     } catch {
       context = null;
     }
 
     if (config.allow && context === null) {
-      rejectUnauthenticated(req, res, onUnauth, loginPath);
+      rejectUnauthenticated(req, res);
       return;
     }
 
@@ -435,6 +504,33 @@ export function firebaseAuth<TContext = unknown>(
 
     await next();
   };
+
+  /**
+   * Reject according to the configured policy:
+   * - cookie/both + GET HTML browser request → render the login page inline
+   *   on the SAME URL (works on Cloud Functions where there's no separate
+   *   `/__login` route reachable from the public URL).
+   * - bearer mode or non-HTML clients → JSON 401.
+   */
+  function rejectUnauthenticated(
+    req: AnyReq,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    res: any,
+  ): void {
+    if (
+      onUnauth === "redirect" &&
+      loginEnabled &&
+      methodOf(req) === "GET" &&
+      wantsHtml(req)
+    ) {
+      renderInlineLogin(req, res, null);
+      return;
+    }
+    res
+      .status(401)
+      .set("Content-Type", "application/json; charset=utf-8")
+      .send(JSON.stringify({ success: false, error: "Unauthorized" }));
+  }
 
   return {
     __authExtension: true,

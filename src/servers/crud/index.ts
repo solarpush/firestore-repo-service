@@ -116,38 +116,7 @@ function scalarDocsHtml(title: string, specUrl: string): string {
 </html>`;
 }
 
-/**
- * Compute the URL prefix for links / spec URLs.
- * In the Firebase emulator the /{project}/{region}/{functionTarget} prefix
- * is visible in URLs but stripped before the handler receives `req.url`.
- * In production Firebase proxy strips it automatically.
- */
-function getLinkBase(req: any, staticBasePath: string): string {
-  const base = staticBasePath === "/" ? "" : staticBasePath.replace(/\/$/, "");
-
-  if (process.env["FUNCTIONS_EMULATOR"] === "true") {
-    const project =
-      process.env["GCLOUD_PROJECT"] ??
-      process.env["GOOGLE_CLOUD_PROJECT"] ??
-      "demo-project";
-    const region = process.env["FUNCTION_REGION"] ?? "us-central1";
-    const target = process.env["FUNCTION_TARGET"] ?? "";
-    return `/${project}/${region}/${target}${base}`;
-  }
-
-  // Cloud Functions v2: K_SERVICE = function name = URL path prefix.
-  // Only add it when accessed via cloudfunctions.net (not custom domains).
-  // Cloud Run (Gen 2) lowercases service names, but K_SERVICE may still
-  // carry the original mixed-case export name — normalise to lowercase
-  // so that generated links match the canonical URL.
-  const service = process.env["K_SERVICE"];
-  const host: string = req?.hostname ?? req?.headers?.["host"] ?? "";
-  if (service && host.includes("cloudfunctions.net")) {
-    return `/${service.toLowerCase()}${base}`;
-  }
-
-  return base;
-}
+import { getLinkBase } from "../utils/link-base";
 
 // ---------------------------------------------------------------------------
 // Body parser
