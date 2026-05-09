@@ -359,9 +359,18 @@ export interface adminsyncFeaturesFlag {
  * handler is created and added to `sync.functions`.
  */
 export interface adminsyncConfig {
-  /** Authentication guard — HTTP Basic Auth or custom middleware function */
+  /**
+   * Authentication guard. Accepts:
+   * - {@link adminsyncBasicAuth} — HTTP Basic Auth (simple shared password),
+   * - an `AuthExtension` returned by `firebaseAuth({ ... })` from
+   *   `@lpdjs/firestore-repo-service/servers/auth` (cookie/bearer/both with
+   *   inline login page), so the sync admin can use the same Firebase Auth
+   *   process as `servers.admin()` / `servers.crud()`,
+   * - a custom Connect-style middleware function.
+   */
   auth?:
     | adminsyncBasicAuth
+    | import("../servers/auth").AuthExtension
     | ((req: any, res: any, next: () => void) => void | Promise<void>);
   /** Base URL path (default: "/sync-admin") */
   basePath?: string;

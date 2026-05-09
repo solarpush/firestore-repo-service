@@ -301,7 +301,8 @@ admin: {
 
 ### Authentication
 
-Same as the Admin Server — supports HTTP Basic Auth or a custom middleware function:
+Same as the Admin Server — supports HTTP Basic Auth, a Firebase `AuthExtension`,
+or a custom middleware function:
 
 ```typescript
 // Custom middleware
@@ -314,6 +315,30 @@ admin: {
     }
     next();
   },
+}
+```
+
+#### Firebase Auth (unified with admin / crud)
+
+The `auth` field also accepts the `AuthExtension` returned by
+`firebaseAuth({ ... })` — the same one used by `servers.admin()` and
+`servers.crud()`. The inline login page, session cookies and `allow()`
+callback work identically:
+
+```typescript
+import { firebaseAuth } from "@lpdjs/firestore-repo-service/servers/auth";
+import { getAuth } from "firebase-admin/auth";
+
+admin: {
+  auth: firebaseAuth({
+    getAuth: () => getAuth(),
+    mode: "cookie",
+    apiKey: process.env.FIREBASE_WEB_API_KEY!,
+    authDomain: process.env.FIREBASE_AUTH_DOMAIN!,
+    allow: ({ claims }) =>
+      claims.role === "superAdmin" ? { role: "superAdmin" } : null,
+  }),
+  featuresFlag: { healthCheck: true, configCheck: true },
 }
 ```
 

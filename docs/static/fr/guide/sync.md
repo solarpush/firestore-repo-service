@@ -299,6 +299,30 @@ admin: {
 }
 ```
 
+### Auth Firebase (unifiée avec admin / crud)
+
+Le champ `auth` accepte aussi une `AuthExtension` retournée par
+`firebaseAuth({ ... })` — la même que celle utilisée par `servers.admin()` et
+`servers.crud()`. La page de connexion inline, les cookies de session et le
+callback `allow()` fonctionnent à l'identique :
+
+```typescript
+import { firebaseAuth } from "@lpdjs/firestore-repo-service/servers/auth";
+import { getAuth } from "firebase-admin/auth";
+
+admin: {
+  auth: firebaseAuth({
+    getAuth: () => getAuth(),
+    mode: "cookie",
+    apiKey: process.env.FIREBASE_WEB_API_KEY!,
+    authDomain: process.env.FIREBASE_AUTH_DOMAIN!,
+    allow: ({ claims }) =>
+      claims.role === "superAdmin" ? { role: "superAdmin" } : null,
+  }),
+  featuresFlag: { healthCheck: true, configCheck: true },
+}
+```
+
 ### Config Check
 
 L'endpoint `/config-check` vérifie votre configuration GCP :

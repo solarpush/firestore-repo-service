@@ -60,6 +60,15 @@ export function renderLoginPage(opts: LoginPageOptions): string {
       body { background: #1d1d1f; color: #f5f5f7; }
       .card { background: #2c2c2e; }
       input { background: #1d1d1f; color: #f5f5f7; border-color: #444; }
+      input::placeholder { color: #888; }
+      input:-webkit-autofill,
+      input:-webkit-autofill:hover,
+      input:-webkit-autofill:focus,
+      input:-webkit-autofill:active {
+        -webkit-text-fill-color: #f5f5f7 !important;
+        -webkit-box-shadow: 0 0 0 1000px #1d1d1f inset !important;
+        caret-color: #f5f5f7;
+      }
       .divider { color: #888; }
       .divider::before, .divider::after { background: #444; }
     }
@@ -76,10 +85,23 @@ export function renderLoginPage(opts: LoginPageOptions): string {
     input {
       width: 100%; padding: 11px 12px;
       border: 1px solid #d2d2d7; border-radius: 8px;
-      font-size: 15px; outline: none; background: #fff; color: inherit;
+      font-size: 15px; outline: none; background: #fff; color: #1d1d1f;
       margin-bottom: 14px;
     }
+    input::placeholder { color: #86868b; }
     input:focus { border-color: #0071e3; box-shadow: 0 0 0 3px rgba(0,113,227,.15); }
+    /* Force readable text on Chrome's autofill (otherwise the input keeps
+       the autofill's white background but inherits the page's dark-mode text
+       colour, producing white-on-white). */
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus,
+    input:-webkit-autofill:active {
+      -webkit-text-fill-color: #1d1d1f !important;
+      -webkit-box-shadow: 0 0 0 1000px #fff inset !important;
+      caret-color: #1d1d1f;
+      transition: background-color 9999s ease-out 0s;
+    }
     button {
       width: 100%; padding: 11px 12px; border: none; border-radius: 8px;
       font-size: 15px; font-weight: 500; cursor: pointer;

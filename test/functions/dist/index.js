@@ -266,8 +266,16 @@ const servers = (0, firestore_repo_service_1.createServers)(repos, {
 });
 exports.admin = servers.admin({
     auth: (0, auth_1.firebaseAuth)({
-        getAuth: () => (0, auth_2.getAuth)(), // No auth in this example, but you can plug in Firebase Auth here
-        mode: "bearer",
+        getAuth: () => (0, auth_2.getAuth)(),
+        // Cookie mode → renders the inline login page on unauthenticated GETs.
+        // Use "bearer" only for REST APIs (no UI), or "both" for hybrid backends.
+        mode: "cookie",
+        // Required when loginPage is enabled (default in cookie/both modes).
+        // Find both in Firebase Console → Project Settings → General → Web app.
+        apiKey: process.env["FIREBASE_WEB_API_KEY"] ??
+            "AIzaSyBTs5eDLAdi-cO0p3BVzm1G0MTl_LnvVbA",
+        authDomain: process.env["FIREBASE_AUTH_DOMAIN"] ??
+            "firestore-repo-services.firebaseapp.com",
         allow: () => true,
     }),
     basePath: "/",
@@ -327,9 +335,17 @@ exports.admin = servers.admin({
 exports.crud = servers.crud({
     basePath: "/",
     auth: (0, auth_1.firebaseAuth)({
-        getAuth: auth_2.getAuth,
-        mode: "bearer",
-        allow: (u) => ({ uid: u.uid, role: u.claims.role ?? "user" }),
+        getAuth: () => (0, auth_2.getAuth)(),
+        // Cookie mode → renders the inline login page on unauthenticated GETs.
+        // Use "bearer" only for REST APIs (no UI), or "both" for hybrid backends.
+        mode: "both",
+        // Required when loginPage is enabled (default in cookie/both modes).
+        // Find both in Firebase Console → Project Settings → General → Web app.
+        apiKey: process.env["FIREBASE_WEB_API_KEY"] ??
+            "AIzaSyBTs5eDLAdi-cO0p3BVzm1G0MTl_LnvVbA",
+        authDomain: process.env["FIREBASE_AUTH_DOMAIN"] ??
+            "firestore-repo-services.firebaseapp.com",
+        allow: () => true,
     }),
     repos: {
         posts: {
@@ -349,6 +365,7 @@ exports.crud = servers.crud({
                 address: ["create"],
                 views: ["create"],
                 userId: ["filterable"],
+                comment: ["create", "mutable", "filterable"],
             },
             allowDelete: true,
         },
@@ -420,12 +437,14 @@ exports.sync = servers.sync({
         maxInstances: 10,
     },
     admin: {
-        auth: {
-            type: "basic",
-            realm: "Admin Area",
-            username: "admin",
-            password: "password",
-        },
+        auth: (0, auth_1.firebaseAuth)({
+            getAuth: () => (0, auth_2.getAuth)(),
+            mode: "cookie",
+            apiKey: process.env["FIREBASE_WEB_API_KEY"] ?? "REPLACE_ME",
+            authDomain: process.env["FIREBASE_AUTH_DOMAIN"] ??
+                "firestore-repo-services.firebaseapp.com",
+            allow: () => true,
+        }),
         basePath: "/",
         featuresFlag: {
             viewQueue: true,

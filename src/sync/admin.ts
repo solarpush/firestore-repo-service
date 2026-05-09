@@ -24,6 +24,8 @@
 import { z } from "zod";
 import type { AnyReq, AnyRes, RouteParams } from "../servers/admin/router";
 import { MiniRouter } from "../servers/admin/router";
+import { isAuthExtension } from "../servers/auth";
+import { getLinkBase } from "../servers/utils/link-base";
 import type { SyncQueue } from "./queue";
 import { zodSchemaToColumns } from "./schema-mapper";
 import { serializeDocument } from "./serializer";
@@ -49,46 +51,6 @@ interface RepoInfo {
   isGroup: boolean;
   repoCfg: RepoSyncConfig<string> | undefined;
   repo: any;
-}
-
-// ---------------------------------------------------------------------------
-// Link-base resolution (emulator vs production)
-// ---------------------------------------------------------------------------
-
-/**
- * Compute the link base for all HTML links.
- *
- * In the Firebase emulator `FUNCTIONS_EMULATOR=true`, functions are served at
- *   `http://localhost:5001/{project}/{region}/{functionTarget}/…`
- * and the browser needs the full prefix for navigation to work.
- *
- * In production, the Firebase proxy strips the prefix so `basePath` is enough.
- */
-function getLinkBase(req: any, base: string): string {
-  if (process.env["FUNCTIONS_EMULATOR"] === "true") {
-    const project =
-      process.env["GCLOUD_PROJECT"] ??
-      process.env["GOOGLE_CLOUD_PROJECT"] ??
-      "demo-project";
-    const region = process.env["FUNCTION_REGION"] ?? "us-central1";
-    // FUNCTION_TARGET uses dots (e.g. "sync.functions.adminsync") but the
-    // emulator URL uses hyphens ("sync-functions-adminsync").
-    const target = (process.env["FUNCTION_TARGET"] ?? "").replace(/\./g, "-");
-    return `/${project}/${region}/${target}${base}`;
-  }
-
-  // Cloud Functions v2: K_SERVICE = function name = URL path prefix.
-  // Only add it when accessed via cloudfunctions.net (not custom domains).
-  // Cloud Run (Gen 2) lowercases service names, but K_SERVICE may still
-  // carry the original mixed-case export name — normalise to lowercase
-  // so that generated links match the canonical URL.
-  const service = process.env["K_SERVICE"];
-  const host: string = req.hostname ?? req.headers?.["host"] ?? "";
-  if (service && host.includes("cloudfunctions.net")) {
-    return `/${service.toLowerCase()}${base}`;
-  }
-
-  return base;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +156,18 @@ export function createadminsyncServer(
 
   // -- Auth middleware -----------------------------------------------------
   if (config.auth) {
-    if (typeof config.auth === "function") {
+    if (isAuthExtension(config.auth)) {
+      // Mount auxiliary routes (login page, session, logout) BEFORE pushing
+      // the protected middleware so they remain publicly reachable. Use the
+      // same convention as `servers.admin()` / `servers.crud()`.
+      const ext = config.auth;
+      for (const route of ext.routes) {
+        const mountPath = `${basePath}${route.path}`;
+        if (route.method === "GET") router.get(mountPath, route.handler);
+        else router.post(mountPath, route.handler);
+      }
+      router.use(ext.middleware);
+    } else if (typeof config.auth === "function") {
       router.use(config.auth as any);
     } else {
       const realm = config.auth.realm ?? "Sync Admin";

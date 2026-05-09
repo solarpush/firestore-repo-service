@@ -600,14 +600,32 @@ function initTable(table) {
 // ── Tag original column indices ─────────────────────────────────────────────
 function tagOriginalIndices(table) {
   var ths = Array.from(table.querySelectorAll("thead th"));
+  // Skip the leading selection (checkbox) column — it must always stay
+  // visible and is not user-toggleable.
+  var startIdx = 0;
+  while (
+    startIdx < ths.length &&
+    ths[startIdx].querySelector("[data-frs-select-page]")
+  ) {
+    startIdx++;
+  }
   var dataCount = countDataColumns(table, ths);
   for (var i = 0; i < dataCount; i++) {
-    ths[i].setAttribute("data-orig-col", String(i));
+    var th = ths[startIdx + i];
+    if (!th) break;
+    th.setAttribute("data-orig-col", String(i));
   }
   table.querySelectorAll("tbody tr").forEach(function (row) {
     var tds = Array.from(row.querySelectorAll("td"));
-    for (var j = 0; j < dataCount && j < tds.length; j++) {
-      tds[j].setAttribute("data-orig-col", String(j));
+    var rowStart = 0;
+    while (
+      rowStart < tds.length &&
+      tds[rowStart].querySelector("[data-frs-select-row]")
+    ) {
+      rowStart++;
+    }
+    for (var j = 0; j < dataCount && rowStart + j < tds.length; j++) {
+      tds[rowStart + j].setAttribute("data-orig-col", String(j));
     }
   });
 }
