@@ -33,7 +33,7 @@ const postSchema = z.object({
   address: z.object({ street: z.string(), city: z.string() }),
   title: z.string().nullish(),
   content: z.string().nullish(),
-  status: z.enum(["draft", "published"]),
+  status: z.enum(["draft", "published", "archived"]),
   comment: z.string().nullish(),
   views: z.number(),
   createdAt: z.date(),
@@ -172,7 +172,19 @@ export const server = onRequest(async (req, res) => {
       isActive: true,
       name: "John Doe",
     });
-
+    const postL = await repos.posts.query.by({
+      where: [
+        ["userId", "==", user.docId],
+        ["status", "==", "published"],
+      ],
+      orWhere: [
+        ["address.city", "==", "Anytown"],
+        ["views", ">", 100],
+      ],
+      orderBy: [{ field: "status", direction: "asc" }],
+      select: ["title", "comment"],
+    });
+    postL?.forEach((p) => console.log("Queried Post:", p.address));
     console.log("Created User:", user);
     console.log("User docId:", user.docId);
     console.log("User documentPath:", user.documentPath);

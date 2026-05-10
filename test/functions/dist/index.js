@@ -62,7 +62,7 @@ const postSchema = zod_1.default.object({
     address: zod_1.default.object({ street: zod_1.default.string(), city: zod_1.default.string() }),
     title: zod_1.default.string().nullish(),
     content: zod_1.default.string().nullish(),
-    status: zod_1.default.enum(["draft", "published"]),
+    status: zod_1.default.enum(["draft", "published", "archived"]),
     comment: zod_1.default.string().nullish(),
     views: zod_1.default.number(),
     createdAt: zod_1.default.date(),
