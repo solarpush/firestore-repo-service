@@ -1,43 +1,26 @@
-# 🔥 Firestore Repository Service
+# firestore-repo-service
 
 [![Documentation](https://img.shields.io/badge/Documentation-Online-blue?style=for-the-badge&logo=read-the-docs)](https://frs.lpdjs.fr)
 [![npm version](https://img.shields.io/npm/v/@lpdjs/firestore-repo-service?style=for-the-badge)](https://www.npmjs.com/package/@lpdjs/firestore-repo-service)
 [![License](https://img.shields.io/npm/l/@lpdjs/firestore-repo-service?style=for-the-badge)](https://github.com/solarpush/firestore-repo-service/blob/master/LICENSE)
 
-Un service de repository type-safe pour Firestore avec génération automatique des méthodes de requête et CRUD.
+Type-safe Firestore repository layer with auto-generated query methods, CRUD,
+a Firestore→SQL sync pipeline via Pub/Sub + BigQuery, change-history tracking,
+and a file-based Hono HTTP server for Firebase Cloud Functions v2.
 
-📚 **Documentation complète disponible sur [frs.lpdjs.fr](https://frs.lpdjs.fr)**
+**Full documentation at [frs.lpdjs.fr](https://frs.lpdjs.fr)**
 
-## ✨ Fonctionnalités
-
-- 🎯 **Type-safe** : TypeScript avec inférence complète des types
-- 🚀 **Auto-génération** : Méthodes `get.by*` et `query.by*` générées automatiquement
-- 🔍 **Requêtes avancées** : Support des conditions OR, tri, pagination avec curseurs
-- 📦 **Opérations en masse** : Batch et bulk operations
-- 🏗️ **Collections et sous-collections** : Support complet
-- 💡 **API intuitive** : Accesseurs directs via getters
-- 📡 **Real-time** : Listeners `onSnapshot` pour les mises à jour en temps réel
-- 🔢 **Agrégations** : Count, sum, average avec support serveur
-- ✏️ **CRUD complet** : Create, set, update, delete avec types préservés
-- 🔄 **Transactions** : Opérations transactionnelles type-safe
-- 🔗 **Relations** : Populate avec select typé (champs projetés)
-- 📄 **Pagination** : Curseurs, include avec relations, select
-- 🔄 **Firestore → SQL Sync** : Réplication vers BigQuery via Pub/Sub avec admin UI
-- 🖥️ **Serveur Admin** : UI admin auto-générée avec formulaires Zod, filtrage, navigation de relations
-
-## 📦 Installation
+## Installation
 
 ```bash
 npm install @lpdjs/firestore-repo-service firebase-admin
-# ou
-yarn add @lpdjs/firestore-repo-service firebase-admin
-# ou
-bun add @lpdjs/firestore-repo-service firebase-admin
 ```
 
-## 🚀 Démarrage rapide
+---
 
-### 1. Définir vos modèles
+## Quick start
+
+### Define your models
 
 ```typescript
 interface UserModel {
@@ -56,7 +39,7 @@ interface PostModel {
 }
 ```
 
-### 2. Créer votre mapping
+### Create the repository mapping
 
 ```typescript
 import {
@@ -67,7 +50,6 @@ import {
 import { doc } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 
-// 1. Définir la configuration de base
 const repositoryMapping = {
   users: createRepositoryConfig<UserModel>()({
     path: "users",
@@ -76,7 +58,6 @@ const repositoryMapping = {
     queryKeys: ["name", "isActive"] as const,
     refCb: (db: Firestore, docId: string) => doc(db, "users", docId),
   }),
-
   posts: createRepositoryConfig<PostModel>()({
     path: "posts",
     isGroup: false,
@@ -86,78 +67,57 @@ const repositoryMapping = {
   }),
 };
 
-// 2. Ajouter les relations (Optionnel)
+// Optional: add relations
 const mappingWithRelations = buildRepositoryRelations(repositoryMapping, {
   posts: {
     userId: { repo: "users", key: "docId", type: "one" as const },
   },
 });
 
-// 3. Créer le service
 export const repos = createRepositoryMapping(db, mappingWithRelations);
 ```
 
-### 3. Utiliser les repositories
+### Use the repositories
 
 ```typescript
-// Récupérer un document unique
+// Fetch a single document
 const user = await repos.users.get.byDocId("user123");
 const userByEmail = await repos.users.get.byEmail("john@example.com");
 
-// Rechercher des documents
+// Query multiple documents
 const activeUsers = await repos.users.query.byIsActive(true);
 
-// Relations (Populate)
+// With query options
+const results = await repos.users.query.byIsActive(true, {
+  where: [["age", ">=", 18]],
+  orderBy: [{ field: "name", direction: "asc" }],
+  limit: 50,
+});
+
+// Populate a relation
 const post = await repos.posts.get.byDocId("post123");
 if (post) {
   const postWithUser = await repos.posts.populate(post, "userId");
-  console.log(postWithUser.populated.users?.name); // Type-safe!
+  console.log(postWithUser.populated.users?.name); // type-safe
 }
 
-// Recherche avec options (tuples where)
-const filteredUsers = await repos.users.query.byName("John", {
-  where: [["age", ">=", 18]],
-  orderBy: [{ field: "createdAt", direction: "desc" }],
-  limit: 10,
-});
-
-// Mettre à jour un document
-const updated = await repos.users.update("user123", {
-  name: "John Updated",
-  age: 31,
-});
+// Update
+const updated = await repos.users.update("user123", { name: "New name", age: 31 });
 ```
 
-## 📚 Guide complet
+## API reference
 
-### Configuration
+### `createRepositoryConfig()`
 
-#### `createRepositoryConfig()`
+| Option        | Description                                             |
+| ------------- | ------------------------------------------------------- |
+| `path`        | Collection path in Firestore                            |
+| `isGroup`     | `true` for collection group, `false` for simple         |
+| `foreignKeys` | Keys for `get.by*` methods (single document lookup)     |
+| `queryKeys`   | Keys for `query.by*` methods (multi-document query)     |
+| `refCb`       | Function that returns the document reference            |
 
-Configure un repository avec ses clés et méthodes.
-
-**Paramètres :**
-
-- `path` : Chemin de la collection dans Firestore
-- `isGroup` : `true` pour une collection group, `false` pour une collection simple
-- `foreignKeys` : Clés pour les méthodes `get.by*` (recherche unique)
-- `queryKeys` : Clés pour les méthodes `query.by*` (recherche multiple)
-- `type` : Type TypeScript du modèle
-- `refCb` : Fonction pour créer la référence du document
-
-**Exemple collection simple :**
-
-```typescript
-users: createRepositoryConfig<UserModel>()({
-  path: "users",
-  isGroup: false,
-  foreignKeys: ["docId", "email"] as const,
-  queryKeys: ["isActive", "role"] as const,
-  refCb: (db: Firestore, docId: string) => doc(db, "users", docId),
-});
-```
-
-**Exemple sous-collection :**
+**Sub-collection example:**
 
 ```typescript
 comments: createRepositoryConfig<CommentModel>()({
@@ -165,459 +125,305 @@ comments: createRepositoryConfig<CommentModel>()({
   isGroup: true,
   foreignKeys: ["docId"] as const,
   queryKeys: ["postId", "userId"] as const,
-  refCb: (db: Firestore, postId: string, commentId: string) =>
+  refCb: (db, postId, commentId) =>
     doc(db, "posts", postId, "comments", commentId),
 });
 ```
 
-### Méthodes GET
-
-Récupère un **document unique** par une clé étrangère.
+### Query options
 
 ```typescript
-// Méthodes générées automatiquement depuis foreignKeys
-const user = await repos.users.get.byDocId("user123");
-const userByEmail = await repos.users.get.byEmail("john@example.com");
-
-// Avec le DocumentSnapshot
-const result = await repos.users.get.byDocId("user123", true);
-if (result) {
-  console.log(result.data); // UserModel
-  console.log(result.doc); // DocumentSnapshot
-}
-
-// Récupérer par liste de valeurs
-const users = await repos.users.get.byList("docId", [
-  "user1",
-  "user2",
-  "user3",
-]);
-```
-
-### Méthodes QUERY
-
-Recherche **plusieurs documents** par une clé de requête.
-
-```typescript
-// Méthodes générées automatiquement depuis queryKeys
-const activeUsers = await repos.users.query.byIsActive(true);
-const usersByName = await repos.users.query.byName("John");
-
-// Avec options (syntaxe tuple pour where)
-const results = await repos.users.query.byIsActive(true, {
-  where: [["age", ">=", 18]],
-  orderBy: [{ field: "name", direction: "asc" }],
-  limit: 50,
-});
-
-// Requête générique
-const users = await repos.users.query.by({
-  where: [
-    ["isActive", "==", true],
-    ["age", ">=", 18],
-  ],
-  orderBy: [{ field: "createdAt", direction: "desc" }],
-  limit: 10,
-});
-
-// Conditions OR
-const posts = await repos.posts.query.by({
-  orWhere: [[["status", "==", "published"]], [["status", "==", "draft"]]],
-});
-```
-
-### Options de requête
-
-```typescript
-// WhereClause en tuple : [field, operator, value]
-type WhereClause<T> = [keyof T, WhereFilterOp, any];
-
 interface QueryOptions<T> {
-  where?: WhereClause<T>[]; // Conditions AND - tuples [field, op, value]
-  orWhere?: WhereClause<T>[][]; // Conditions OR
-  orderBy?: {
-    field: keyof T;
-    direction?: "asc" | "desc";
-  }[];
-  limit?: number; // Nombre max de résultats
-  offset?: number; // Pagination (skip)
-  select?: (keyof T)[]; // Champs à récupérer (projection)
-  startAt?: DocumentSnapshot | any[]; // Cursor pagination - start at
-  startAfter?: DocumentSnapshot | any[]; // Cursor pagination - start after
-  endAt?: DocumentSnapshot | any[]; // Cursor pagination - end at
-  endBefore?: DocumentSnapshot | any[]; // Cursor pagination - end before
+  where?: [keyof T, WhereFilterOp, any][];      // AND conditions
+  orWhere?: [keyof T, WhereFilterOp, any][][];  // OR conditions
+  orderBy?: { field: keyof T; direction?: "asc" | "desc" }[];
+  limit?: number;
+  offset?: number;
+  select?: (keyof T)[];
+  startAt?: DocumentSnapshot | any[];
+  startAfter?: DocumentSnapshot | any[];
+  endAt?: DocumentSnapshot | any[];
+  endBefore?: DocumentSnapshot | any[];
 }
 ```
 
-### Mise à jour
+### CRUD
 
 ```typescript
-// Met à jour et retourne le document mis à jour
-const updated = await repos.users.update("user123", {
-  name: "New Name",
-  age: 30,
-});
+// Create (auto-generated ID)
+const newUser = await repos.users.create({ email: "...", name: "...", age: 25, isActive: true });
 
-// Pour sous-collections
-const updatedComment = await repos.comments.update(
-  "post123", // postId
-  "comment456", // commentId
-  { text: "Updated text" }
-);
+// Set (create or replace)
+await repos.users.set("user123", { ... });
+
+// Set with merge
+await repos.users.set("user123", { age: 31 }, { merge: true });
+
+// Update (partial)
+await repos.users.update("user123", { age: 32 });
+
+// Delete
+await repos.users.delete("user123");
+
+// Document ref
+const ref = repos.users.documentRef("user123");
+
+// Raw collection ref
+const colRef = repos.users.ref;
 ```
 
-### Références de documents
+### Batch & Bulk
 
 ```typescript
-const userRef = repos.users.documentRef("user123");
-const commentRef = repos.comments.documentRef("post123", "comment456");
-```
-
-### Opérations Batch
-
-Pour des opérations atomiques (max 500 opérations).
-
-```typescript
+// Atomic batch (max 500 operations)
 const batch = repos.users.batch.create();
-
-batch.set(repos.users.documentRef("user1"), {
-  name: "User One",
-  email: "user1@example.com",
-});
-
-batch.update(repos.users.documentRef("user2"), {
-  age: 25,
-});
-
-batch.delete(repos.users.documentRef("user3"));
-
+batch.set(repos.users.documentRef("u1"), { ... });
+batch.update(repos.users.documentRef("u2"), { age: 25 });
+batch.delete(repos.users.documentRef("u3"));
 await batch.commit();
-```
 
-### Opérations Bulk
-
-Pour traiter de grandes quantités (automatiquement divisées en batches de 500).
-
-```typescript
-// Set multiple
+// Bulk (auto-split into batches of 500)
 await repos.users.bulk.set([
-  {
-    docRef: repos.users.documentRef("user1"),
-    data: { name: "User 1", email: "user1@example.com" },
-    merge: true,
-  },
-  {
-    docRef: repos.users.documentRef("user2"),
-    data: { name: "User 2", email: "user2@example.com" },
-  },
-  // ... jusqu'à des milliers de documents
+  { docRef: repos.users.documentRef("u1"), data: { ... }, merge: true },
 ]);
-
-// Update multiple
-await repos.users.bulk.update([
-  { docRef: repos.users.documentRef("user1"), data: { age: 30 } },
-  { docRef: repos.users.documentRef("user2"), data: { age: 25 } },
-]);
-
-// Delete multiple
-await repos.users.bulk.delete([
-  repos.users.documentRef("user1"),
-  repos.users.documentRef("user2"),
-]);
+await repos.users.bulk.update([...]);
+await repos.users.bulk.delete([...]);
 ```
 
-### Récupérer tous les documents
+### Real-time listeners
 
 ```typescript
-// Récupère tous les documents de la collection
-const allUsers = await repos.users.query.getAll();
-
-// Avec des options de filtrage et tri
-const filteredUsers = await repos.users.query.getAll({
-  where: [["isActive", "==", true]],
-  orderBy: [{ field: "createdAt", direction: "desc" }],
-  limit: 100,
-});
-
-// Avec projection (select)
-const userNames = await repos.users.query.getAll({
-  select: ["docId", "name", "email"],
-});
-```
-
-### Real-time listeners (onSnapshot)
-
-```typescript
-// Écouter les changements en temps réel
 const unsubscribe = repos.users.query.onSnapshot(
-  {
-    where: [["isActive", "==", true]],
-    orderBy: [{ field: "name", direction: "asc" }],
-  },
-  (users) => {
-    console.log("Données mises à jour:", users);
-  },
-  (error) => {
-    console.error("Erreur:", error);
-  }
+  { where: [["isActive", "==", true]] },
+  (users) => console.log(users),
 );
-
-// Arrêter l'écoute
 unsubscribe();
 ```
 
-### Pagination avec curseurs
-
-La pagination basée sur les curseurs est plus efficace que `offset` pour de grandes collections.
+### Pagination
 
 ```typescript
-// Première page
 const firstPage = await repos.users.query.by({
   orderBy: [{ field: "createdAt", direction: "desc" }],
   limit: 10,
 });
 
-// Page suivante en utilisant le dernier document
-const lastDoc = firstPage[firstPage.length - 1];
 const nextPage = await repos.users.query.by({
   orderBy: [{ field: "createdAt", direction: "desc" }],
-  startAfter: lastDoc, // ou utiliser un tableau de valeurs
+  startAfter: firstPage[firstPage.length - 1],
   limit: 10,
 });
 
-// Exemple avec des valeurs
-const page = await repos.users.query.by({
-  orderBy: [{ field: "createdAt", direction: "desc" }],
-  startAfter: [new Date("2024-01-01")],
-  limit: 10,
+// Paginate with relations
+const page = await repos.posts.query.paginate({
+  pageSize: 10,
+  include: [{ relation: "userId", select: ["docId", "name", "email"] }],
 });
 ```
 
-### CRUD complet
+### Aggregations
 
 ```typescript
-// Create - Créer avec ID auto-généré
-const newUser = await repos.users.create({
-  email: "new@example.com",
-  name: "New User",
-  age: 25,
-  isActive: true,
-});
-console.log(newUser.docId); // ID auto-généré
+import { count, sum, average } from "@lpdjs/firestore-repo-service";
 
-// Set - Créer ou remplacer complètement
-await repos.users.set("user123", {
-  email: "user@example.com",
-  name: "User",
-  age: 30,
-  isActive: true,
-});
-
-// Set avec merge - Fusion partielle
-await repos.users.set(
-  "user123",
-  { age: 31 }, // Seul 'age' sera modifié
-  { merge: true }
-);
-
-// Update - Mise à jour partielle
-const updated = await repos.users.update("user123", {
-  age: 32,
-  name: "Updated Name",
-});
-
-// Delete - Supprimer un document
-await repos.users.delete("user123");
+const activeCount = await repos.users.aggregate.count({ where: [["isActive", "==", true]] });
+const totalViews = await repos.posts.aggregate.sum("views");
+const avgAge = await repos.users.aggregate.average("age");
 ```
 
 ### Transactions
 
 ```typescript
-// Transaction avec méthodes type-safe
 const result = await repos.users.transaction.run(async (txn) => {
-  // Get document dans la transaction
   const user = await txn.get(repos.users.documentRef("user123"));
-
   if (user.exists()) {
-    const userData = user.data();
-
-    // Update dans la transaction
-    txn.update(repos.users.documentRef("user123"), {
-      age: userData.age + 1,
-    });
-
-    // Set dans la transaction
-    txn.set(repos.users.documentRef("user124"), {
-      email: "new@example.com",
-      name: "New User",
-    });
-
-    // Delete dans la transaction
-    txn.delete(repos.users.documentRef("user125"));
+    txn.update(repos.users.documentRef("user123"), { age: user.data().age + 1 });
   }
-
   return { success: true };
 });
-
-// Accès à la transaction Firestore brute si nécessaire
-await repos.users.transaction.run(async (txn) => {
-  const rawTransaction = txn.raw;
-  // Utiliser rawTransaction avec l'API Firestore native
-});
 ```
 
-### Agrégations
-
-```typescript
-import { count, sum, average } from "@lpdjs/firestore-repo-service";
-
-// Compter les documents
-const activeCount = await repos.users.aggregate.count({
-  where: [["isActive", "==", true]],
-});
-
-// Somme d'un champ
-const totalViews = await repos.posts.aggregate.sum("views");
-
-// Moyenne d'un champ
-const avgAge = await repos.users.aggregate.average("age");
-
-// Avec filtres
-const publishedViews = await repos.posts.aggregate.sum("views", {
-  where: [["status", "==", "published"]],
-});
-```
-
-### Accès à la collection Firestore
-
-```typescript
-// Référence brute si besoin
-const collectionRef = repos.users.ref;
-```
-
-## 🎯 Exemples avancés
-
-### Collection imbriquée complexe
-
-```typescript
-const repositoryMapping = {
-  eventRatings: createRepositoryConfig<RatingModel>()({
-    path: "ratings",
-    isGroup: true,
-    foreignKeys: ["docId"] as const,
-    queryKeys: ["eventId", "rating"] as const,
-    refCb: (
-      db: Firestore,
-      residenceId: string,
-      eventId: string,
-      ratingId: string
-    ) =>
-      doc(
-        db,
-        "residences",
-        residenceId,
-        "events",
-        eventId,
-        "ratings",
-        ratingId
-      ),
-  }),
-};
-
-// Utilisation
-const rating = await repos.eventRatings.update(
-  "residence123",
-  "event456",
-  "rating789",
-  { score: 5 }
-);
-```
-
-### Recherche complexe avec OR
+### OR queries
 
 ```typescript
 // (status = 'active' AND age >= 18) OR (status = 'pending' AND verified = true)
 const users = await repos.users.query.by({
   orWhere: [
-    [
-      ["status", "==", "active"],
-      ["age", ">=", 18],
-    ],
-    [
-      ["status", "==", "pending"],
-      ["verified", "==", true],
-    ],
+    [["status", "==", "active"], ["age", ">=", 18]],
+    [["status", "==", "pending"], ["verified", "==", true]],
   ],
-  orderBy: [{ field: "createdAt", direction: "desc" }],
-  limit: 100,
 });
 ```
 
-### Populate avec select (projection)
+---
+
+## Change History
+
+Track every write (create / update / delete) to any Firestore document with
+zero-boilerplate Firestore triggers. Enabled per-repository via the
+`createServers` config.
 
 ```typescript
-// Populate avec tous les champs
-const postWithUser = await repos.posts.populate(post, "userId");
-console.log(postWithUser.populated.users?.name);
+const servers = createServers(repos, { onRequest, firestoreTriggers });
 
-// Populate avec select (seulement certains champs)
-const userWithPosts = await repos.users.populate(
-  { docId: user.docId },
-  {
-    relation: "docId",
-    select: ["docId", "title", "status"], // Type-safe: keyof PostModel
-  }
-);
-
-// Populate plusieurs relations
-const postWithAll = await repos.posts.populate(post, ["userId", "categoryId"]);
+export const { historyTriggers } = servers.history({
+  enabled: true,
+  repos: { posts: true, users: true },
+  // Optional: retention and relational tracking
+  relational: true,
+});
 ```
 
-### Pagination avec include
+Each change is stored as an immutable snapshot in a `__history` sub-collection:
 
 ```typescript
-// Paginer avec relations incluses
-const page = await repos.posts.query.paginate({
-  pageSize: 10,
-  orderBy: [{ field: "createdAt", direction: "desc" }],
-  include: ["userId"], // Inclut l'auteur automatiquement
+// Read history entries for a document
+const entries = await repos.posts.history.byDocId("post123");
+
+// Field-level lookup
+const titleHistory = await repos.posts.history.byField("post123", "title");
+```
+
+Full documentation: [frs.lpdjs.fr/guide/history](https://frs.lpdjs.fr/guide/history)
+
+---
+
+## Hono File-Based API Server
+
+A typed, file-based HTTP server built on [Hono](https://hono.dev/), designed
+to ship one Firebase Cloud Function v2 per logical API — with auto-generated
+OpenAPI 3.1, Zod validation, and a CLI scaffolder.
+
+### Install extras
+
+```bash
+npm i hono @hono/node-server
+npm i -D @asteasolutions/zod-to-openapi
+```
+
+### Bootstrap
+
+```bash
+npx frs-hono init          # interactive — creates apis.ts + manifest stub
+npx frs-hono new createPost --domain posts --method post --api v1
+npx frs-hono gen --root src/domains   # refresh manifest (run before each build)
+```
+
+### Configure your APIs (`apis.ts`)
+
+```typescript
+import { createApiRegistry } from "@lpdjs/firestore-repo-service/servers/hono";
+
+export const apis = createApiRegistry({
+  v1: {
+    basePath: "/v1",
+    openapi: { info: { title: "Public API", version: "1.0.0" } },
+    interceptor: async ({ next, c }) => {
+      const data = await next();
+      return c.json({ success: true, data, error: null });
+    },
+    verbose: process.env["NODE_ENV"] !== "production",
+  },
 });
 
-// Avec select sur les relations
-const pageWithSelect = await repos.posts.query.paginate({
-  pageSize: 10,
-  include: [{ relation: "userId", select: ["docId", "name", "email"] }],
-});
-
-// Accès aux données peuplées
-for (const post of page.data) {
-  console.log(post.title);
-  console.log(post.populated.users?.name); // Type-safe!
-}
+export const defineRoute = apis.defineRoute;
 ```
 
-## 🔄 Firestore → SQL Sync
-
-Répliquez automatiquement vos collections Firestore vers BigQuery (ou toute base SQL) via Cloud Pub/Sub.
-
-### Architecture
-
-```
-Firestore Triggers → Cloud Pub/Sub → Worker → BigQuery
-```
-
-### Démarrage rapide
+### Write a route
 
 ```typescript
-import { createFirestoreSync } from "@lpdjs/firestore-repo-service/sync";
+// src/domains/posts/useCases/createPost/routes.ts
+import { z } from "zod";
+import { defineRoute } from "../../../../apis.js";
+
+export default defineRoute({
+  api: "v1",           // typed: only registered tags accepted
+  method: "post",
+  input: z.object({ title: z.string() }),
+  output: z.object({ id: z.string() }),
+  summary: "Create a post",
+  tags: ["posts"],
+  handler: async ({ input }) => ({ id: input.title }),
+});
+```
+
+Export an **array** of `defineRoute(...)` to expose the same logic under
+multiple APIs with different schemas — each call infers `input` independently.
+
+### Wire Cloud Functions
+
+```typescript
+// src/index.ts
+import { onRequest } from "firebase-functions/v2/https";
+import { apis } from "./apis.js";
+import { routes } from "./domains/__generated__/routes.js";
+
+export const { v1 } = apis.toFunctions(routes, onRequest, {
+  defaults: { region: "us-central1", invoker: "public" },
+});
+```
+
+### Key features
+
+| Feature | Details |
+| --- | --- |
+| **File-based routing** | `routes.ts` next to each useCase, scanned at build time |
+| **Multi-API registry** | One Cloud Function per tag, typed `api` field |
+| **Zod validation** | Body / query / path params + optional response validation |
+| **OpenAPI 3.1** | Auto-generated from Zod schemas; Scalar UI at `/docs` |
+| **Interceptor** | Around-style hook for envelopes, error mapping, tracing |
+| **Middlewares** | Per-API and per-route Hono middlewares |
+| **Typed context** | Augment `ContextVariableMap` once, `c.get("user")` typed everywhere |
+| **CLI** | `init` / `new` (interactive) / `gen` |
+
+Full documentation: [frs.lpdjs.fr/guide/hono](https://frs.lpdjs.fr/guide/hono)
+
+---
+
+## Servers (admin UI · CRUD REST · Firestore → SQL sync)
+
+A single unified factory binds all servers to your repository registry. Per-repo `repo: …` is no longer needed — the registry key drives both the runtime binding and the inferred model type for `fieldsConfig` autocomplete.
+
+```typescript
+import { createServers } from "@lpdjs/firestore-repo-service";
+import { onRequest } from "firebase-functions/v2/https";
 import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
 import { BigQuery } from "@google-cloud/bigquery";
 import { PubSub } from "@google-cloud/pubsub";
 import * as firestoreTriggers from "firebase-functions/v2/firestore";
 import * as pubsubHandler from "firebase-functions/v2/pubsub";
-import { onRequest } from "firebase-functions/v2/https";
 
-const sync = createFirestoreSync(repos, {
+const servers = createServers(repos, {
+  onRequest,
+  httpsOptions: { invoker: "public" },
+});
+
+// Admin UI — repo auto-injected from the key, fieldsConfig typed against the model
+export const admin = servers.admin({
+  basePath: "/admin",
+  auth: { type: "basic", username: "admin", password: "secret" },
+  repos: {
+    posts: {
+      path: "posts",
+      fieldsConfig: { title: ["create", "mutable"], status: ["filterable"] },
+      allowDelete: true,
+    },
+    users: { path: "users" },
+  },
+});
+
+// CRUD REST API
+export const api = servers.crud({
+  basePath: "/api",
+  repos: {
+    posts: { path: "posts", allowDelete: true },
+    users: { path: "users" },
+  },
+  openapi: { title: "My API", version: "1.0.0" },
+});
+
+// Firestore → BigQuery sync (triggers + worker + admin Cloud Functions)
+export const { functions } = servers.sync({
   deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
   adapter: new BigQueryAdapter({
     bigquery: new BigQuery({ projectId: "my-project" }),
@@ -627,119 +433,404 @@ const sync = createFirestoreSync(repos, {
   autoMigrate: true,
   admin: {
     auth: { type: "basic", username: "admin", password: "secret" },
-    featuresFlag: {
-      healthCheck: true,
-      manualSync: true,
-      viewQueue: true,
-      configCheck: true,
-    },
+    featuresFlag: { healthCheck: true, manualSync: true, viewQueue: true, configCheck: true },
   },
   repos: {
     users: { tableName: "users", columnMap: { docId: "user_id" } },
     posts: { columnMap: { docId: "post_id" } },
-    // Collection groups nécessitent triggerPath
     comments: { triggerPath: "posts/{postId}/comments/{docId}" },
   },
 });
 
-// Export des Cloud Functions
+// Spread Cloud Functions into your exports
 export const {
   users_onCreate, users_onUpdate, users_onDelete, sync_users,
   posts_onCreate, posts_onUpdate, posts_onDelete, sync_posts,
   comments_onCreate, comments_onUpdate, comments_onDelete, sync_comments,
-} = sync.functions;
-
-// Admin (optionnel)
-export const syncAdmin = onRequest(sync.adminHandler!);
+  adminsync,
+} = functions;
 ```
 
-### Sync Admin
+When `onRequest` is passed to `createServers`, `servers.admin()` and `servers.crud()` return ready-to-export Cloud Functions. Without it, they return raw HTTP handlers you can wrap yourself.
 
-L'endpoint admin fournit :
+The sync admin endpoint (`/`) exposes a UI for health checks, force-sync, queue inspection, and GCP config verification.
 
-- **Health Check** : Compare le schéma attendu (Zod) vs les colonnes BigQuery réelles
-- **Force Sync** : Re-synchronise tous les documents d'une collection
-- **View Queues** : Inspecte les éléments en attente
-- **Config Check** : Vérifie APIs GCP, topics, tables — avec commandes `gcloud` pour corriger
-
-### Adaptateur personnalisé
-
-Implémentez l'interface `SqlAdapter` pour d'autres bases de données :
+For a custom SQL backend, implement the `SqlAdapter` interface:
 
 ```typescript
 import type { SqlAdapter } from "@lpdjs/firestore-repo-service/sync";
 
 class MyAdapter implements SqlAdapter {
-  // tableExists, getTableColumns, createTable, insertRows,
-  // upsertRows, deleteRows, executeRaw
+  // tableExists, getTableColumns, createTable, upsertRows, deleteRows, executeRaw
 }
 ```
 
-📚 **Documentation complète** : [frs.lpdjs.fr/guide/sync](https://frs.lpdjs.fr/guide/sync)
+Full sync documentation: [frs.lpdjs.fr/guide/sync](https://frs.lpdjs.fr/guide/sync)
 
-## 🔧 Types exportés
+---
 
-```typescript
-import type {
-  // Core types
-  WhereClause,
-  QueryOptions,
-  RepositoryConfig,
-  RelationConfig,
-
-  // Populate/Include types (avec typage keyof)
-  PopulateOptions,
-  PopulateOptionsTyped,
-  IncludeConfig,
-  IncludeConfigTyped,
-
-  // Pagination
-  PaginationOptions,
-  PaginationResult,
-  PaginationWithIncludeOptions,
-  PaginationWithIncludeOptionsTyped,
-} from "@lpdjs/firestore-repo-service";
-
-// Sync types
-import type {
-  FirestoreSyncConfig,
-  SqlAdapter,
-  SqlColumn,
-  SqlTableDef,
-  RepoSyncConfig,
-  SyncAdminConfig,
-} from "@lpdjs/firestore-repo-service/sync";
-```
-
-## 🧪 Tests avec l'émulateur
-
-Pour tester rapidement sans projet Firebase :
+## Testing
 
 ```bash
-# Installer Firebase CLI (si nécessaire)
-npm install -g firebase-tools
-
-# Option 1 : Mode automatique (recommandé)
+# Run emulator + tests (watch mode)
 bun run test:watch
-# → Lance l'émulateur + tests en mode watch automatiquement
 
-# Option 2 : Mode manuel (deux terminaux)
-bun run emulator    # Terminal 1
-bun run test        # Terminal 2
+# Two-terminal alternative
+bun run emulator  # terminal 1
+bun run test      # terminal 2
 ```
 
-L'émulateur Firestore démarre sur `localhost:8080` avec une UI sur `http://localhost:4000`.
+Firestore emulator runs on `localhost:8080`, UI on `http://localhost:4000`.
 
-Voir `test/README.md` pour plus de détails.
-
-## 📝 Licence
+## License
 
 MIT
 
-## 🤝 Contribution
 
-Les contributions sont les bienvenues ! N'hésitez pas à ouvrir une issue ou une pull request.
+## Installation
 
-## 📬 Support
+```bash
+npm install @lpdjs/firestore-repo-service firebase-admin
+```
 
-Pour toute question ou problème, ouvrez une issue sur GitHub.
+## Quick start
+
+### Define your models
+
+```typescript
+interface UserModel {
+  docId: string;
+  email: string;
+  name: string;
+  age: number;
+  isActive: boolean;
+}
+
+interface PostModel {
+  docId: string;
+  userId: string;
+  title: string;
+  status: "draft" | "published";
+}
+```
+
+### Create the repository mapping
+
+```typescript
+import {
+  createRepositoryConfig,
+  buildRepositoryRelations,
+  createRepositoryMapping,
+} from "@lpdjs/firestore-repo-service";
+import { doc } from "firebase/firestore";
+import type { Firestore } from "firebase/firestore";
+
+const repositoryMapping = {
+  users: createRepositoryConfig<UserModel>()({
+    path: "users",
+    isGroup: false,
+    foreignKeys: ["docId", "email"] as const,
+    queryKeys: ["name", "isActive"] as const,
+    refCb: (db: Firestore, docId: string) => doc(db, "users", docId),
+  }),
+  posts: createRepositoryConfig<PostModel>()({
+    path: "posts",
+    isGroup: false,
+    foreignKeys: ["docId", "userId"] as const,
+    queryKeys: ["status"] as const,
+    refCb: (db: Firestore, docId: string) => doc(db, "posts", docId),
+  }),
+};
+
+// Optional: add relations
+const mappingWithRelations = buildRepositoryRelations(repositoryMapping, {
+  posts: {
+    userId: { repo: "users", key: "docId", type: "one" as const },
+  },
+});
+
+export const repos = createRepositoryMapping(db, mappingWithRelations);
+```
+
+### Use the repositories
+
+```typescript
+// Fetch a single document
+const user = await repos.users.get.byDocId("user123");
+const userByEmail = await repos.users.get.byEmail("john@example.com");
+
+// Query multiple documents
+const activeUsers = await repos.users.query.byIsActive(true);
+
+// With query options
+const results = await repos.users.query.byIsActive(true, {
+  where: [["age", ">=", 18]],
+  orderBy: [{ field: "name", direction: "asc" }],
+  limit: 50,
+});
+
+// Populate a relation
+const post = await repos.posts.get.byDocId("post123");
+if (post) {
+  const postWithUser = await repos.posts.populate(post, "userId");
+  console.log(postWithUser.populated.users?.name); // type-safe
+}
+
+// Update
+const updated = await repos.users.update("user123", { name: "New name", age: 31 });
+```
+
+## API reference
+
+### `createRepositoryConfig()`
+
+| Option        | Description                                             |
+| ------------- | ------------------------------------------------------- |
+| `path`        | Collection path in Firestore                            |
+| `isGroup`     | `true` for collection group, `false` for simple         |
+| `foreignKeys` | Keys for `get.by*` methods (single document lookup)     |
+| `queryKeys`   | Keys for `query.by*` methods (multi-document query)     |
+| `refCb`       | Function that returns the document reference            |
+
+**Sub-collection example:**
+
+```typescript
+comments: createRepositoryConfig<CommentModel>()({
+  path: "comments",
+  isGroup: true,
+  foreignKeys: ["docId"] as const,
+  queryKeys: ["postId", "userId"] as const,
+  refCb: (db, postId, commentId) =>
+    doc(db, "posts", postId, "comments", commentId),
+});
+```
+
+### Query options
+
+```typescript
+interface QueryOptions<T> {
+  where?: [keyof T, WhereFilterOp, any][];      // AND conditions
+  orWhere?: [keyof T, WhereFilterOp, any][][];  // OR conditions
+  orderBy?: { field: keyof T; direction?: "asc" | "desc" }[];
+  limit?: number;
+  offset?: number;
+  select?: (keyof T)[];
+  startAt?: DocumentSnapshot | any[];
+  startAfter?: DocumentSnapshot | any[];
+  endAt?: DocumentSnapshot | any[];
+  endBefore?: DocumentSnapshot | any[];
+}
+```
+
+### CRUD
+
+```typescript
+// Create (auto-generated ID)
+const newUser = await repos.users.create({ email: "...", name: "...", age: 25, isActive: true });
+
+// Set (create or replace)
+await repos.users.set("user123", { ... });
+
+// Set with merge
+await repos.users.set("user123", { age: 31 }, { merge: true });
+
+// Update (partial)
+await repos.users.update("user123", { age: 32 });
+
+// Delete
+await repos.users.delete("user123");
+
+// Document ref
+const ref = repos.users.documentRef("user123");
+
+// Raw collection ref
+const colRef = repos.users.ref;
+```
+
+### Batch & Bulk
+
+```typescript
+// Atomic batch (max 500 operations)
+const batch = repos.users.batch.create();
+batch.set(repos.users.documentRef("u1"), { ... });
+batch.update(repos.users.documentRef("u2"), { age: 25 });
+batch.delete(repos.users.documentRef("u3"));
+await batch.commit();
+
+// Bulk (auto-split into batches of 500)
+await repos.users.bulk.set([
+  { docRef: repos.users.documentRef("u1"), data: { ... }, merge: true },
+]);
+await repos.users.bulk.update([...]);
+await repos.users.bulk.delete([...]);
+```
+
+### Real-time listeners
+
+```typescript
+const unsubscribe = repos.users.query.onSnapshot(
+  { where: [["isActive", "==", true]] },
+  (users) => console.log(users),
+);
+unsubscribe();
+```
+
+### Pagination
+
+```typescript
+const firstPage = await repos.users.query.by({
+  orderBy: [{ field: "createdAt", direction: "desc" }],
+  limit: 10,
+});
+
+const nextPage = await repos.users.query.by({
+  orderBy: [{ field: "createdAt", direction: "desc" }],
+  startAfter: firstPage[firstPage.length - 1],
+  limit: 10,
+});
+
+// Paginate with relations
+const page = await repos.posts.query.paginate({
+  pageSize: 10,
+  include: [{ relation: "userId", select: ["docId", "name", "email"] }],
+});
+```
+
+### Aggregations
+
+```typescript
+import { count, sum, average } from "@lpdjs/firestore-repo-service";
+
+const activeCount = await repos.users.aggregate.count({ where: [["isActive", "==", true]] });
+const totalViews = await repos.posts.aggregate.sum("views");
+const avgAge = await repos.users.aggregate.average("age");
+```
+
+### Transactions
+
+```typescript
+const result = await repos.users.transaction.run(async (txn) => {
+  const user = await txn.get(repos.users.documentRef("user123"));
+  if (user.exists()) {
+    txn.update(repos.users.documentRef("user123"), { age: user.data().age + 1 });
+  }
+  return { success: true };
+});
+```
+
+### OR queries
+
+```typescript
+// (status = 'active' AND age >= 18) OR (status = 'pending' AND verified = true)
+const users = await repos.users.query.by({
+  orWhere: [
+    [["status", "==", "active"], ["age", ">=", 18]],
+    [["status", "==", "pending"], ["verified", "==", true]],
+  ],
+});
+```
+
+## Servers (admin UI · CRUD REST · Firestore → SQL sync)
+
+A single unified factory binds all servers to your repository registry. Per-repo `repo: …` is no longer needed — the registry key drives both the runtime binding and the inferred model type for `fieldsConfig` autocomplete.
+
+```typescript
+import { createServers } from "@lpdjs/firestore-repo-service";
+import { onRequest } from "firebase-functions/v2/https";
+import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
+import { BigQuery } from "@google-cloud/bigquery";
+import { PubSub } from "@google-cloud/pubsub";
+import * as firestoreTriggers from "firebase-functions/v2/firestore";
+import * as pubsubHandler from "firebase-functions/v2/pubsub";
+
+const servers = createServers(repos, {
+  onRequest,
+  httpsOptions: { invoker: "public" },
+});
+
+// Admin UI — repo auto-injected from the key, fieldsConfig typed against the model
+export const admin = servers.admin({
+  basePath: "/admin",
+  auth: { type: "basic", username: "admin", password: "secret" },
+  repos: {
+    posts: {
+      path: "posts",
+      fieldsConfig: { title: ["create", "mutable"], status: ["filterable"] },
+      allowDelete: true,
+    },
+    users: { path: "users" },
+  },
+});
+
+// CRUD REST API
+export const api = servers.crud({
+  basePath: "/api",
+  repos: {
+    posts: { path: "posts", allowDelete: true },
+    users: { path: "users" },
+  },
+  openapi: { title: "My API", version: "1.0.0" },
+});
+
+// Firestore → BigQuery sync (triggers + worker + admin Cloud Functions)
+export const { functions } = servers.sync({
+  deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
+  adapter: new BigQueryAdapter({
+    bigquery: new BigQuery({ projectId: "my-project" }),
+    datasetId: "firestore_sync",
+  }),
+  topicPrefix: "firestore-sync",
+  autoMigrate: true,
+  admin: {
+    auth: { type: "basic", username: "admin", password: "secret" },
+    featuresFlag: { healthCheck: true, manualSync: true, viewQueue: true, configCheck: true },
+  },
+  repos: {
+    users: { tableName: "users", columnMap: { docId: "user_id" } },
+    posts: { columnMap: { docId: "post_id" } },
+    comments: { triggerPath: "posts/{postId}/comments/{docId}" },
+  },
+});
+
+// Spread Cloud Functions into your exports
+export const {
+  users_onCreate, users_onUpdate, users_onDelete, sync_users,
+  posts_onCreate, posts_onUpdate, posts_onDelete, sync_posts,
+  comments_onCreate, comments_onUpdate, comments_onDelete, sync_comments,
+  adminsync,
+} = functions;
+```
+
+When `onRequest` is passed to `createServers`, `servers.admin()` and `servers.crud()` return ready-to-export Cloud Functions. Without it, they return raw HTTP handlers you can wrap yourself.
+
+The sync admin endpoint (`/`) exposes a UI for health checks, force-sync, queue inspection, and GCP config verification.
+
+For a custom SQL backend, implement the `SqlAdapter` interface:
+
+```typescript
+import type { SqlAdapter } from "@lpdjs/firestore-repo-service/sync";
+
+class MyAdapter implements SqlAdapter {
+  // tableExists, getTableColumns, createTable, upsertRows, deleteRows, executeRaw
+}
+```
+
+Full sync documentation: [frs.lpdjs.fr/guide/sync](https://frs.lpdjs.fr/guide/sync)
+
+## Testing
+
+```bash
+# Run emulator + tests (watch mode)
+bun run test:watch
+
+# Two-terminal alternative
+bun run emulator  # terminal 1
+bun run test      # terminal 2
+```
+
+Firestore emulator runs on `localhost:8080`, UI on `http://localhost:4000`.
+
+## License
+
+MIT
+

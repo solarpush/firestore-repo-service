@@ -1,0 +1,9 @@
+# Firebase deploy ignore (replaces .gitignore for deploys)
+node_modules
+.git
+.cache
+.idea
+.DS_Store
+.env*
+*-debug.log
+*.tsbuildinfo

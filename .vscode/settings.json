@@ -1,0 +1,1 @@
+{ "typescript.tsconfig.fallback": "test/functions/tsconfig.dev.json" }

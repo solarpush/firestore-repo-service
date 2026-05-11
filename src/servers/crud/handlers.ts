@@ -11,6 +11,16 @@
  */
 
 import { z } from "zod";
+import {
+  coerceToDate,
+  getDateHandling,
+  maybeNormalize,
+} from "../../shared/date-config";
+import {
+  isMissingIndexError,
+  toQueryError,
+  type QueryErrorContext,
+} from "../admin/index-url";
 import type {
   ApiResponse,
   CrudRepoEntry,
@@ -24,10 +34,11 @@ import type {
 // ---------------------------------------------------------------------------
 
 function sendJson<T>(res: any, data: ApiResponse<T>, status = 200): void {
+  const payload = maybeNormalize(data);
   res
     .status(status)
     .set("Content-Type", "application/json; charset=utf-8")
-    .send(JSON.stringify(data));
+    .send(JSON.stringify(payload));
 }
 
 function sendSuccess<T>(
@@ -41,6 +52,35 @@ function sendSuccess<T>(
 
 function sendError(res: any, error: string, status = 400): void {
   sendJson(res, { success: false, error }, status);
+}
+
+/**
+ * Send a structured error response. When the underlying Firestore error is a
+ * missing-index (`FAILED_PRECONDITION` / code 9), include `errorType: "index"`
+ * and an `indexUrl` pointing to the Firebase Console index-creation wizard —
+ * crucial for collection-group queries where the SDK omits the link.
+ */
+function sendQueryError(
+  res: any,
+  err: unknown,
+  ctx: QueryErrorContext,
+  fallbackMessage: string,
+  verbose: boolean,
+): void {
+  const qe = toQueryError(err, ctx);
+  const isIndex = qe.type === "index";
+  const status = isIndex ? 424 : 500;
+  const message = isIndex
+    ? qe.message
+    : verbose && err instanceof Error
+      ? err.message
+      : fallbackMessage;
+  const payload: ApiResponse = { success: false, error: message };
+  if (isIndex) {
+    payload.errorType = "index";
+    if (qe.indexUrl) payload.indexUrl = qe.indexUrl;
+  }
+  sendJson(res, payload, status);
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +102,52 @@ function generateFirestoreId(): string {
 // ---------------------------------------------------------------------------
 // Zod schema helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Recursively wrap z.date() with z.preprocess(coerceToDate) so that ISO strings,
+ * Firestore Timestamps and {_seconds,_nanoseconds} payloads are accepted as input.
+ * Only invoked when global date handling mode is "normalize".
+ */
+function wrapDateSchemas(schema: z.ZodType): z.ZodType {
+  const def = (schema as any)._def ?? (schema as any).def;
+  if (!def) return schema;
+  const typeName = def.typeName ?? def.type;
+
+  if (typeName === "ZodDate" || typeName === "date") {
+    return z.preprocess((v) => coerceToDate(v) ?? v, schema as z.ZodDate);
+  }
+  if (typeName === "ZodObject" || typeName === "object") {
+    const shape = (schema as z.ZodObject<any>).shape;
+    const wrapped: Record<string, z.ZodType> = {};
+    for (const [k, v] of Object.entries(shape)) {
+      wrapped[k] = wrapDateSchemas(v as z.ZodType);
+    }
+    return z.object(wrapped);
+  }
+  if (typeName === "ZodArray" || typeName === "array") {
+    const inner = def.element ?? def.type;
+    if (inner) return z.array(wrapDateSchemas(inner));
+  }
+  if (typeName === "ZodOptional" || typeName === "optional") {
+    const inner = def.innerType;
+    if (inner) return wrapDateSchemas(inner).optional();
+  }
+  if (typeName === "ZodNullable" || typeName === "nullable") {
+    const inner = def.innerType;
+    if (inner) return wrapDateSchemas(inner).nullable();
+  }
+  if (typeName === "ZodDefault" || typeName === "default") {
+    const inner = def.innerType;
+    const dflt = def.defaultValue;
+    if (inner) {
+      const wrapped = wrapDateSchemas(inner);
+      return typeof dflt === "function"
+        ? wrapped.default(dflt())
+        : wrapped.default(dflt);
+    }
+  }
+  return schema;
+}
 
 /**
  * Pick only specified fields from a Zod schema, always excluding system-managed keys.
@@ -104,7 +190,11 @@ function validateData(
   | { success: false; error: string } {
   try {
     const targetSchema = pickSchemaFields(schema, fields, systemKeys);
-    const finalSchema = partial ? targetSchema.partial() : targetSchema;
+    const partialSchema = partial ? targetSchema.partial() : targetSchema;
+    const finalSchema =
+      getDateHandling() === "normalize"
+        ? (wrapDateSchemas(partialSchema) as z.ZodObject<any>)
+        : partialSchema;
     const parsed = finalSchema.parse(data);
     return { success: true, data: parsed as Record<string, unknown> };
   } catch (err) {
@@ -285,7 +375,77 @@ export function createCrudHandlers(
   registry: CrudRepoRegistry,
   basePath: string,
   verbose: boolean,
+  authEnabled: boolean = false,
 ) {
+  // ── Authorization helpers ───────────────────────────────────────────────
+  /**
+   * Default-deny gate: when the server has `auth` configured, reject any
+   * operation without an explicit rule. When `auth` is absent, rules are
+   * ignored entirely (open API).
+   */
+  async function assertRule<TCtx>(
+    res: any,
+    entry: CrudRepoEntry,
+    op: "list" | "get" | "create" | "update" | "delete",
+    ctx: TCtx,
+  ): Promise<boolean> {
+    if (!authEnabled) return true;
+    const rule = entry.rules?.[op] as
+      | ((c: TCtx) => boolean | Promise<boolean>)
+      | undefined;
+    if (!rule) {
+      sendError(
+        res,
+        `Operation "${op}" is not allowed for this repository`,
+        403,
+      );
+      return false;
+    }
+    try {
+      const ok = await rule(ctx);
+      if (!ok) {
+        sendError(res, "Forbidden", 403);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      const message =
+        verbose && err instanceof Error ? err.message : "Forbidden";
+      sendError(res, message, 403);
+      return false;
+    }
+  }
+
+  /** Apply `rules.filter` to every doc in a list; returns the filtered slice. */
+  async function applyRowFilter<T extends Record<string, unknown>>(
+    entry: CrudRepoEntry,
+    user: any,
+    params: Record<string, string>,
+    docs: T[],
+  ): Promise<T[]> {
+    if (!authEnabled) return docs;
+    const filter = entry.rules?.filter as
+      | ((c: { user: any; doc: T; params: Record<string, string> }) =>
+          | boolean
+          | Promise<boolean>)
+      | undefined;
+    if (!filter) return docs;
+    const out: T[] = [];
+    for (const doc of docs) {
+      try {
+        if (await filter({ user, doc, params })) out.push(doc);
+      } catch {
+        // exclude on error (fail closed)
+      }
+    }
+    return out;
+  }
+
+  /** Pull the authenticated user from the request (may be undefined when auth is off). */
+  function userOf(req: any): any {
+    return req?.user ?? null;
+  }
+
   // ── Helper to get repo entry ────────────────────────────────────────────
   function getRepoEntry(
     repoName: string | undefined,
@@ -350,6 +510,20 @@ export function createCrudHandlers(
     const entry = getRepoEntry(params.repoName, res);
     if (!entry) return;
 
+    const user = userOf(req);
+    if (
+      !(await assertRule(res, entry, "list", {
+        user,
+        query: req.query ?? {},
+        params,
+      }))
+    )
+      return;
+
+    // Captured for error handling (so the catch can build an index URL)
+    let ctxFilters: { field: string; op: any; value: string }[] = [];
+    let ctxSort: { field: string; dir: "asc" | "desc" } | undefined;
+
     try {
       const query = req.query ?? {};
       const pageSize = Math.min(
@@ -387,6 +561,12 @@ export function createCrudHandlers(
 
       // Parse filters
       const filters = parseFilters(query, entry.filterableFields);
+      ctxFilters = filters.map((f) => ({
+        field: f.field,
+        op: f.op,
+        value: String(f.value ?? ""),
+      }));
+      if (orderBy) ctxSort = { field: orderBy, dir: orderDir };
 
       // Build query options
       const queryOptions: any = {
@@ -422,9 +602,15 @@ export function createCrudHandlers(
 
       // Execute query
       const result = await entry.repo.query.paginate(queryOptions);
+      const filteredItems = await applyRowFilter(
+        entry,
+        userOf(req),
+        params,
+        result.data,
+      );
 
       const responseData: ListResponseData = {
-        items: result.data,
+        items: filteredItems,
         hasNextPage: result.hasNextPage,
         hasPrevPage: result.hasPrevPage,
         nextCursor: serializeCursor(result.nextCursor),
@@ -436,11 +622,19 @@ export function createCrudHandlers(
         hasMore: result.hasNextPage,
       });
     } catch (err) {
-      const message =
-        verbose && err instanceof Error
-          ? err.message
-          : "Failed to fetch documents";
-      sendError(res, message, 500);
+      sendQueryError(
+        res,
+        err,
+        {
+          ref: entry.repo.ref,
+          path: entry.path,
+          isGroup: !!entry.isGroup,
+          filters: ctxFilters,
+          sort: ctxSort,
+        },
+        "Failed to fetch documents",
+        verbose,
+      );
     }
   }
 
@@ -451,10 +645,39 @@ export function createCrudHandlers(
     const entry = getRepoEntry(params.repoName, res);
     if (!entry) return;
 
+    const user = userOf(req);
+    if (
+      !(await assertRule(res, entry, "list", {
+        user,
+        query: req.body ?? {},
+        params,
+      }))
+    )
+      return;
+
+    // Captured for error handling (so the catch can build an index URL)
+    let ctxFilters: { field: string; op: any; value: string }[] = [];
+    let ctxSort: { field: string; dir: "asc" | "desc" } | undefined;
+
     try {
       const body: QueryRequestBody = req.body ?? {};
       const pageSize = Math.min(body.pageSize || entry.pageSize, 100);
       const direction = body.direction === "prev" ? "prev" : "next";
+
+      // Capture context for index URL fallback
+      if (body.where) {
+        ctxFilters = body.where.map((w) => ({
+          field: String(w[0]),
+          op: w[1] as any,
+          value: String(w[2] ?? ""),
+        }));
+      }
+      if (body.orderBy && body.orderBy[0]) {
+        ctxSort = {
+          field: body.orderBy[0].field,
+          dir: body.orderBy[0].direction === "desc" ? "desc" : "asc",
+        };
+      }
 
       // Build query options
       const queryOptions: any = {
@@ -562,9 +785,15 @@ export function createCrudHandlers(
 
       // Execute query
       const result = await entry.repo.query.paginate(queryOptions);
+      const filteredItems = await applyRowFilter(
+        entry,
+        userOf(req),
+        params,
+        result.data,
+      );
 
       const responseData: ListResponseData = {
-        items: result.data,
+        items: filteredItems,
         hasNextPage: result.hasNextPage,
         hasPrevPage: result.hasPrevPage,
         nextCursor: serializeCursor(result.nextCursor),
@@ -576,11 +805,19 @@ export function createCrudHandlers(
         hasMore: result.hasNextPage,
       });
     } catch (err) {
-      const message =
-        verbose && err instanceof Error
-          ? err.message
-          : "Failed to query documents";
-      sendError(res, message, 500);
+      sendQueryError(
+        res,
+        err,
+        {
+          ref: entry.repo.ref,
+          path: entry.path,
+          isGroup: !!entry.isGroup,
+          filters: ctxFilters,
+          sort: ctxSort,
+        },
+        "Failed to query documents",
+        verbose,
+      );
     }
   }
 
@@ -604,13 +841,48 @@ export function createCrudHandlers(
         return;
       }
 
+      const user = userOf(req);
+      if (
+        !(await assertRule(res, entry, "get", {
+          user,
+          doc: doc as any,
+          params,
+        }))
+      )
+        return;
+
+      // Apply row-level filter (404 if rejected, to avoid existence leakage)
+      if (authEnabled && entry.rules?.filter) {
+        try {
+          const ok = await entry.rules.filter({
+            user,
+            doc: doc as any,
+            params,
+          });
+          if (!ok) {
+            sendError(res, "Document not found", 404);
+            return;
+          }
+        } catch {
+          sendError(res, "Document not found", 404);
+          return;
+        }
+      }
+
       sendSuccess(res, doc);
     } catch (err) {
-      const message =
-        verbose && err instanceof Error
-          ? err.message
-          : "Failed to fetch document";
-      sendError(res, message, 500);
+      sendQueryError(
+        res,
+        err,
+        {
+          ref: entry.repo.ref,
+          path: entry.path,
+          isGroup: !!entry.isGroup,
+          filters: [{ field: entry.documentKey, op: "==", value: id }],
+        },
+        "Failed to fetch document",
+        verbose,
+      );
     }
   }
 
@@ -622,6 +894,16 @@ export function createCrudHandlers(
 
     try {
       const body = req.body ?? {};
+
+      const user = userOf(req);
+      if (
+        !(await assertRule(res, entry, "create", {
+          user,
+          body,
+          params,
+        }))
+      )
+        return;
 
       // Validate against schema
       const validation = validateData(
@@ -700,6 +982,24 @@ export function createCrudHandlers(
     try {
       const body = req.body ?? {};
 
+      // Fetch existing doc so the rule can authorize against current state
+      const existingDoc = await fetchDocById(entry, id);
+      if (!existingDoc) {
+        sendError(res, "Document not found", 404);
+        return;
+      }
+
+      const user = userOf(req);
+      if (
+        !(await assertRule(res, entry, "update", {
+          user,
+          doc: existingDoc as any,
+          body,
+          params,
+        }))
+      )
+        return;
+
       // Validate against schema
       const validation = validateData(
         entry.schema,
@@ -722,10 +1022,9 @@ export function createCrudHandlers(
         }
       }
 
-      // Update document — fetch first to get path args for subcollections
-      const existingDoc = await fetchDocById(entry, id);
+      // Update document — derive path args for subcollections
       const pathArgs =
-        (existingDoc && extractPathArgs(existingDoc, entry.pathKey)) ?? [id];
+        extractPathArgs(existingDoc, entry.pathKey) ?? [id];
       const updated = await entry.repo.update(
         ...pathArgs,
         validation.data as any,
@@ -759,10 +1058,24 @@ export function createCrudHandlers(
     }
 
     try {
-      // Fetch first to get path args for subcollections
+      // Fetch first to authorize against current state and get path args
       const doc = await fetchDocById(entry, id);
-      const pathArgs =
-        (doc && extractPathArgs(doc, entry.pathKey)) ?? [id];
+      if (!doc) {
+        sendError(res, "Document not found", 404);
+        return;
+      }
+
+      const user = userOf(req);
+      if (
+        !(await assertRule(res, entry, "delete", {
+          user,
+          doc: doc as any,
+          params,
+        }))
+      )
+        return;
+
+      const pathArgs = extractPathArgs(doc, entry.pathKey) ?? [id];
       await entry.repo.delete(...pathArgs);
       sendSuccess(res, { deleted: true });
     } catch (err) {

@@ -3,9 +3,31 @@
  */
 
 import type { z } from "zod";
+import type { HttpsOptions } from "firebase-functions/v2/https";
 import type { ConfiguredRepository } from "../../repositories/types";
 import type { FieldPath, RepositoryConfig } from "../../shared/types";
-import type { OpenAPISpecOptions } from "./openapi";
+
+// ---------------------------------------------------------------------------
+// OpenAPI options
+// ---------------------------------------------------------------------------
+
+/**
+ * Options to control OpenAPI 3.1 spec generation for the CRUD server.
+ * Defined here (rather than in `./openapi`) to avoid a circular import:
+ * `openapi.ts` imports types from this module.
+ */
+export interface OpenAPISpecOptions {
+  /** Document title (default: "CRUD API") */
+  title?: string;
+  /** API version (default: "1.0.0") */
+  version?: string;
+  /** Description shown in Scalar UI / Swagger */
+  description?: string;
+  /** Server URLs */
+  servers?: { url: string; description?: string }[];
+  /** Whether the API requires auth — adds securitySchemes */
+  auth?: "basic" | "bearer" | false;
+}
 
 // ---------------------------------------------------------------------------
 // Public option types
@@ -13,13 +35,28 @@ import type { OpenAPISpecOptions } from "./openapi";
 
 /**
  * Extracts the model type `T` from a `ConfiguredRepository`.
+ * Uses a two-step inference so it survives intersection types
+ * (e.g. `RepositoryConfig<...> & { schema: ZodObject }` produced by
+ * `createRepositoryConfig(schema)`).
  * @internal
  */
 export type RepoModelType<TRepo> =
-  TRepo extends ConfiguredRepository<
-    RepositoryConfig<infer T, any, any, any, any, any, any, any, any, any>
+  TRepo extends ConfiguredRepository<infer C>
+    ? C extends RepositoryConfig<
+    infer T,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any
   >
-    ? T
+      ? T
+      : never
     : never;
 
 /**
@@ -28,25 +65,26 @@ export type RepoModelType<TRepo> =
  * @internal
  */
 export type RepoSystemKeys<TRepo> =
-  TRepo extends ConfiguredRepository<
-    RepositoryConfig<
-      any,
-      any,
-      any,
-      any,
-      any,
-      any,
-      infer TDocKey,
-      infer TPathKey,
-      infer TCreatedKey,
-      infer TUpdatedKey
-    >
-  >
-    ?
-        | (TDocKey extends string ? TDocKey : never)
-        | (TPathKey extends string ? TPathKey : never)
-        | (TCreatedKey extends string ? TCreatedKey : never)
-        | (TUpdatedKey extends string ? TUpdatedKey : never)
+  TRepo extends ConfiguredRepository<infer C>
+    ? C extends RepositoryConfig<
+        any,
+        any,
+        any,
+        any,
+        any,
+        any,
+        infer TDocKey,
+        infer TPathKey,
+        infer TCreatedKey,
+        infer TUpdatedKey,
+        any
+      >
+      ?
+          | (TDocKey extends string ? TDocKey : never)
+          | (TPathKey extends string ? TPathKey : never)
+          | (TCreatedKey extends string ? TCreatedKey : never)
+          | (TUpdatedKey extends string ? TUpdatedKey : never)
+      : never
     : never;
 
 /**
@@ -105,6 +143,7 @@ export type RepoRelationKeys<TRepo> =
             any,
             any,
             infer TRelKeys,
+            any,
             any,
             any,
             any,
@@ -180,7 +219,111 @@ export interface CrudRepoConfig<
     data: Partial<RepoModelType<TRepo>>,
     operation: "create" | "update",
   ) => string | undefined | Promise<string | undefined>;
+  /**
+   * Per-operation authorization rules. Evaluated **after** the global `auth`
+   * middleware has populated `req.user` and **before** the handler executes.
+   *
+   * **Default deny**: when the server has `auth` configured AND a rule for an
+   * operation is omitted, that operation returns 403. Use `allowAll` from
+   * `@lpdjs/firestore-repo-service/servers/auth` to explicitly open an
+   * operation. When the server has no `auth`, rules are ignored.
+   *
+   * Each rule receives a context with the authenticated user and any
+   * operation-specific payload, and returns a boolean (sync or async).
+   *
+   * - `list`/`get`: pre-fetch authorization. To filter rows post-fetch
+   *   (row-level security on `list` results), use `filter`.
+   * - `filter`: applied to every document returned by `list`/`query`/`get`.
+   *   Returning `false` removes the row from the response (or yields 404 for
+   *   single-doc `get`).
+   *
+   * @example
+   * ```ts
+   * rules: {
+   *   list:   () => true,
+   *   get:    ({ user, doc }) => doc.public || doc.authorId === user.uid,
+   *   create: ({ user })      => !!user.uid,
+   *   update: ({ user, doc }) => user.uid === doc.authorId,
+   *   delete: ({ user, doc }) => user.claims.role === "moderator",
+   *   filter: ({ user, doc }) => doc.public || doc.authorId === user.uid,
+   * }
+   * ```
+   */
+  rules?: CrudRules<TRepo>;
 }
+
+/** Context passed to {@link CrudRules.list}. */
+export interface CrudListRuleContext {
+  user: import("../auth").AuthUser;
+  query: Record<string, unknown>;
+  params: Record<string, string>;
+}
+
+/** Context passed to {@link CrudRules.get}. */
+export interface CrudGetRuleContext<T = Record<string, unknown>> {
+  user: import("../auth").AuthUser;
+  doc: T;
+  params: Record<string, string>;
+}
+
+/** Context passed to {@link CrudRules.create}. */
+export interface CrudCreateRuleContext<T = Record<string, unknown>> {
+  user: import("../auth").AuthUser;
+  body: Partial<T>;
+  params: Record<string, string>;
+}
+
+/** Context passed to {@link CrudRules.update}. */
+export interface CrudUpdateRuleContext<T = Record<string, unknown>> {
+  user: import("../auth").AuthUser;
+  doc: T;
+  body: Partial<T>;
+  params: Record<string, string>;
+}
+
+/** Context passed to {@link CrudRules.delete}. */
+export interface CrudDeleteRuleContext<T = Record<string, unknown>> {
+  user: import("../auth").AuthUser;
+  doc: T;
+  params: Record<string, string>;
+}
+
+/** Context passed to {@link CrudRules.filter}. */
+export interface CrudFilterRuleContext<T = Record<string, unknown>> {
+  user: import("../auth").AuthUser;
+  doc: T;
+  params: Record<string, string>;
+}
+
+/**
+ * Per-repo, per-operation authorization rules.
+ * @template TRepo - The configured repository (used to type `doc` and `body`).
+ */
+export interface CrudRules<
+  TRepo extends ConfiguredRepository<any> = ConfiguredRepository<any>,
+> {
+  list?: (ctx: CrudListRuleContext) => boolean | Promise<boolean>;
+  get?: (
+    ctx: CrudGetRuleContext<RepoModelType<TRepo>>,
+  ) => boolean | Promise<boolean>;
+  create?: (
+    ctx: CrudCreateRuleContext<RepoModelType<TRepo>>,
+  ) => boolean | Promise<boolean>;
+  update?: (
+    ctx: CrudUpdateRuleContext<RepoModelType<TRepo>>,
+  ) => boolean | Promise<boolean>;
+  delete?: (
+    ctx: CrudDeleteRuleContext<RepoModelType<TRepo>>,
+  ) => boolean | Promise<boolean>;
+  /** Row-level filter applied to every doc returned by `list` / `query` / `get`. */
+  filter?: (
+    ctx: CrudFilterRuleContext<RepoModelType<TRepo>>,
+  ) => boolean | Promise<boolean>;
+}
+
+/** Erased rules type stored on the runtime registry entry. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyCrudRules = CrudRules<any>;
 
 /**
  * Internal repo entry for the CRUD server.
@@ -189,7 +332,7 @@ export interface CrudRepoEntry {
   name: string;
   path: string;
   repo: ConfiguredRepository<
-    RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
+    RepositoryConfig<any, any, any, any, any, any, any, any, any, any, any>
   >;
   schema: z.ZodObject<any>;
   /** Keys automatically managed by Firestore (docId, path, timestamps) — excluded from create/update payloads */
@@ -216,6 +359,8 @@ export interface CrudRepoEntry {
     data: any,
     operation: "create" | "update",
   ) => string | undefined | Promise<string | undefined>;
+  /** Per-operation authorization rules (see {@link CrudRules}). */
+  rules?: AnyCrudRules;
 }
 
 export type CrudRepoRegistry = Record<string, CrudRepoEntry>;
@@ -291,10 +436,15 @@ export interface CrudServerOptions<
 
   /**
    * Authentication guard executed before every request.
+   * - Pass an {@link AuthExtension} (e.g. result of `firebaseAuth({...})`) to
+   *   wire Firebase Auth (typically `mode: "bearer"` for REST APIs).
    * - Pass a `BasicAuthConfig` to enable HTTP Basic Auth.
-   * - Pass a `Middleware` function for custom auth logic.
+   * - Pass a `Middleware` function for fully custom auth logic.
+   *
+   * When an `AuthExtension` is set, per-repo `rules` follow a **default deny**
+   * policy: any operation without an explicit rule returns 403.
    */
-  auth?: BasicAuthConfig | Middleware;
+  auth?: import("../auth").AuthExtension | BasicAuthConfig | Middleware;
 
   /**
    * Additional middleware functions executed after auth, before route handlers.
@@ -313,11 +463,22 @@ export interface CrudServerOptions<
    * When unset or an object, `/__spec.json` and `/__docs` routes are exposed.
    */
   openapi?: OpenAPISpecOptions | false;
+
+  /**
+   * Options forwarded to `onRequest()` from `firebase-functions/v2/https`.
+   * Stored on the returned handler as `.httpsOptions` for easy access.
+   *
+   * @example
+   * ```ts
+   * const handler = createCrudServer({ httpsOptions: { invoker: "public" }, ... });
+   * export const crud = onRequest(handler.httpsOptions!, handler);
+   * ```
+   */
+  httpsOptions?: HttpsOptions;
 }
 
 // ---------------------------------------------------------------------------
 // Response types
-// ---------------------------------------------------------------------------
 
 /**
  * Standard API response wrapper.
@@ -326,6 +487,18 @@ export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
+  /**
+   * Discriminator for known error categories. Currently:
+   * - "index" → Firestore composite index missing; see `indexUrl`.
+   */
+  errorType?: "index";
+  /**
+   * Firebase Console URL to create the missing composite index.
+   * Always present when `errorType === "index"`. The CRUD server fills this in
+   * even for collection-group queries, where the Firestore SDK does not
+   * include the link in the error message.
+   */
+  indexUrl?: string;
   meta?: {
     total?: number;
     page?: number;

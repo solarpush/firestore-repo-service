@@ -1,6 +1,9 @@
 {
   "name": "@lpdjs/firestore-repo-service",
-  "version": "2.0.1",
+  "version": "2.2.9",
+  "workspaces": [
+    "test/functions"
+  ],
   "description": "⚡ Type-safe Firestore ORM with auto-generated repositories, advanced queries, relations with typed select, pagination with include, batch/bulk operations, aggregations and transactions.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -36,6 +39,66 @@
         "types": "./dist/sync/bigquery.d.ts",
         "default": "./dist/sync/bigquery.js"
       }
+    },
+    "./history": {
+      "require": {
+        "types": "./dist/history/index.d.cts",
+        "default": "./dist/history/index.cjs"
+      },
+      "import": {
+        "types": "./dist/history/index.d.ts",
+        "default": "./dist/history/index.js"
+      }
+    },
+    "./servers": {
+      "require": {
+        "types": "./dist/servers/index.d.cts",
+        "default": "./dist/servers/index.cjs"
+      },
+      "import": {
+        "types": "./dist/servers/index.d.ts",
+        "default": "./dist/servers/index.js"
+      }
+    },
+    "./servers/admin": {
+      "require": {
+        "types": "./dist/servers/admin/index.d.cts",
+        "default": "./dist/servers/admin/index.cjs"
+      },
+      "import": {
+        "types": "./dist/servers/admin/index.d.ts",
+        "default": "./dist/servers/admin/index.js"
+      }
+    },
+    "./servers/crud": {
+      "require": {
+        "types": "./dist/servers/crud/index.d.cts",
+        "default": "./dist/servers/crud/index.cjs"
+      },
+      "import": {
+        "types": "./dist/servers/crud/index.d.ts",
+        "default": "./dist/servers/crud/index.js"
+      }
+    },
+    "./servers/auth": {
+      "require": {
+        "types": "./dist/servers/auth/index.d.cts",
+        "default": "./dist/servers/auth/index.cjs"
+      },
+      "import": {
+        "types": "./dist/servers/auth/index.d.ts",
+        "default": "./dist/servers/auth/index.js"
+      }
+    },
+    "./servers/hono": {
+      "require": {
+        "types": "./dist/servers/hono/index.d.cts",
+        "default": "./dist/servers/hono/index.cjs"
+      },
+      "import": {
+        "types": "./dist/servers/hono/index.d.ts",
+        "default": "./dist/servers/hono/index.js"
+      }
     }
   },
   "typesVersions": {
@@ -49,11 +112,20 @@
       "servers/crud": [
         "./dist/servers/crud/index.d.ts"
       ],
+      "servers/auth": [
+        "./dist/servers/auth/index.d.ts"
+      ],
+      "servers/hono": [
+        "./dist/servers/hono/index.d.ts"
+      ],
       "sync": [
         "./dist/sync/index.d.ts"
       ],
       "sync/bigquery": [
         "./dist/sync/bigquery.d.ts"
+      ],
+      "history": [
+        "./dist/history/index.d.ts"
       ]
     }
   },
@@ -62,6 +134,9 @@
     "README.md",
     "LICENSE"
   ],
+  "bin": {
+    "frs-hono": "./dist/servers/hono/cli.js"
+  },
   "authors": [
     {
       "name": "@LPDJS Pierre Nicolas",
@@ -84,7 +159,7 @@
     "deploy": "firebase deploy --only functions --project firestore-repo-services",
     "emulator": "firebase emulators:start --project firestore-repo-services",
     "emulator:fire": "firebase emulators:start --only firestore --project firestore-repo-services",
-    "emulator:func": "firebase emulators:start --only firestore,functions --project firestore-repo-services",
+    "emulator:func": "firebase emulators:start --only functions --project firestore-repo-services",
     "lint": "tsc --noEmit"
   },
   "keywords": [
@@ -122,7 +197,7 @@
     "@google-cloud/bigquery": "^7.0.0 || ^8.0.0",
     "@google-cloud/pubsub": "^4.0.0 || ^5.0.0",
     "firebase-admin": "^11.0.0 || ^12.0.0 || ^13.0.0",
-    "firebase-functions": "^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0",
+    "firebase-functions": "^5.0.0 || ^6.0.0 || ^7.0.0",
     "typescript": "^5.0.0",
     "zod": "^4"
   },
@@ -138,20 +213,22 @@
     }
   },
   "devDependencies": {
-    "@google-cloud/bigquery": "^8.1.1",
+    "@google-cloud/bigquery": "^8.3.0",
     "@google-cloud/pubsub": "^5.3.0",
     "@types/bun": "latest",
     "@types/express": "latest",
     "concurrently": "^9.2.1",
-    "firebase-admin": "^13.7.0",
-    "firebase-functions": "^7.2.2",
+    "firebase-admin": "^13.8.0",
+    "firebase-functions": "^7.2.5",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
-    "wait-on": "^9.0.4",
-    "zod": "^4.3.6"
+    "wait-on": "^9.0.5",
+    "zod": "^4.4.3"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.11",
-    "hono": "^4.12.8"
+    "@asteasolutions/zod-to-openapi": "^8.5.0",
+    "@hono/node-server": "^1.19.14",
+    "@hono/zod-openapi": "^1.4.0",
+    "hono": "^4.12.17"
   }
 }

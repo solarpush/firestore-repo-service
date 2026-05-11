@@ -1,13 +1,14 @@
+import { SYNC_VERSION_COLUMN } from "../constants";
 import type {
+  LogicalType,
   SqlAdapter,
   SqlColumn,
   SqlDialect,
   SqlTableDef,
-  LogicalType,
 } from "../types";
 
 // ---------------------------------------------------------------------------
-// Dialect
+// Dialect (internal — used only by BigQueryAdapter)
 // ---------------------------------------------------------------------------
 
 /** BigQuery SQL dialect mapping. */
@@ -35,26 +36,6 @@ class BigQueryDialect implements SqlDialect {
 
   quoteIdentifier(id: string): string {
     return `\`${id}\``;
-  }
-
-  createTableDDL(table: SqlTableDef): string {
-    const cols = table.columns
-      .map((c) => {
-        const notNull = c.isPrimaryKey ? " NOT NULL" : "";
-        return `  ${this.quoteIdentifier(c.name)} ${c.sqlType}${notNull}`;
-      })
-      .join(",\n");
-
-    return `CREATE TABLE IF NOT EXISTS ${this.quoteIdentifier(table.tableName)} (\n${cols}\n);`;
-  }
-
-  addColumnsDDL(tableName: string, columns: SqlColumn[]): string {
-    return columns
-      .map(
-        (c) =>
-          `ALTER TABLE ${this.quoteIdentifier(tableName)} ADD COLUMN ${this.quoteIdentifier(c.name)} ${c.sqlType};`,
-      )
-      .join("\n");
   }
 }
 
@@ -109,10 +90,27 @@ export class BigQueryAdapter implements SqlAdapter {
     return fields.map((f) => f.name);
   }
 
-  /** Create a table using the dialect's DDL. */
+  /** Create a table using a fully-qualified name. */
   async createTable(table: SqlTableDef): Promise<void> {
-    const ddl = this.dialect.createTableDDL(table);
+    const qi = (id: string) => this.dialect.quoteIdentifier(id);
+    const cols = table.columns
+      .map((c) => {
+        const notNull = c.isPrimaryKey ? " NOT NULL" : "";
+        return `  ${qi(c.name)} ${c.sqlType}${notNull}`;
+      })
+      .join(",\n");
+
+    const ddl = `CREATE TABLE IF NOT EXISTS ${this.fqn(table.tableName)} (\n${cols}\n);`;
     await this.bigquery.query({ query: ddl });
+  }
+
+  /** Add columns to an existing table using a fully-qualified name. */
+  async addColumns(tableName: string, columns: SqlColumn[]): Promise<void> {
+    const qi = (id: string) => this.dialect.quoteIdentifier(id);
+    for (const c of columns) {
+      const stmt = `ALTER TABLE ${this.fqn(tableName)} ADD COLUMN ${qi(c.name)} ${c.sqlType};`;
+      await this.bigquery.query({ query: stmt });
+    }
   }
 
   /** Append rows via BigQuery streaming insert. */
@@ -145,7 +143,10 @@ export class BigQueryAdapter implements SqlAdapter {
     const selects = rows.map((row, i) => {
       const values = allKeys
         .map((k) => {
-          const aliased = i === 0 ? `${this.escapeValue(row[k])} AS ${qi(k)}` : this.escapeValue(row[k]);
+          const aliased =
+            i === 0
+              ? `${this.escapeValue(row[k])} AS ${qi(k)}`
+              : this.escapeValue(row[k]);
           return aliased;
         })
         .join(", ");
@@ -154,7 +155,9 @@ export class BigQueryAdapter implements SqlAdapter {
 
     const source = selects.join(" UNION ALL\n    ");
 
-    // UPDATE SET clause (non-PK columns)
+    // UPDATE SET clause (non-PK columns).
+    // Note: when __sync_version is present we still update it so the row
+    // tracks the latest applied version.
     const updateSet = nonPkCols
       .map((c) => `T.${qi(c)} = S.${qi(c)}`)
       .join(", ");
@@ -163,11 +166,18 @@ export class BigQueryAdapter implements SqlAdapter {
     const insertCols = allKeys.map((c) => qi(c)).join(", ");
     const insertVals = allKeys.map((c) => `S.${qi(c)}`).join(", ");
 
+    // Out-of-order protection: only UPDATE when the incoming version is
+    // strictly greater than the stored one (NULL stored version means the
+    // row pre-dates versioning → always update).
+    const versionGuard = allKeys.includes(SYNC_VERSION_COLUMN)
+      ? ` AND (T.${qi(SYNC_VERSION_COLUMN)} IS NULL OR S.${qi(SYNC_VERSION_COLUMN)} > T.${qi(SYNC_VERSION_COLUMN)})`
+      : "";
+
     const query = [
       `MERGE ${this.fqn(tableName)} AS T`,
       `USING (\n    ${source}\n  ) AS S`,
       `ON T.${qi(primaryKey)} = S.${qi(primaryKey)}`,
-      `WHEN MATCHED THEN UPDATE SET ${updateSet}`,
+      `WHEN MATCHED${versionGuard} THEN UPDATE SET ${updateSet}`,
       `WHEN NOT MATCHED THEN INSERT (${insertCols}) VALUES (${insertVals});`,
     ].join("\n");
 
@@ -208,12 +218,20 @@ export class BigQueryAdapter implements SqlAdapter {
     return `\`${this.datasetId}.${tableName}\``;
   }
 
+  /** ISO 8601 timestamp pattern (e.g. 2026-03-29T20:59:27.394Z) */
+  private static readonly ISO_TIMESTAMP_RE =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+
   /** Escape a value for use as a SQL literal. */
   private escapeValue(v: unknown): string {
     if (v === null || v === undefined) return "NULL";
     if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
     if (typeof v === "number" || typeof v === "bigint") return String(v);
     if (typeof v === "string") {
+      // ISO 8601 timestamps → TIMESTAMP literal (keeps type-safety with BQ TIMESTAMP columns)
+      if (BigQueryAdapter.ISO_TIMESTAMP_RE.test(v)) {
+        return `TIMESTAMP('${v}')`;
+      }
       // Detect JSON strings (arrays/objects) → use PARSE_JSON for native JSON columns
       if (
         (v.startsWith("[") && v.endsWith("]")) ||

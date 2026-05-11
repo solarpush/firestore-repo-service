@@ -4,10 +4,9 @@
     "module": "commonjs",
     "lib": ["ES2020"],
     "moduleResolution": "node",
-    "declaration": true,
     "sourceMap": true,
     "outDir": "./dist",
-    "rootDir": "./",
+    "noEmit": true,
     "removeComments": false,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
@@ -21,8 +20,14 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": false,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
+    "paths": {
+      "@lpdjs/firestore-repo-service": ["../../src/index.ts"],
+      "@lpdjs/firestore-repo-service/*": ["../../src/*"]
+    }
   },
-  "include": ["index.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["index.ts", "app-env.d.ts"],
+  "exclude": ["node_modules", "dist", "../../node_modules"]
 }

@@ -1,4 +1,5 @@
 import type { Firestore } from "firebase-admin/firestore";
+import { maybeNormalize } from "../shared/date-config";
 
 /**
  * Creates transaction operation methods for atomic read-write operations.
@@ -81,7 +82,7 @@ export function createTransactionMethods(
             const docRef = documentRef(...args);
             const docSnap = (await rawTransaction.get(docRef)) as any;
             if (!docSnap.exists) return null;
-            return { ...docSnap.data(), docId: docSnap.id } as any;
+            return maybeNormalize({ ...docSnap.data(), docId: docSnap.id }) as any;
           },
 
           // Type-safe set method

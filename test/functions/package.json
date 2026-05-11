@@ -4,19 +4,22 @@
     "description": "Tests for Firebase Functions",
     "main": "dist/index.js",
     "scripts": {
-        "build": "tsc"
+        "build": "tsc -p tsconfig.json",
+        "build:prod": "tsc -p tsconfig.build.json"
     },
     "dependencies": {
+        "@google-cloud/bigquery": "8.1.1",
         "@google-cloud/pubsub": "^5.3.0",
-        "@lpdjs/firestore-repo-service": "file:../..",
+        "@lpdjs/firestore-repo-service": "2.2.9",
         "firebase-admin": "^13.7.0",
         "firebase-functions": "^7.2.2",
         "zod": "^4.3.6"
     },
     "devDependencies": {
-        "typescript": "^5.9.3"
+        "@typescript/native-preview": "^7.0.0-dev.20260505.1",
+        "vitest": "^4.1.5"
     },
     "engines": {
-        "node": "22"
+        "node": "24"
     }
 }

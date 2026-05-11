@@ -6,6 +6,7 @@
  * to PubSub for retry (if a PubSub re-publisher is provided).
  */
 
+import { SYNC_VERSION_COLUMN } from "./constants";
 import type { SqlAdapter, SyncEvent } from "./types";
 
 export interface SyncQueueOptions {
@@ -80,16 +81,31 @@ export class SyncQueue {
     const batch = this.buffer.splice(0, this.batchSize);
 
     try {
-      const upserts: Record<string, unknown>[] = [];
+      const upsertsById = new Map<string, Record<string, unknown>>();
       const deleteIds: string[] = [];
 
       for (const evt of batch) {
         if (evt.operation === "DELETE") {
           deleteIds.push(evt.docId);
+          // A delete supersedes any pending upsert in the same batch.
+          upsertsById.delete(evt.docId);
         } else if (evt.data) {
-          upserts.push(evt.data);
+          // Multiple updates to the same doc within a single batch would
+          // make BigQuery MERGE error out ("UPDATE/MERGE must match at
+          // most one source row for each target row"). Keep only the row
+          // with the highest __sync_version per docId.
+          const existing = upsertsById.get(evt.docId);
+          if (!existing) {
+            upsertsById.set(evt.docId, evt.data);
+          } else {
+            const a = Number(existing[SYNC_VERSION_COLUMN] ?? 0);
+            const b = Number(evt.data[SYNC_VERSION_COLUMN] ?? 0);
+            if (b >= a) upsertsById.set(evt.docId, evt.data);
+          }
         }
       }
+
+      const upserts = Array.from(upsertsById.values());
 
       if (upserts.length > 0) {
         await this.adapter.upsertRows(this.tableName, upserts, this.primaryKey);
@@ -103,8 +119,15 @@ export class SyncQueue {
       }
     } catch (err) {
       if (this.onFlushError) {
-        await this.onFlushError(batch, err).catch(() => {
-          /* swallow re-publish errors to avoid infinite loops */
+        await this.onFlushError(batch, err).catch((handlerErr) => {
+          console.error(
+            `[SyncQueue] Flush error for ${this.tableName}:`,
+            err,
+          );
+          console.error(
+            `[SyncQueue] Error handler also failed:`,
+            handlerErr,
+          );
         });
       } else {
         // Re-insert at the front so we retry next flush

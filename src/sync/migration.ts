@@ -44,7 +44,10 @@ export async function autoMigrate<M extends Record<string, any>>(
     skipped: [],
   };
 
-  for (const [repoName, repo] of Object.entries(repoMapping) as [string, any][]) {
+  for (const [repoName, repo] of Object.entries(repoMapping) as [
+    string,
+    any,
+  ][]) {
     const schema: z.ZodObject<any> | undefined =
       (repo as any).schema ?? undefined;
     if (!schema) {
@@ -52,12 +55,12 @@ export async function autoMigrate<M extends Record<string, any>>(
       continue;
     }
 
-    const repoCfg = (config?.repos as Record<string, RepoSyncConfig<string>> | undefined)?.[repoName];
+    const repoCfg = (
+      config?.repos as Record<string, RepoSyncConfig<string>> | undefined
+    )?.[repoName];
     const tableName = repoCfg?.tableName ?? repoName;
     const documentKey: string =
-      (repo as any)._systemKeys?.[0] ??
-      (repo as any).documentKey ??
-      "docId";
+      (repo as any)._systemKeys?.[0] ?? (repo as any).documentKey ?? "docId";
 
     const columns = zodSchemaToColumns(schema, adapter.dialect, {
       primaryKey: documentKey,
@@ -78,12 +81,7 @@ export async function autoMigrate<M extends Record<string, any>>(
       );
 
       if (newCols.length > 0) {
-        const ddl = adapter.dialect.addColumnsDDL(tableName, newCols);
-        // Execute each statement individually
-        for (const stmt of ddl.split("\n").filter((s) => s.trim())) {
-          // Use the adapter's underlying query mechanism
-          await executeRaw(adapter, stmt);
-        }
+        await adapter.addColumns(tableName, newCols);
         result.altered.push(tableName);
       } else {
         result.upToDate.push(tableName);
@@ -92,23 +90,4 @@ export async function autoMigrate<M extends Record<string, any>>(
   }
 
   return result;
-}
-
-/**
- * Execute a raw SQL statement via the adapter.
- * Falls back to no-op if the adapter doesn't expose a raw query method.
- */
-async function executeRaw(adapter: SqlAdapter, sql: string): Promise<void> {
-  // BigQueryAdapter and similar expose a `query` or `execute` method
-  const a = adapter as any;
-  if (typeof a.executeRaw === "function") {
-    await a.executeRaw(sql);
-  } else if (typeof a.bigquery?.query === "function") {
-    await a.bigquery.query({ query: sql });
-  } else {
-    console.warn(
-      "[autoMigrate] Adapter does not support raw SQL execution; skipping:",
-      sql,
-    );
-  }
 }

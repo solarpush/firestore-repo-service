@@ -6,6 +6,37 @@
  * touches the database SDK; everything else works with these abstractions.
  */
 
+import type {
+  onDocumentCreated,
+  onDocumentDeleted,
+  onDocumentUpdated,
+} from "firebase-functions/v2/firestore";
+import type { HttpsOptions, onRequest } from "firebase-functions/v2/https";
+import type {
+  PubSubOptions,
+  onMessagePublished,
+} from "firebase-functions/v2/pubsub";
+
+/**
+ * Cloud Functions v2 options forwarded to `onMessagePublished()` for every
+ * sync worker handler. The `topic` field is omitted because the library sets
+ * it itself from `topicPrefix` + repo name.
+ */
+export type SyncWorkerOptions = Omit<PubSubOptions, "topic">;
+
+/**
+ * Cloud Functions v2 options forwarded to `onRequest()` for the admin handler.
+ * Re-export of `HttpsOptions` from `firebase-functions/v2/https`.
+ */
+export type AdminHttpsOptions = HttpsOptions;
+
+// ---------------------------------------------------------------------------
+// Lazy factory utility
+// ---------------------------------------------------------------------------
+
+/** A value that can be provided directly or as a lazy factory function. */
+export type OrFactory<T> = T | (() => T);
+
 // ---------------------------------------------------------------------------
 // SQL column / dialect
 // ---------------------------------------------------------------------------
@@ -43,10 +74,6 @@ export interface SqlDialect {
   mapType(logical: LogicalType): string;
   /** Wrap an identifier (table / column name) for the dialect */
   quoteIdentifier(id: string): string;
-  /** Generate a full CREATE TABLE statement */
-  createTableDDL(table: SqlTableDef): string;
-  /** Generate ALTER TABLE ADD COLUMN statement(s) for new columns */
-  addColumnsDDL(tableName: string, columns: SqlColumn[]): string;
 }
 
 /**
@@ -81,6 +108,16 @@ export interface SyncEvent {
   data: Record<string, unknown> | null;
   /** ISO-8601 timestamp of the event */
   timestamp: string;
+  /**
+   * Monotonic version (publish-time `Date.now()` in ms). Used by the worker
+   * to apply only the most recent event per document and to discard
+   * out-of-order PubSub deliveries — a stale event with a smaller `version`
+   * than the row already in SQL is skipped at MERGE time.
+   *
+   * Optional for backwards-compat with events published by older library
+   * versions; the worker treats `undefined` as "always apply".
+   */
+  version?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,10 +151,7 @@ export interface SqlAdapter {
   /**
    * Insert rows (append-only, no dedup).
    */
-  insertRows(
-    tableName: string,
-    rows: Record<string, unknown>[],
-  ): Promise<void>;
+  insertRows(tableName: string, rows: Record<string, unknown>[]): Promise<void>;
 
   /**
    * Upsert rows (INSERT … ON CONFLICT UPDATE / MERGE).
@@ -137,6 +171,18 @@ export interface SqlAdapter {
     primaryKey: string,
     ids: string[],
   ): Promise<void>;
+
+  /**
+   * Add columns to an existing table.
+   * The adapter is responsible for qualifying table names (e.g. dataset.table).
+   */
+  addColumns(tableName: string, columns: SqlColumn[]): Promise<void>;
+
+  /**
+   * Execute a raw SQL statement.
+   * The adapter is responsible for qualifying any table references.
+   */
+  executeRaw(sql: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,14 +210,13 @@ export interface RepoSyncConfig<F extends string = string> {
  * Extract field names from a repo value.
  * Works with ConfiguredRepository (_modelType), raw config (schema.shape), or fallback (type).
  */
-export type ExtractRepoFields<R> =
-  R extends { _modelType: infer Model }
-    ? string & keyof Model
-    : R extends { schema: { shape: infer S } }
-      ? string & keyof S
-      : R extends { type: infer T }
-        ? string & keyof T
-        : string;
+export type ExtractRepoFields<R> = R extends { _modelType: infer Model }
+  ? string & keyof Model
+  : R extends { schema: { shape: infer S } }
+    ? string & keyof S
+    : R extends { type: infer T }
+      ? string & keyof T
+      : string;
 
 /** Keys of repos where `_isGroup` is `true`. */
 type GroupRepoKeys<M> = {
@@ -201,19 +246,23 @@ export type TypedRepoSyncConfigs<M> = {
 
 /** Firestore trigger constructors from `firebase-functions/v2/firestore`. */
 export interface FirestoreTriggersDep {
-  onDocumentCreated: Function;
-  onDocumentUpdated: Function;
-  onDocumentDeleted: Function;
+  onDocumentCreated: typeof onDocumentCreated;
+  onDocumentUpdated: typeof onDocumentUpdated;
+  onDocumentDeleted: typeof onDocumentDeleted;
 }
 
 /** PubSub handler from `firebase-functions/v2/pubsub`. */
 export interface PubSubHandlerDep {
-  onMessagePublished: Function;
+  onMessagePublished: typeof onMessagePublished;
 }
 
 /** PubSub client instance (e.g. `new PubSub()`). */
 export interface PubSubClientDep {
-  topic(name: string): { publishMessage(msg: any): Promise<any> };
+  topic(name: string): {
+    publishMessage(msg: any): Promise<any>;
+    exists(): Promise<[boolean]>;
+    create(): Promise<any>;
+  };
 }
 
 /** All external deps needed by the sync module. */
@@ -252,6 +301,19 @@ export interface SyncWorkerConfig<M = Record<string, any>> {
   flushIntervalMs?: number;
   /** Auto-create/migrate tables on first event (default: false) */
   autoMigrate?: boolean;
+  /** PubSub topic prefix (default: "firestore-sync") */
+  topicPrefix?: string;
+  /**
+   * Cloud Functions v2 options forwarded to `onMessagePublished()` for every
+   * worker handler. Use to tune `concurrency`, `maxInstances`, `minInstances`,
+   * `memory`, `timeoutSeconds`, `region`, `cpu`, etc.
+   *
+   * Example:
+   * ```ts
+   * workerOptions: { concurrency: 10, maxInstances: 10, memory: "512MiB" }
+   * ```
+   */
+  workerOptions?: SyncWorkerOptions;
   /** Per-repo overrides */
   repos?: TypedRepoSyncConfigs<M>;
 }
@@ -269,7 +331,7 @@ export interface GenerateDDLConfig<M = Record<string, any>> {
 /**
  * HTTP Basic Auth configuration for the sync admin.
  */
-export interface SyncAdminBasicAuth {
+export interface adminsyncBasicAuth {
   type: "basic";
   /** Realm displayed in the browser login dialog */
   realm?: string;
@@ -280,7 +342,7 @@ export interface SyncAdminBasicAuth {
 /**
  * Feature flags controlling which sync admin endpoints are enabled.
  */
-export interface SyncAdminFeaturesFlag {
+export interface adminsyncFeaturesFlag {
   /** Show pending queue state (default: false) */
   viewQueue?: boolean;
   /** Allow force-syncing an entire collection (default: false) */
@@ -296,27 +358,53 @@ export interface SyncAdminFeaturesFlag {
  * When provided in `FirestoreSyncConfig.admin`, an `onRequest` Cloud Function
  * handler is created and added to `sync.functions`.
  */
-export interface SyncAdminConfig {
-  /** Authentication guard — HTTP Basic Auth or custom middleware function */
-  auth?: SyncAdminBasicAuth | ((req: any, res: any, next: () => void) => void | Promise<void>);
+export interface adminsyncConfig {
+  /**
+   * Authentication guard. Accepts:
+   * - {@link adminsyncBasicAuth} — HTTP Basic Auth (simple shared password),
+   * - an `AuthExtension` returned by `firebaseAuth({ ... })` from
+   *   `@lpdjs/firestore-repo-service/servers/auth` (cookie/bearer/both with
+   *   inline login page), so the sync admin can use the same Firebase Auth
+   *   process as `servers.admin()` / `servers.crud()`,
+   * - a custom Connect-style middleware function.
+   */
+  auth?:
+    | adminsyncBasicAuth
+    | import("../servers/auth").AuthExtension
+    | ((req: any, res: any, next: () => void) => void | Promise<void>);
   /** Base URL path (default: "/sync-admin") */
   basePath?: string;
   /** Feature flags controlling which endpoints are enabled */
-  featuresFlag?: SyncAdminFeaturesFlag;
+  featuresFlag?: adminsyncFeaturesFlag;
   /**
-   * `onRequest` from `firebase-functions/https` (or `firebase-functions/v2/https`).
+   * `onRequest` from `firebase-functions/v2/https` (or `firebase-functions/https`,
+   * which re-exports the v2 version in `firebase-functions` ≥ 5).
    * When provided, the admin handler is automatically wrapped as a Cloud Function.
    * If omitted, the raw `(req, res) => void` handler is exposed instead.
    */
-  onRequest?: (handler: (req: any, res: any) => void | Promise<void>) => any;
+  onRequest?: typeof onRequest;
+  /**
+   * Options forwarded to `onRequest()` as the first argument (e.g. `{ invoker: "public" }`).
+   * Only used when `onRequest` is also provided.
+   */
+  httpsOptions?: AdminHttpsOptions;
 }
 
 /** Options for `createFirestoreSync()` — the unified wrapper. */
 export interface FirestoreSyncConfig<M = Record<string, any>> {
-  /** External dependencies — all Firebase/PubSub modules */
-  deps: SyncDeps;
-  /** SQL adapter to flush data to */
-  adapter: SqlAdapter;
+  /**
+   * External dependencies — all Firebase/PubSub modules.
+   * `pubsub` can be a factory `() => PubSub` for lazy initialization
+   * (avoids creating gRPC channels at module-load time for functions that
+   * don't need PubSub, e.g. the admin or CRUD servers).
+   */
+  deps: Omit<SyncDeps, "pubsub"> & { pubsub: OrFactory<PubSubClientDep> };
+  /**
+   * SQL adapter to flush data to.
+   * Can be a factory `() => adapter` for lazy initialization
+   * (avoids connecting to BigQuery / SQL at module-load time).
+   */
+  adapter: OrFactory<SqlAdapter>;
   /** PubSub topic name prefix (topics will be `{prefix}-{repoName}`) */
   topicPrefix?: string;
   /** Max rows per flush batch (default: 100) */
@@ -326,11 +414,17 @@ export interface FirestoreSyncConfig<M = Record<string, any>> {
   /** Auto-create/migrate tables on first event (default: false) */
   autoMigrate?: boolean;
   /**
-   * Optional sync admin endpoint. When provided, a `syncAdmin` handler is
+   * Cloud Functions v2 options forwarded to `onMessagePublished()` for every
+   * worker handler. Use to tune `concurrency`, `maxInstances`, `minInstances`,
+   * `memory`, `timeoutSeconds`, `region`, `cpu`, etc.
+   */
+  workerOptions?: SyncWorkerOptions;
+  /**
+   * Optional sync admin endpoint. When provided, a `adminsync` handler is
    * added to `sync.functions` exposing health-check, force-sync, and queue
    * inspection endpoints behind authentication.
    */
-  admin?: SyncAdminConfig;
+  admin?: adminsyncConfig;
   /** Per-repo overrides (shared between triggers and worker) */
   repos?: TypedRepoSyncConfigs<M>;
 }

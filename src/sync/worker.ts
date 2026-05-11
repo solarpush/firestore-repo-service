@@ -8,9 +8,15 @@
  */
 
 import { z } from "zod";
-import { zodSchemaToColumns } from "./schema-mapper";
+import { SYNC_VERSION_COLUMN } from "./constants";
 import { SyncQueue } from "./queue";
-import type { RepoSyncConfig, SqlAdapter, SyncEvent, SyncWorkerConfig } from "./types";
+import { zodSchemaToColumns } from "./schema-mapper";
+import type {
+  RepoSyncConfig,
+  SqlAdapter,
+  SyncEvent,
+  SyncWorkerConfig,
+} from "./types";
 
 // ---------------------------------------------------------------------------
 // Migration tracking
@@ -43,11 +49,7 @@ async function ensureMigrated(
     const existing = new Set(await adapter.getTableColumns(tableName));
     const newCols = columns.filter((c) => !existing.has(c.name));
     if (newCols.length > 0) {
-      const ddl = adapter.dialect.addColumnsDDL(tableName, newCols);
-      for (const stmt of ddl.split("\n").filter(Boolean)) {
-        await (adapter as any).bigquery?.query?.({ query: stmt }) ??
-          Promise.resolve();
-      }
+      await adapter.addColumns(tableName, newCols);
     }
   }
 
@@ -78,7 +80,12 @@ export function createSyncWorker<M extends Record<string, any>>(
     batchSize = 100,
     flushIntervalMs = 5_000,
     autoMigrate = false,
-    repos: repoConfigs = {} as Record<string, RepoSyncConfig<string> | undefined>,
+    topicPrefix = "firestore-sync",
+    workerOptions,
+    repos: repoConfigs = {} as Record<
+      string,
+      RepoSyncConfig<string> | undefined
+    >,
   } = config;
 
   // Build per-repo queues lazily
@@ -91,19 +98,29 @@ export function createSyncWorker<M extends Record<string, any>>(
     const repoCfg = repoConfigs[repoName];
     const tableName = repoCfg?.tableName ?? repoName;
 
-    // On flush failure → re-publish to PubSub dead-letter
+    // On flush failure → log error + re-publish to PubSub dead-letter
     const onFlushError = async (
       events: SyncEvent[],
-      _error: unknown,
+      error: unknown,
     ): Promise<void> => {
+      console.error(
+        `[SyncWorker] Flush failed for "${repoName}" (${events.length} events):`,
+        error,
+      );
       try {
-        const dlTopic = deps.pubsub.topic(`${repoName}-sync-dlq`);
+        const dlTopicName = `${topicPrefix}-${repoName}-dlq`;
+        const dlTopic = deps.pubsub.topic(dlTopicName);
+        const [exists] = await dlTopic.exists();
+        if (!exists) {
+          await dlTopic.create();
+          console.info(`[SyncWorker] Created DLQ topic "${dlTopicName}"`);
+        }
         for (const evt of events) {
           await dlTopic.publishMessage({ json: evt });
         }
       } catch (dlErr) {
         console.error(
-          `[SyncWorker] Dead-letter publish failed for ${repoName}:`,
+          `[SyncWorker] Dead-letter publish also failed for ${repoName}:`,
           dlErr,
         );
       }
@@ -131,15 +148,17 @@ export function createSyncWorker<M extends Record<string, any>>(
     }
 
     const documentKey: string =
-      (repo as any)._systemKeys?.[0] ??
-      (repo as any).documentKey ??
-      "docId";
+      (repo as any)._systemKeys?.[0] ?? (repo as any).documentKey ?? "docId";
+
+    const repoCfg = repoConfigs[repoName];
+    const columnMap = repoCfg?.columnMap as Record<string, string> | undefined;
+    // The primaryKey for BigQuery must use the mapped column name (e.g. docId → user_id)
+    const primaryKey = columnMap?.[documentKey] ?? documentKey;
 
     if (autoMigrate) {
       const schema: z.ZodObject<any> | undefined =
         (repo as any).schema ?? undefined;
       if (schema) {
-        const repoCfg = repoConfigs[repoName];
         const tableName = repoCfg?.tableName ?? repoName;
         await ensureMigrated(
           repoName,
@@ -148,25 +167,45 @@ export function createSyncWorker<M extends Record<string, any>>(
           tableName,
           documentKey,
           repoCfg?.exclude,
-          repoCfg?.columnMap as Record<string, string> | undefined,
+          columnMap,
         );
       }
     }
 
-    const queue = getQueue(repoName, documentKey);
+    const queue = getQueue(repoName, primaryKey);
+
+    // Stamp the row with the publish version so the SQL adapter can skip
+    // stale (out-of-order) updates. Force-sync events without a version
+    // fall back to the wall clock — still monotonic per-process.
+    if (syncEvent.data) {
+      syncEvent.data[SYNC_VERSION_COLUMN] = syncEvent.version ?? Date.now();
+    }
+
     queue.enqueue(syncEvent);
   }
 
   // Cloud Function v2 PubSub handler (sync — deps are already available)
   function createHandler(topicName: string) {
-    return deps.pubsubHandler.onMessagePublished(topicName, async (event: any) => {
+    const handlerFn = async (event: any) => {
       const data: SyncEvent = event.data?.message?.json ?? event.data?.json;
       if (!data) {
         console.warn("[SyncWorker] Received empty PubSub message");
         return;
       }
       await handleMessage(data);
-    });
+      // Flush so data is persisted before the Cloud Function container shuts down.
+      // Force-sync (admin) handles its own flush after the batch loop.
+      const q = queues.get(data.repoName);
+      if (q) await q.flush();
+    };
+
+    if (workerOptions) {
+      return deps.pubsubHandler.onMessagePublished(
+        { topic: topicName, ...workerOptions },
+        handlerFn,
+      );
+    }
+    return deps.pubsubHandler.onMessagePublished(topicName, handlerFn);
   }
 
   return {

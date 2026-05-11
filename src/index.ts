@@ -51,6 +51,15 @@ export type {
   PopulateOptionsTyped,
 } from "./repositories/types";
 
+// Date handling (global)
+export {
+  coerceToDate,
+  getDateHandling,
+  normalizeTimestamps,
+  setDateHandling,
+} from "./shared/date-config";
+export type { DateHandlingMode } from "./shared/date-config";
+
 // ============================================
 // Imports for internal use
 // ============================================
@@ -123,6 +132,7 @@ export function createRepositoryConfig<TSchema extends z.ZodObject<any>>(
   const TPathKey extends keyof z.infer<TSchema> | undefined = undefined,
   const TCreatedKey extends keyof z.infer<TSchema> | undefined = undefined,
   const TUpdatedKey extends keyof z.infer<TSchema> | undefined = undefined,
+  const THistoryEnabled extends boolean = false,
   TRefCb = undefined,
 >(config: {
   path: string;
@@ -134,6 +144,14 @@ export function createRepositoryConfig<TSchema extends z.ZodObject<any>>(
   createdKey?: TCreatedKey;
   updatedKey?: TUpdatedKey;
   refCb: TRefCb;
+  /**
+   * Optional change-history configuration. Set `enabled: true` to expose
+   * `repo.history.*` and have `createHistoryTriggers(...)` register a trigger
+   * for this repo.
+   */
+  history?: import("./history/types").HistoryConfigForModel<
+    z.infer<TSchema>
+  > & { enabled: THistoryEnabled };
 }) => RepositoryConfig<
   z.infer<TSchema>,
   TForeignKeys,
@@ -144,7 +162,8 @@ export function createRepositoryConfig<TSchema extends z.ZodObject<any>>(
   TDocumentKey,
   TPathKey,
   TCreatedKey,
-  TUpdatedKey
+  TUpdatedKey,
+  THistoryEnabled
 > & { schema: TSchema } {
   return (config: any): any => ({
     ...config,
@@ -208,6 +227,7 @@ export function buildRepositoryRelations<
       any,
       any,
       any,
+      any,
       any
     >
       ? {
@@ -215,6 +235,7 @@ export function buildRepositoryRelations<
             [R in keyof TMapping]: TMapping[R] extends RepositoryConfig<
               infer TTargetModel,
               infer TForeignKeys,
+              any,
               any,
               any,
               any,
@@ -249,7 +270,8 @@ export function buildRepositoryRelations<
         infer TDocumentKey,
         infer TPathKey,
         infer TCreatedKey,
-        infer TUpdatedKey
+        infer TUpdatedKey,
+        infer THistoryEnabled
       >
       ? RepositoryConfig<
           T,
@@ -266,7 +288,8 @@ export function buildRepositoryRelations<
           TDocumentKey,
           TPathKey,
           TCreatedKey,
-          TUpdatedKey
+          TUpdatedKey,
+          THistoryEnabled
         >
       : TMapping[K]
     : TMapping[K];
@@ -409,17 +432,19 @@ export function createRepositoryMapping<T extends Record<string, any>>(
 // ============================================
 // Servers (admin ORM & CRUD API)
 // ============================================
-export {
-  createAdminServer,
-  createCrudServer,
-  MiniRouter,
-} from "./servers/index";
+export { createServers, MiniRouter } from "./servers/index";
 export type {
   AdminRepoConfig,
   AdminRepoEntry,
   AdminServerOptions,
   ApiResponse,
   BasicAuthConfig,
+  BoundAdminRepoConfig,
+  BoundAdminServerOptions,
+  BoundCrudRepoConfig,
+  BoundCrudServerOptions,
+  BoundFirestoreSyncConfig,
+  CreateServersDeps,
   CrudRepoConfig,
   CrudServerOptions,
   FieldRole,

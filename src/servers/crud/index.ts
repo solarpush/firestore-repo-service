@@ -84,6 +84,8 @@
  */
 
 import { MiniRouter } from "../admin/router";
+import { isAuthExtension } from "../auth";
+import type { HttpsOptions } from "firebase-functions/v2/https";
 import type { HttpRequest, HttpResponse } from "../http-types";
 import type { ConfiguredRepository } from "../../repositories/types";
 import { createCrudHandlers } from "./handlers";
@@ -114,27 +116,7 @@ function scalarDocsHtml(title: string, specUrl: string): string {
 </html>`;
 }
 
-/**
- * Compute the URL prefix for links / spec URLs.
- * In the Firebase emulator the /{project}/{region}/{functionTarget} prefix
- * is visible in URLs but stripped before the handler receives `req.url`.
- * In production Firebase proxy strips it automatically.
- */
-function getLinkBase(staticBasePath: string): string {
-  const base = staticBasePath === "/" ? "" : staticBasePath.replace(/\/$/, "");
-
-  if (process.env["FUNCTIONS_EMULATOR"] === "true") {
-    const project =
-      process.env["GCLOUD_PROJECT"] ??
-      process.env["GOOGLE_CLOUD_PROJECT"] ??
-      "demo-project";
-    const region = process.env["FUNCTION_REGION"] ?? "us-central1";
-    const target = process.env["FUNCTION_TARGET"] ?? "";
-    return `/${project}/${region}/${target}${base}`;
-  }
-
-  return base;
-}
+import { getLinkBase } from "../utils/link-base";
 
 // ---------------------------------------------------------------------------
 // Body parser
@@ -244,7 +226,7 @@ export function createCrudServer<
   TRepos extends Record<string, ConfiguredRepository<any>>,
 >(
   options: CrudServerOptions<TRepos>,
-): (req: any, res: any) => Promise<void> {
+): ((req: any, res: any) => Promise<void>) & { spec: () => OpenAPIDocument; httpsOptions?: HttpsOptions } {
   const {
     basePath = "/",
     repos,
@@ -252,6 +234,7 @@ export function createCrudServer<
     auth,
     middleware: extraMiddleware = [],
     verbose = false,
+    httpsOptions,
   } = options;
 
   // Normalise basePath: no trailing slash
@@ -320,12 +303,14 @@ export function createCrudServer<
       allowDelete: cfg.allowDelete ?? false,
       allowedIncludes: cfg.allowedIncludes as string[] | undefined,
       validate: cfg.validate as CrudRepoEntry["validate"],
+      rules: cfg.rules,
     };
 
     registry[name] = entry;
   }
 
-  const handlers = createCrudHandlers(registry, base, verbose);
+  const authEnabled = !!auth;
+  const handlers = createCrudHandlers(registry, base, verbose, authEnabled);
 
   // ── OpenAPI spec (cached) ─────────────────────────────────────────────
   const openapi = options.openapi;
@@ -333,12 +318,11 @@ export function createCrudServer<
   let _specCache: OpenAPIDocument | null = null;
   function getSpec(): OpenAPIDocument {
     if (!_specCache) {
-      const authType =
-        auth && typeof auth !== "function"
-          ? ("basic" as const)
-          : auth
-            ? ("bearer" as const)
-            : false;
+      const authType = !auth
+        ? false
+        : isAuthExtension(auth) || typeof auth === "function"
+          ? ("bearer" as const)
+          : ("basic" as const);
       _specCache = generateOpenAPISpec(registry, base, {
         ...openapiOpts,
         auth: openapiOpts.auth ?? authType,
@@ -384,7 +368,15 @@ export function createCrudServer<
 
   // ── 2. Auth middleware ──────────────────────────────────────────────────
   if (auth) {
-    if (typeof auth === "function") {
+    if (isAuthExtension(auth)) {
+      // Mount login/session/logout routes BEFORE the protected chain.
+      for (const route of auth.routes) {
+        const mountPath = `${base}${route.path}`;
+        if (route.method === "GET") router.get(mountPath, route.handler);
+        else router.post(mountPath, route.handler);
+      }
+      router.use(auth.middleware);
+    } else if (typeof auth === "function") {
       // Custom middleware
       router.use(auth);
     } else {
@@ -428,10 +420,10 @@ export function createCrudServer<
         .send(JSON.stringify(spec, null, 2));
     });
 
-    router.get(docsPath, (_req: any, res: any) => {
-      // Rebuild spec URL with the Firebase Functions prefix when running
-      // in the emulator so Scalar can fetch the spec correctly.
-      const specUrl = getLinkBase(base) + "/__spec.json";
+    router.get(docsPath, (req: any, res: any) => {
+      // Rebuild spec URL with the correct prefix for the current context
+      // (emulator, Cloud Functions URL, or custom domain).
+      const specUrl = getLinkBase(req, base) + "/__spec.json";
       const html = scalarDocsHtml(openapiOpts.title ?? "CRUD API", specUrl);
       res
         .status(200)
@@ -484,10 +476,13 @@ export function createCrudServer<
 
   // Attach spec getter so users can call server.spec() programmatically
   (handler as any).spec = getSpec;
+  if (httpsOptions) (handler as any).httpsOptions = httpsOptions;
 
   return handler as ((req: any, res: any) => Promise<void>) & {
     /** Return the generated OpenAPI 3.1 document. */
     spec: () => OpenAPIDocument;
+    /** Options to forward to `onRequest()` from firebase-functions. */
+    httpsOptions?: HttpsOptions;
   };
 }
 

@@ -9,6 +9,7 @@ export type {
   ColumnMeta,
   FilterState,
   PageOptions,
+  QueryError,
   RelationalFieldMeta,
   SortState,
   WhereOp,

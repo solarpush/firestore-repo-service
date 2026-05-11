@@ -8,7 +8,9 @@
  */
 
 import { z } from "zod";
-import type { CrudRepoEntry, CrudRepoRegistry } from "./types";
+import type { CrudRepoEntry, CrudRepoRegistry, OpenAPISpecOptions } from "./types";
+
+export type { OpenAPISpecOptions };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,19 +36,6 @@ export interface OpenAPIInfo {
   description?: string;
 }
 
-export interface OpenAPISpecOptions {
-  /** Document title (default: "CRUD API") */
-  title?: string;
-  /** API version (default: "1.0.0") */
-  version?: string;
-  /** Description shown in Scalar UI / Swagger */
-  description?: string;
-  /** Server URLs */
-  servers?: { url: string; description?: string }[];
-  /** Whether the API requires auth — adds securitySchemes */
-  auth?: "basic" | "bearer" | false;
-}
-
 interface OpenAPIOperation {
   operationId: string;
   summary: string;
@@ -61,15 +50,39 @@ interface OpenAPIOperation {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Convert a Zod schema to a JSON Schema object suitable for OpenAPI 3.1. */
+/**
+ * Convert a Zod schema to a JSON Schema object suitable for OpenAPI 3.1.
+ *
+ * Uses `unrepresentable: "any"` so that types Zod can't natively serialize
+ * (e.g. `z.date()`, `z.bigint()`, custom classes — common with Firestore
+ * Timestamps stored as `Date`) don't throw and collapse the whole schema to
+ * a bare `{ type: "object" }`. We additionally override a few well-known
+ * cases to a sensible OpenAPI representation.
+ */
 function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
   try {
-    return z.toJSONSchema(schema, { target: "openapi-3.1" }) as Record<
-      string,
-      unknown
-    >;
-  } catch {
-    // Fallback for unsupported types
+    return z.toJSONSchema(schema, {
+      target: "openapi-3.1",
+      unrepresentable: "any",
+      override: (ctx) => {
+        const def: any = (ctx.zodSchema as any)?._zod?.def;
+        if (!def) return;
+        if (def.type === "date") {
+          (ctx.jsonSchema as any).type = "string";
+          (ctx.jsonSchema as any).format = "date-time";
+        } else if (def.type === "bigint") {
+          (ctx.jsonSchema as any).type = "string";
+          (ctx.jsonSchema as any).format = "int64";
+        }
+      },
+    }) as Record<string, unknown>;
+  } catch (err) {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn(
+        "[generateOpenAPISpec] Failed to convert Zod schema to JSON Schema; falling back to {type:object}.",
+        err,
+      );
+    }
     return { type: "object" };
   }
 }

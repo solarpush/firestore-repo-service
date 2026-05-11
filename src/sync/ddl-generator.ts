@@ -8,6 +8,7 @@
  */
 
 import { z } from "zod";
+import { zodSchemaToColumns } from "./schema-mapper";
 import type {
   GenerateDDLConfig,
   RepoSyncConfig,
@@ -15,7 +16,6 @@ import type {
   SqlDialect,
   SqlTableDef,
 } from "./types";
-import { zodSchemaToColumns } from "./schema-mapper";
 
 // ---------------------------------------------------------------------------
 // Low-level DDL helpers
@@ -23,25 +23,45 @@ import { zodSchemaToColumns } from "./schema-mapper";
 
 /**
  * Generate a CREATE TABLE statement from a table definition.
- * Delegates to the dialect for syntax specifics.
+ * Uses the dialect for identifier quoting and type mapping.
+ *
+ * NOTE: This produces preview/export DDL with unqualified table names.
+ * For actual execution, use `adapter.createTable()` which handles
+ * dataset/schema qualification internally.
  */
 export function createTableDDL(
   dialect: SqlDialect,
   table: SqlTableDef,
 ): string {
-  return dialect.createTableDDL(table);
+  const cols = table.columns
+    .map((c) => {
+      const notNull = c.isPrimaryKey ? " NOT NULL" : "";
+      return `  ${dialect.quoteIdentifier(c.name)} ${c.sqlType}${notNull}`;
+    })
+    .join(",\n");
+
+  return `CREATE TABLE IF NOT EXISTS ${dialect.quoteIdentifier(table.tableName)} (\n${cols}\n);`;
 }
 
 /**
  * Generate ALTER TABLE ADD COLUMN statements for columns missing from an
  * existing table.
+ *
+ * NOTE: This produces preview/export DDL with unqualified table names.
+ * For actual execution, use `adapter.addColumns()` which handles
+ * dataset/schema qualification internally.
  */
 export function addColumnsDDL(
   dialect: SqlDialect,
   tableName: string,
   columns: SqlColumn[],
 ): string {
-  return dialect.addColumnsDDL(tableName, columns);
+  return columns
+    .map(
+      (c) =>
+        `ALTER TABLE ${dialect.quoteIdentifier(tableName)} ADD COLUMN ${dialect.quoteIdentifier(c.name)} ${c.sqlType};`,
+    )
+    .join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -64,19 +84,22 @@ export function generateDDL<M extends Record<string, any>>(
 ): string {
   const statements: string[] = [];
 
-  for (const [repoName, repo] of Object.entries(repoMapping) as [string, any][]) {
+  for (const [repoName, repo] of Object.entries(repoMapping) as [
+    string,
+    any,
+  ][]) {
     const schema: z.ZodObject<any> | undefined =
       repo.schema ?? (repo as any)._schema ?? undefined;
     if (!schema) continue;
 
-    const repoCfg = (config?.repos as Record<string, RepoSyncConfig<string>> | undefined)?.[repoName];
+    const repoCfg = (
+      config?.repos as Record<string, RepoSyncConfig<string>> | undefined
+    )?.[repoName];
     const tableName = repoCfg?.tableName ?? repoName;
 
     // Detect documentKey from repo metadata
     const documentKey: string =
-      (repo as any)._systemKeys?.[0] ??
-      (repo as any).documentKey ??
-      "docId";
+      (repo as any)._systemKeys?.[0] ?? (repo as any).documentKey ?? "docId";
 
     const columns = zodSchemaToColumns(schema, dialect, {
       primaryKey: documentKey,

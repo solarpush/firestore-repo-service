@@ -62,6 +62,7 @@ export type {
   ColumnMeta,
   FilterState,
   PageOptions,
+  QueryError,
   RelationalFieldMeta,
   SortState,
   WhereOp,
@@ -74,6 +75,7 @@ import type {
   ColumnMeta,
   FilterState,
   PageOptions,
+  QueryError,
   RelationalFieldMeta,
   SortState,
 } from "./components";
@@ -83,6 +85,7 @@ import {
   renderListJsx,
   renderPageJsx,
 } from "./components";
+import type { z } from "zod";
 
 export function renderPage(content: string, opts: PageOptions): string {
   return renderPageJsx(content, opts);
@@ -113,6 +116,13 @@ export function renderList(
   relationalMeta?: RelationalFieldMeta[],
   sortState?: SortState,
   currentPageSize?: number,
+  queryError?: QueryError,
+  isGroup?: boolean,
+  totalCount?: number,
+  mutableFields?: string[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  schema?: z.ZodObject<any>,
+  historyEnabled?: boolean,
 ): string {
   return renderListJsx(
     repoName,
@@ -127,6 +137,12 @@ export function renderList(
     relationalMeta,
     sortState,
     currentPageSize,
+    queryError,
+    isGroup,
+    totalCount,
+    mutableFields,
+    schema,
+    historyEnabled,
   );
 }
 

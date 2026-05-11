@@ -37,10 +37,12 @@
  */
 
 import type { z } from "zod";
+import type { HttpsOptions } from "firebase-functions/v2/https";
 import type { ConfiguredRepository } from "../../repositories/types";
 import type { FieldPath, RepositoryConfig } from "../../shared/types";
 import type { FieldRole } from "../crud/types";
 import type { HttpRequest, HttpResponse } from "../http-types";
+import { type AuthExtension, isAuthExtension } from "../auth";
 import type { AdminRepoEntry, RepoRegistry } from "./handlers";
 import { createAdminHandlers } from "./handlers";
 import type { RelationalFieldMeta } from "./renderer";
@@ -52,13 +54,28 @@ import { type Middleware, MiniRouter } from "./router";
 
 /**
  * Extracts the model type `T` from a `ConfiguredRepository`.
+ * Two-step inference so it survives intersection types
+ * (e.g. `RepositoryConfig<...> & { schema: ZodObject }` produced by
+ * `createRepositoryConfig(schema)`).
  * @internal
  */
 type RepoModelType<TRepo> =
-  TRepo extends ConfiguredRepository<
-    RepositoryConfig<infer T, any, any, any, any, any, any, any, any, any>
+  TRepo extends ConfiguredRepository<infer C>
+    ? C extends RepositoryConfig<
+    infer T,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any
   >
-    ? T
+      ? T
+      : never
     : never;
 
 /**
@@ -217,19 +234,30 @@ export interface AdminServerOptions<
 
   /**
    * Authentication guard executed before every request.
+   * - Pass an {@link AuthExtension} (e.g. result of `firebaseAuth({...})`) to
+   *   wire Firebase Auth with a bundled `/__login` page and session cookie.
    * - Pass a `BasicAuthConfig` to enable HTTP Basic Auth.
-   * - Pass a `Middleware` function for custom auth logic.
+   * - Pass a `Middleware` function for fully custom auth logic.
    */
-  auth?: BasicAuthConfig | Middleware;
+  auth?: AuthExtension | BasicAuthConfig | Middleware;
 
   /**
    * Additional middleware functions executed after auth, before route handlers.
    */
   middleware?: Middleware[];
-}
 
-// ---------------------------------------------------------------------------
-// Body parser (replaces express.urlencoded in Firebase Functions context)
+  /**
+   * Options forwarded to `onRequest()` from `firebase-functions/v2/https`.
+   * Stored on the returned handler as `.httpsOptions` for easy access.
+   *
+   * @example
+   * ```ts
+   * const handler = createAdminServer({ httpsOptions: { invoker: "public" }, ... });
+   * export const admin = onRequest(handler.httpsOptions!, handler);
+   * ```
+   */
+  httpsOptions?: HttpsOptions;
+}
 // ---------------------------------------------------------------------------
 
 /** Eagerly reads the raw request body as a string */
@@ -383,13 +411,14 @@ export function createAdminServer<
 >(
   options: AdminServerOptions<TRepos>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): (req: any, res: any) => Promise<void> {
+): ((req: any, res: any) => Promise<void>) & { httpsOptions?: HttpsOptions } {
   const {
     basePath = "/",
     repos,
     parseBody = true,
     auth,
     middleware: extraMiddleware = [],
+    httpsOptions,
   } = options;
 
   // Normalise basePath: no trailing slash
@@ -455,6 +484,11 @@ export function createAdminServer<
       mutableFields,
       createFields,
       allowDelete: cfg.allowDelete ?? false,
+      historyEnabled: !!(cfg.repo as any).history,
+      historySubcollection:
+        ((cfg.repo as any).history &&
+          ((cfg.repo as any)._historySubcollection as string | undefined)) ??
+        undefined,
       relationalMeta: (() => {
         if (!cfg.relationalFields || cfg.relationalFields.length === 0)
           return undefined;
@@ -507,7 +541,16 @@ export function createAdminServer<
 
   // ── 2. Auth middleware ──────────────────────────────────────────────────
   if (auth) {
-    if (typeof auth === "function") {
+    if (isAuthExtension(auth)) {
+      // Mount auxiliary routes (login page, session, logout) BEFORE pushing
+      // the protected middleware so they remain publicly reachable.
+      for (const route of auth.routes) {
+        const mountPath = `${base}${route.path}`;
+        if (route.method === "GET") router.get(mountPath, route.handler);
+        else router.post(mountPath, route.handler);
+      }
+      router.use(auth.middleware);
+    } else if (typeof auth === "function") {
       // Custom middleware
       router.use(auth);
     } else {
@@ -540,6 +583,12 @@ export function createAdminServer<
   router.get(`${base}/`, handlers.handleDashboard);
   router.get(`${base}`, handlers.handleDashboard);
 
+  // Specific routes (with literal "_panel" / "_bulk" segments) MUST come before
+  // the generic ":repoName/:id/..." routes so they take precedence.
+  router.get(`${base}/:repoName/_panel`, handlers.handlePanel as any);
+  router.post(`${base}/:repoName/_bulk/delete`, handlers.handleBulkDelete as any);
+  router.post(`${base}/:repoName/_bulk/update`, handlers.handleBulkUpdate as any);
+
   router.get(`${base}/:repoName`, handlers.handleList);
 
   router.get(`${base}/:repoName/create`, handlers.handleCreateForm);
@@ -548,12 +597,16 @@ export function createAdminServer<
   router.get(`${base}/:repoName/:id/edit`, handlers.handleEditForm as any);
   router.post(`${base}/:repoName/:id/edit`, handlers.handleEditSubmit as any);
 
+  router.get(`${base}/:repoName/:id/history`, handlers.handleHistory as any);
+
   router.post(`${base}/:repoName/:id/delete`, handlers.handleDelete as any);
 
   // ── Request handler ─────────────────────────────────────────────────────
-  return async (req: HttpRequest, res: HttpResponse): Promise<void> => {
+  const handler = async (req: HttpRequest, res: HttpResponse): Promise<void> => {
     await router.handle(req as any, res as any);
   };
+  if (httpsOptions) (handler as any).httpsOptions = httpsOptions;
+  return handler as ((req: any, res: any) => Promise<void>) & { httpsOptions?: HttpsOptions };
 }
 
 // Re-exports for convenience

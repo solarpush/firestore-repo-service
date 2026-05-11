@@ -6,6 +6,10 @@ out
 /dist
 *.tgz
 
+# VitePress docs build artifacts
+docs/static/.vitepress/cache
+docs/static/.vitepress/dist
+
 # code coverage
 coverage
 *.lcov
@@ -21,7 +25,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.test.local
 .env.production.local
 .env.local
-
+test/functions.secret.local
 # caches
 .eslintcache
 .cache
@@ -32,7 +36,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
-
+test/functions/dist/**
 # Firebase Emulator
 .firebase/
 *-debug.log

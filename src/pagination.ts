@@ -1,5 +1,6 @@
 import type { DocumentSnapshot, Query } from "firebase-admin/firestore";
 import { buildAndExecuteQuery } from "./query-builder";
+import { maybeNormalize } from "./shared/date-config";
 import type { QueryOptions } from "./shared/types";
 import { applyQueryOptions } from "./shared/utils";
 
@@ -116,10 +117,12 @@ export async function executePaginatedQuery<T>(
   const hasMore = docs.length > options.pageSize;
   const actualDocs = hasMore ? docs.slice(0, options.pageSize) : docs;
 
-  const data = actualDocs.map((doc) => ({
-    ...doc.data(),
-    docId: doc.id,
-  })) as T[];
+  const data = actualDocs.map((doc) =>
+    maybeNormalize({
+      ...doc.data(),
+      docId: doc.id,
+    }),
+  ) as T[];
 
   const isPrev = options.direction === "prev";
 

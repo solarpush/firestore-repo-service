@@ -126,3 +126,66 @@ const docs = await repos.users.query.by({
   where: [["docId", "in", ids]],
 });
 ```
+
+## Gestion des dates (`setDateHandling`)
+
+Firestore stocke les dates en `Timestamp`. Par défaut le SDK les retourne tels
+quels en lecture — pratique en JS pur, mais pénible pour les API JSON,
+l'OpenAPI, BigQuery, ou tout code qui attend du `Date` natif / des ISO strings.
+
+`setDateHandling()` est un switch global avec deux modes :
+
+```typescript
+import { setDateHandling } from "@lpdjs/firestore-repo-service";
+
+// Au démarrage de ton app (init serveur, init function, etc.)
+setDateHandling("normalize"); // ou "preserve"
+```
+
+### `"preserve"` (défaut — non-breaking)
+
+Comportement inchangé :
+
+- Les lectures du repo renvoient des `Timestamp` bruts.
+- La validation CRUD `z.date()` reste stricte (rejette les ISO strings).
+- La sortie JSON CRUD peut contenir `{ _seconds, _nanoseconds }` si tu laisses
+  passer un `Timestamp`.
+
+À choisir si ton code manipule déjà des `Timestamp` et que tu ne veux aucun
+changement de comportement.
+
+### `"normalize"` (recommandé pour les nouveaux projets)
+
+Tout converge sur **`Date` JS** côté code et **ISO 8601** sur le réseau :
+
+| Couche                                    | Comportement                                                                     |
+|-------------------------------------------|----------------------------------------------------------------------------------|
+| `get.by*`, `getAll`, `query.by*`          | Conversion récursive `Timestamp` → `Date` (objets/arrays imbriqués inclus).      |
+| `paginate`, `transaction.get`             | Même normalisation récursive.                                                    |
+| Retours `create`, `set`, `update`         | Même normalisation récursive.                                                    |
+| Validation d'entrée CRUD                  | `z.date()` est wrappé en `z.preprocess(coerceToDate)` et accepte : `Date`, `Timestamp`, ISO string, `{_seconds,_nanoseconds}`, epoch ms. |
+| Sortie JSON CRUD                          | `Date` → ISO string (natif), plus de fuite `{_seconds,_nanoseconds}`.            |
+| OpenAPI                                   | `z.date()` documenté en `string` / `format: date-time` (matche le runtime).      |
+| Sync BigQuery                             | Inchangé — fonctionne identiquement avec `Date` ou `Timestamp`.                  |
+| Serveur Admin                             | Inchangé — déjà défensif (gère tous les formats).                                |
+
+### Helpers
+
+Les utilitaires de conversion sont exportés au cas où tu en aurais besoin manuellement :
+
+```typescript
+import {
+  coerceToDate,
+  normalizeTimestamps,
+  getDateHandling,
+} from "@lpdjs/firestore-repo-service";
+
+// Date | Timestamp | ISO | epoch ms | {_seconds,_nanoseconds} -> Date | null
+const d = coerceToDate(req.body.publishedAt);
+
+// Convertit récursivement les Timestamps en Dates
+const normalized = normalizeTimestamps(somePayload);
+
+// Lecture du mode global courant
+getDateHandling(); // "preserve" | "normalize"
+```

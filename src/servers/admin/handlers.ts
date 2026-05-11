@@ -14,16 +14,30 @@
 import { z } from "zod";
 import type { ConfiguredRepository } from "../../repositories/types";
 import type { RepositoryConfig } from "../../shared/types";
-import { getInnerType, getShape, getTypeName } from "../../shared/zod-compat";
+import {
+  getEnumValues,
+  getInnerType,
+  getLiteralValue,
+  getNativeEnumValues,
+  getShape,
+  getTypeName,
+} from "../../shared/zod-compat";
 import { renderForm, zodToFields, type FieldDescriptor } from "./form-gen";
+import { isMissingIndexError, toQueryError } from "./index-url";
 import type {
   ColumnMeta,
   FilterState,
   RelationalFieldMeta,
   WhereOp,
 } from "./renderer";
-import { renderDashboard, renderFormPage, renderList } from "./renderer";
+import {
+  renderDashboard,
+  renderFormPage,
+  renderList,
+  renderPage,
+} from "./renderer";
 import type { AnyReq, AnyRes, RouteParams } from "./router";
+import { getLinkBase as getLinkBaseShared } from "../utils/link-base";
 
 // ---------------------------------------------------------------------------
 // Registry type
@@ -34,7 +48,7 @@ export interface AdminRepoEntry {
   path: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   repo: ConfiguredRepository<
-    RepositoryConfig<any, any, any, any, any, any, any, any, any, any>
+    RepositoryConfig<any, any, any, any, any, any, any, any, any, any, any>
   >;
   schema: z.ZodObject<any>;
   /** document key field name (default: "docId") */
@@ -64,6 +78,14 @@ export interface AdminRepoEntry {
    * Populated automatically from the repo's relationalKeys.
    */
   relationalMeta?: RelationalFieldMeta[];
+  /**
+   * Auto-detected from `repo.history`. When true, the admin renders an
+   * extra "History" button on each row and exposes a dedicated route at
+   * `GET /:repoName/:id/history` that lists the change-log entries.
+   */
+  historyEnabled?: boolean;
+  /** Subcollection name used to store history docs (display only). */
+  historySubcollection?: string;
 }
 
 export type RepoRegistry = Record<string, AdminRepoEntry>;
@@ -135,6 +157,49 @@ async function fetchDocById(
     limit: 1,
   });
   return (results[0] as Record<string, unknown>) ?? null;
+}
+
+/**
+ * Build a `flash` payload (with optional "Create Index" CTA) from a Firestore
+ * error raised while loading a single document. Returns `undefined` if the
+ * error is not interesting enough to render as a structured alert.
+ */
+function flashFromDocFetchError(
+  entry: AdminRepoEntry,
+  docId: string,
+  err: unknown,
+): {
+  type: "warning" | "error";
+  message: string;
+  action?: { href: string; label: string; external?: boolean };
+} {
+  const docKey = entry.documentKey ?? "docId";
+  const qe = toQueryError(err, {
+    ref: entry.repo.ref,
+    path: entry.path,
+    isGroup: !!entry.isGroup,
+    filters: [{ field: docKey, op: "==", value: docId }],
+  });
+  if (qe.type === "index") {
+    return {
+      type: "warning",
+      message:
+        "Loading this document requires a composite index that does not exist yet.",
+      ...(qe.indexUrl
+        ? {
+            action: {
+              href: qe.indexUrl,
+              label: "Create Index →",
+              external: true,
+            },
+          }
+        : {}),
+    };
+  }
+  return {
+    type: "error",
+    message: qe.message,
+  };
 }
 
 function sendHtml(res: AnyRes, html: string, status = 200): void {
@@ -316,6 +381,57 @@ function resolveTypeName(schema: z.ZodType): string {
   }
 }
 
+/** Resolve the innermost Zod schema (unwrapping Optional/Nullable/Default) */
+function resolveInnerSchema(schema: z.ZodType): z.ZodType {
+  let s: z.ZodType = schema;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const tn = getTypeName(s);
+    if (tn === "ZodOptional" || tn === "ZodNullable" || tn === "ZodDefault") {
+      s = getInnerType(s)!;
+    } else {
+      return s;
+    }
+  }
+}
+
+/** True if the schema is wrapped in ZodOptional or ZodNullable (recursively). */
+function isFieldNullable(schema: z.ZodType): boolean {
+  let s: z.ZodType = schema;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const tn = getTypeName(s);
+    if (tn === "ZodOptional" || tn === "ZodNullable") return true;
+    if (tn === "ZodDefault") {
+      s = getInnerType(s)!;
+      continue;
+    }
+    return false;
+  }
+}
+
+/** Extract enum values from a (possibly wrapped) ZodEnum / ZodNativeEnum / ZodLiteral. Returns undefined if not an enum. */
+function extractEnumValues(schema: z.ZodType): readonly string[] | undefined {
+  const inner = resolveInnerSchema(schema);
+  const tn = getTypeName(inner);
+  if (tn === "ZodEnum") {
+    const v = getEnumValues(inner);
+    return v.length > 0 ? v : undefined;
+  }
+  if (tn === "ZodNativeEnum") {
+    const obj = getNativeEnumValues(inner);
+    const vals = Object.values(obj).filter(
+      (v) => typeof v === "string",
+    ) as string[];
+    return vals.length > 0 ? vals : undefined;
+  }
+  if (tn === "ZodLiteral") {
+    const v = getLiteralValue(inner);
+    return typeof v === "string" ? [v] : undefined;
+  }
+  return undefined;
+}
+
 /**
  * Prefill a Zod schema fields with existing document values.
  * For ZodObject fields, recurses into nested sub-fields using dot-notation keys
@@ -420,6 +536,8 @@ function parseFilters(
     "<=",
     ">",
     ">=",
+    "in",
+    "not-in",
     "array-contains",
     "array-contains-any",
   ]);
@@ -442,19 +560,23 @@ function parseFilters(
  * Coerces string values to boolean/number when unambiguous.
  */
 function filtersToWhere(filters: FilterState[]): [string, WhereOp, unknown][] {
+  const NULL_SENTINEL = "__null__";
   const coerce = (v: string): unknown => {
+    if (v === NULL_SENTINEL) return null;
     if (v === "true") return true;
     if (v === "false") return false;
     if (v !== "" && !isNaN(Number(v))) return Number(v);
     return v;
   };
   return filters.map((f) => {
-    if (f.op === "array-contains-any") {
-      // CSV list → array, each element coerced
+    if (f.op === "array-contains-any" || f.op === "in" || f.op === "not-in") {
+      // CSV list → array, each element coerced (drop empty / null sentinels —
+      // Firestore rejects null inside `in`/`not-in`).
       const arr = f.value
         .split(",")
-        .map((s) => coerce(s.trim()))
-        .filter((s) => s !== "");
+        .map((s) => s.trim())
+        .filter((s) => s !== "" && s !== NULL_SENTINEL)
+        .map((s) => coerce(s));
       return [f.field, f.op, arr];
     }
     return [f.field, f.op, coerce(f.value)];
@@ -498,7 +620,12 @@ function buildColumnMeta(
         ),
       );
     } else {
-      result.push({ name: fullName, zodType });
+      result.push({
+        name: fullName,
+        zodType,
+        nullable: isFieldNullable(field),
+        enumValues: extractEnumValues(field),
+      });
     }
   }
   return result;
@@ -600,36 +727,10 @@ function getMutableSchema(
 }
 /**
  * Compute the link base for all UI links.
- *
- * ── Emulator (FUNCTIONS_EMULATOR=true) ──────────────────────────────────────
- * Firebase emulator exposes functions at:
- *   http://localhost:5001/{GCLOUD_PROJECT}/{FUNCTION_REGION}/{FUNCTION_TARGET}/...
- * env vars set by the emulator:
- *   GCLOUD_PROJECT / GOOGLE_CLOUD_PROJECT  → project id
- *   FUNCTION_REGION                        → region (default: us-central1)
- *   FUNCTION_TARGET                        → function export name (e.g. "admin")
- *
- * ── Production ──────────────────────────────────────────────────────────────
- * Firebase proxy strips the prefix before reaching the handler, so links
- * are relative to "/" and `staticBasePath` is used as-is.
+ * @see {@link import("../utils/link-base").getLinkBase}
  */
-function getLinkBase(_req: AnyReq, staticBasePath: string): string {
-  const base = staticBasePath === "/" ? "" : staticBasePath.replace(/\/$/, "");
-
-  if (process.env["FUNCTIONS_EMULATOR"] === "true") {
-    const project =
-      process.env["GCLOUD_PROJECT"] ??
-      process.env["GOOGLE_CLOUD_PROJECT"] ??
-      "demo-project";
-    const region = process.env["FUNCTION_REGION"] ?? "us-central1";
-    // FUNCTION_TARGET uses dots (e.g. "sync.functions.syncAdmin") but the
-    // emulator URL uses hyphens ("sync-functions-syncAdmin").
-    const target = (process.env["FUNCTION_TARGET"] ?? "").replace(/\./g, "-");
-    return `/${project}/${region}/${target}${base}`;
-  }
-
-  // Production: Firebase proxy strips the /{project}/{region}/{fn} prefix
-  return base;
+function getLinkBase(req: AnyReq, staticBasePath: string): string {
+  return getLinkBaseShared(req, staticBasePath);
 }
 
 export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
@@ -708,6 +809,8 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
           out.push({
             name: col,
             zodType: resolved ? resolveTypeName(resolved) : "ZodString",
+            nullable: resolved ? isFieldNullable(resolved) : false,
+            enumValues: resolved ? extractEnumValues(resolved) : undefined,
           });
         } else {
           out.push(...buildColumnMeta([col], entry.schema));
@@ -737,35 +840,61 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       }
     }
 
-    const result = await entry.repo.query.paginate({
-      pageSize: currentPageSize,
-      cursor: cursorSnapshot,
-      // direction + where + orderBy are supported at runtime but not in the strict typed interface
-      ...{ direction: dir },
-      ...(whereFilters.length > 0 ? { where: whereFilters } : {}),
-      ...(sortState
-        ? {
-            orderBy: [
-              { field: sortState.field as any, direction: sortState.dir },
-            ],
-          }
-        : {}),
-    });
+    const [result, totalCount] = await Promise.all([
+      entry.repo.query
+        .paginate({
+          pageSize: currentPageSize,
+          cursor: cursorSnapshot,
+          // direction + where + orderBy are supported at runtime but not in the strict typed interface
+          ...{ direction: dir },
+          ...(whereFilters.length > 0 ? { where: whereFilters } : {}),
+          ...(sortState
+            ? {
+                orderBy: [
+                  { field: sortState.field as any, direction: sortState.dir },
+                ],
+              }
+            : {}),
+        })
+        .catch(
+          (err: unknown) =>
+            ({
+              queryError: toQueryError(err, {
+                ref: entry.repo.ref,
+                path: entry.path,
+                isGroup: !!entry.isGroup,
+                filters: activeFilters,
+                sort: sortState,
+              }),
+            }) as const,
+        ),
+      entry.repo.aggregate
+        .count(
+          (whereFilters.length > 0
+            ? { where: whereFilters as any }
+            : {}) as any,
+        )
+        .catch(() => undefined as number | undefined),
+    ]);
 
-    const nextCursorId = result.nextCursor?.id ?? "";
-    const prevCursorId = result.prevCursor?.id ?? "";
+    // Discriminate between success and error results
+    const isError = "queryError" in result;
+    const docs = isError ? [] : (result.data as Record<string, unknown>[]);
+    const nextCursorId = isError ? "" : (result.nextCursor?.id ?? "");
+    const prevCursorId = isError ? "" : (result.prevCursor?.id ?? "");
+    const queryError = isError ? result.queryError : undefined;
     const lb = getLinkBase(req, basePath);
 
     sendHtml(
       res,
       renderList(
         entry.name,
-        result.data as Record<string, unknown>[],
+        docs,
         columns,
         lb,
         {
-          hasPrev: result.hasPrevPage,
-          hasNext: result.hasNextPage,
+          hasPrev: isError ? false : result.hasPrevPage,
+          hasNext: isError ? false : result.hasNextPage,
           prevCursor: prevCursorId,
           nextCursor: nextCursorId,
         },
@@ -776,6 +905,12 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
         entry.relationalMeta,
         sortState,
         currentPageSize,
+        queryError,
+        entry.isGroup,
+        totalCount,
+        entry.mutableFields,
+        entry.schema,
+        entry.historyEnabled,
       ),
     );
   };
@@ -901,11 +1036,28 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       return;
     }
 
+    const lb = getLinkBase(req, basePath);
+
     let doc: Record<string, unknown> | null = null;
     try {
       doc = await fetchDocById(entry, docId);
     } catch (err) {
-      sendHtml(res, `Error fetching document: ${(err as Error).message}`, 500);
+      const flash = flashFromDocFetchError(entry, docId, err);
+      const status = isMissingIndexError(err) ? 424 : 500;
+      sendHtml(
+        res,
+        renderPage("", {
+          title: `Edit ${entry.name} / ${docId}`,
+          basePath: lb,
+          breadcrumb: [
+            { label: "Repositories", href: lb },
+            { label: entry.name, href: `${lb}/${entry.name}` },
+            { label: `Edit ${docId}` },
+          ],
+          flash,
+        }),
+        status,
+      );
       return;
     }
 
@@ -918,7 +1070,6 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     const mutableSchema = getMutableSchema(entry.schema, entry.mutableFields);
     const fields = applyPrefill(zodToFields(mutableSchema), prefilled);
 
-    const lb = getLinkBase(req, basePath);
     const actionUrl = `${lb}/${entry.name}/${encodeURIComponent(docId)}/edit`;
     const formHtml = renderForm(fields, actionUrl, "POST", "Save changes");
 
@@ -989,13 +1140,17 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       const fields = zodToFields(mutableSchema2);
       const actionUrl = `${lb}/${entry.name}/${encodeURIComponent(docId)}/edit`;
       const formHtml = renderForm(fields, actionUrl, "POST", "Save changes");
+      const flash = isMissingIndexError(err)
+        ? flashFromDocFetchError(entry, docId, err)
+        : {
+            type: "error" as const,
+            message: `Save error: ${(err as Error).message}`,
+          };
+      const status = isMissingIndexError(err) ? 424 : 500;
       sendHtml(
         res,
-        renderFormPage(entry.name, formHtml, "edit", docId, lb, {
-          type: "error",
-          message: `Save error: ${(err as Error).message}`,
-        }),
-        500,
+        renderFormPage(entry.name, formHtml, "edit", docId, lb, flash),
+        status,
       );
     }
   };
@@ -1028,8 +1183,507 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       await entry.repo.delete(...pathArgs);
       redirect(res, `${lb}/${entry.name}?flash=deleted`);
     } catch (err) {
-      sendHtml(res, `Delete error: ${(err as Error).message}`, 500);
+      const flash = isMissingIndexError(err)
+        ? flashFromDocFetchError(entry, docId, err)
+        : {
+            type: "error" as const,
+            message: `Delete error: ${(err as Error).message}`,
+          };
+      const status = isMissingIndexError(err) ? 424 : 500;
+      sendHtml(
+        res,
+        renderPage("", {
+          title: `Delete ${entry.name} / ${docId}`,
+          basePath: lb,
+          breadcrumb: [
+            { label: "Repositories", href: lb },
+            { label: entry.name, href: `${lb}/${entry.name}` },
+            { label: `Delete ${docId}` },
+          ],
+          flash,
+        }),
+        status,
+      );
     }
+  };
+
+  // ── Relation right-panel preview (HTML fragment, no shell) ───────────────
+  const handlePanel = async (
+    req: AnyReq & { params: RouteParams },
+    res: AnyRes,
+  ): Promise<void> => {
+    const repoName = req.params["repoName"];
+    if (!repoName) {
+      sendHtml(res, "Bad request", 400);
+      return;
+    }
+    const entry = registry[repoName];
+    if (!entry) {
+      sendHtml(res, "Repository not found", 404);
+      return;
+    }
+    const lb = getLinkBase(req, basePath);
+    const query = (req as any).query as Record<string, string> | undefined;
+    const type = query?.["type"] === "many" ? "many" : "one";
+    const ps = Math.max(1, Math.min(100, Number(query?.["ps"] ?? 25) || 25));
+    const allColumns = entry.listColumns ?? Object.keys(getShape(entry.schema));
+
+    // Lazy import the panel components — they're only used by this route.
+    const { PanelOne, PanelMany } = await import("./components/right-panel");
+    const { renderToString } = await import("hono/jsx/dom/server");
+
+    if (type === "one") {
+      const id = String(query?.["id"] ?? "");
+      if (!id) {
+        sendHtml(
+          res,
+          "<div class='p-6 text-error'>Missing id parameter.</div>",
+          400,
+        );
+        return;
+      }
+      try {
+        const doc = await fetchDocById(entry, id);
+        const html = renderToString(
+          PanelOne({
+            doc,
+            repoName: entry.name,
+            basePath: lb,
+            schema: entry.schema,
+            columns: allColumns,
+          }) as any,
+        );
+        sendHtml(res, html);
+      } catch (err) {
+        sendHtml(
+          res,
+          `<div class='p-6 text-error text-sm'>Error: ${(err as Error).message}</div>`,
+          500,
+        );
+      }
+      return;
+    }
+
+    // many
+    const fk = String(query?.["fk"] ?? "");
+    const fv = String(query?.["fv"] ?? "");
+    if (!fk || !fv) {
+      sendHtml(
+        res,
+        "<div class='p-6 text-error'>Missing fk/fv parameters.</div>",
+        400,
+      );
+      return;
+    }
+    const cursorStr = query?.["cursor"] ?? "";
+    const dir = query?.["dir"] === "prev" ? "prev" : "next";
+    let cursorSnapshot:
+      | import("firebase-admin/firestore").DocumentSnapshot
+      | undefined;
+    if (cursorStr) {
+      try {
+        const colRef = entry.repo.ref as any;
+        if (typeof colRef.doc === "function") {
+          cursorSnapshot = await colRef.doc(cursorStr).get();
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      const result = await entry.repo.query.paginate({
+        pageSize: ps,
+        cursor: cursorSnapshot,
+        ...{ direction: dir },
+        ...{ where: [[fk, "==", coerceFilterValue(fv)]] },
+      } as any);
+      const html = renderToString(
+        PanelMany({
+          docs: result.data as Record<string, unknown>[],
+          repoName: entry.name,
+          basePath: lb,
+          fk,
+          fv,
+          columns: allColumns,
+          schema: entry.schema,
+          pagination: {
+            hasPrev: result.hasPrevPage,
+            hasNext: result.hasNextPage,
+            prevCursor: result.prevCursor?.id ?? "",
+            nextCursor: result.nextCursor?.id ?? "",
+            pageSize: ps,
+          },
+        }) as any,
+      );
+      sendHtml(res, html);
+    } catch (err) {
+      sendHtml(
+        res,
+        `<div class='p-6 text-error text-sm'>Error: ${(err as Error).message}</div>`,
+        500,
+      );
+    }
+  };
+
+  // ── Bulk operations ──────────────────────────────────────────────────────
+  /** Build DocumentReferences for a list of docIds, handling subcollections via fetchDocById. */
+  const resolveRefs = async (
+    entry: AdminRepoEntry,
+    ids: string[],
+  ): Promise<import("firebase-admin/firestore").DocumentReference[]> => {
+    const refs: import("firebase-admin/firestore").DocumentReference[] = [];
+    for (const id of ids) {
+      let pathArgs: string[] | undefined;
+      if (entry.isGroup || entry.parentKeys?.length) {
+        const doc = await fetchDocById(entry, id);
+        pathArgs = doc ? extractPathArgs(doc, entry.pathKey) : undefined;
+      }
+      if (!pathArgs) pathArgs = [id];
+      try {
+        const ref = (entry.repo as any).documentRef(...pathArgs);
+        if (ref) refs.push(ref);
+      } catch {
+        /* ignore */
+      }
+    }
+    return refs;
+  };
+
+  /** Resolve all docIds matching a set of filters by streaming the query in pages. */
+  const resolveAllIds = async (
+    entry: AdminRepoEntry,
+    filters: FilterState[],
+  ): Promise<string[]> => {
+    const where = filtersToWhere(filters);
+    const docKey = entry.documentKey ?? "docId";
+    const ids: string[] = [];
+    let cursor: import("firebase-admin/firestore").DocumentSnapshot | undefined;
+    // Stream in pages of 500
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const page: any = await entry.repo.query.paginate({
+        pageSize: 500,
+        cursor,
+        ...{ direction: "next" },
+        ...(where.length > 0 ? { where } : {}),
+      } as any);
+      for (const d of page.data as Record<string, unknown>[]) {
+        const id = String(d[docKey] ?? d["id"] ?? "");
+        if (id) ids.push(id);
+      }
+      if (!page.hasNextPage || !page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    return ids;
+  };
+
+  const handleBulkDelete = async (
+    req: AnyReq & { params: RouteParams },
+    res: AnyRes,
+  ): Promise<void> => {
+    const repoName = req.params["repoName"];
+    if (!repoName) {
+      sendJson(res, { error: "Bad request" }, 400);
+      return;
+    }
+    const entry = registry[repoName];
+    if (!entry) {
+      sendJson(res, { error: "Repository not found" }, 404);
+      return;
+    }
+    if (!entry.allowDelete) {
+      sendJson(
+        res,
+        { error: "Delete is not allowed for this repository" },
+        403,
+      );
+      return;
+    }
+    const body = ((req as any).body ?? {}) as {
+      ids?: unknown;
+      selectAll?: unknown;
+      filters?: unknown;
+    };
+    try {
+      const ids = await collectTargetIds(entry, body);
+      if (ids.length === 0) {
+        sendJson(res, { deleted: 0 });
+        return;
+      }
+      const refs = await resolveRefs(entry, ids);
+      // Chunk to 500 per Firestore batched-write limit
+      for (let i = 0; i < refs.length; i += 500) {
+        await entry.repo.bulk.delete(refs.slice(i, i + 500));
+      }
+      sendJson(res, { deleted: refs.length });
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 500);
+    }
+  };
+
+  const handleBulkUpdate = async (
+    req: AnyReq & { params: RouteParams },
+    res: AnyRes,
+  ): Promise<void> => {
+    const repoName = req.params["repoName"];
+    if (!repoName) {
+      sendJson(res, { error: "Bad request" }, 400);
+      return;
+    }
+    const entry = registry[repoName];
+    if (!entry) {
+      sendJson(res, { error: "Repository not found" }, 404);
+      return;
+    }
+    const body = ((req as any).body ?? {}) as {
+      ids?: unknown;
+      selectAll?: unknown;
+      filters?: unknown;
+      field?: unknown;
+      value?: unknown;
+    };
+    const field = String(body.field ?? "");
+    if (!field) {
+      sendJson(res, { error: "Missing 'field'" }, 400);
+      return;
+    }
+    // SECURITY: Strict allow-list of fields
+    if (!entry.mutableFields || !entry.mutableFields.includes(field)) {
+      sendJson(res, { error: `Field '${field}' is not bulk-updatable` }, 403);
+      return;
+    }
+    // Parse value through the field's Zod schema for validation/coercion
+    const fieldSchema = (entry.schema as any).shape?.[field] as
+      | z.ZodType
+      | undefined;
+    let parsedValue: unknown = body.value;
+    if (fieldSchema) {
+      const parsed = fieldSchema.safeParse(body.value);
+      if (!parsed.success) {
+        sendJson(
+          res,
+          { error: `Invalid value for '${field}': ${parsed.error.message}` },
+          400,
+        );
+        return;
+      }
+      parsedValue = parsed.data;
+    }
+    try {
+      const ids = await collectTargetIds(entry, body);
+      if (ids.length === 0) {
+        sendJson(res, { updated: 0 });
+        return;
+      }
+      const refs = await resolveRefs(entry, ids);
+      const items = refs.map((docRef) => ({
+        docRef,
+        data: { [field]: parsedValue } as any,
+      }));
+      for (let i = 0; i < items.length; i += 500) {
+        await entry.repo.bulk.update(items.slice(i, i + 500));
+      }
+      sendJson(res, { updated: items.length });
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 500);
+    }
+  };
+
+  /** Shared logic: extract target IDs from a request body (`ids[]` OR `selectAll + filters`). */
+  async function collectTargetIds(
+    entry: AdminRepoEntry,
+    body: { ids?: unknown; selectAll?: unknown; filters?: unknown },
+  ): Promise<string[]> {
+    if (body.selectAll) {
+      const filters = sanitizeFilters(body.filters, entry);
+      return await resolveAllIds(entry, filters);
+    }
+    if (Array.isArray(body.ids)) {
+      return body.ids.filter((x): x is string => typeof x === "string" && !!x);
+    }
+    return [];
+  }
+
+  function sanitizeFilters(raw: unknown, entry: AdminRepoEntry): FilterState[] {
+    if (!Array.isArray(raw)) return [];
+    const validFields = new Set(
+      (entry.filterableFields ?? Object.keys(getShape(entry.schema))).map((s) =>
+        String(s),
+      ),
+    );
+    const validOps = new Set([
+      "==",
+      "!=",
+      "<",
+      "<=",
+      ">",
+      ">=",
+      "in",
+      "not-in",
+      "array-contains",
+      "array-contains-any",
+    ]);
+    const out: FilterState[] = [];
+    for (const f of raw) {
+      if (
+        f &&
+        typeof f === "object" &&
+        typeof (f as any).field === "string" &&
+        validFields.has((f as any).field) &&
+        typeof (f as any).value === "string" &&
+        validOps.has(String((f as any).op))
+      ) {
+        out.push({
+          field: (f as any).field,
+          op: (f as any).op,
+          value: (f as any).value,
+        });
+      }
+    }
+    return out;
+  }
+
+  // ── History list ──────────────────────────────────────────────────────────
+  const handleHistory = async (
+    req: AnyReq & { params: RouteParams },
+    res: AnyRes,
+  ): Promise<void> => {
+    const repoName = req.params["repoName"];
+    const docId = req.params["id"];
+    if (!repoName || !docId) {
+      sendHtml(res, "Bad request", 400);
+      return;
+    }
+    const entry = registry[repoName];
+    if (!entry) {
+      sendHtml(res, "Repository not found", 404);
+      return;
+    }
+    if (!entry.historyEnabled || !(entry.repo as any).history) {
+      sendHtml(res, "History not enabled for this repository", 404);
+      return;
+    }
+
+    const lb = getLinkBase(req, basePath);
+    const subcollection = entry.historySubcollection ?? "history";
+
+    let pathArgs: string[] = [docId];
+    try {
+      const doc = await fetchDocById(entry, docId);
+      const extracted = doc ? extractPathArgs(doc, entry.pathKey) : undefined;
+      if (extracted && extracted.length > 0) pathArgs = extracted;
+    } catch {
+      // best-effort: fall back to [docId]
+    }
+
+    const limitRaw = parseInt(String((req.query as any)?.limit ?? ""));
+    const limit =
+      Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 100;
+
+    let entries: any[] = [];
+    let errorMsg: string | undefined;
+    try {
+      entries = await (entry.repo as any).history.list(...pathArgs, { limit });
+    } catch (err) {
+      errorMsg = (err as Error).message;
+    }
+
+    const escape = (s: unknown): string =>
+      String(s ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+
+    const fmtVal = (v: unknown): string => {
+      if (v === undefined) return '<span class="opacity-40">undefined</span>';
+      if (v === null) return '<span class="opacity-40">null</span>';
+      if (typeof v === "object") {
+        try {
+          return `<code class="text-xs">${escape(JSON.stringify(v))}</code>`;
+        } catch {
+          return escape(String(v));
+        }
+      }
+      return escape(String(v));
+    };
+
+    const fmtTs = (ts: any): string => {
+      if (!ts) return "";
+      if (typeof ts.toDate === "function") return ts.toDate().toISOString();
+      if (ts instanceof Date) return ts.toISOString();
+      return escape(String(ts));
+    };
+
+    const opBadge = (op: string): string => {
+      const cls =
+        op === "create"
+          ? "badge-success"
+          : op === "delete"
+            ? "badge-error"
+            : "badge-info";
+      return `<span class="badge badge-sm ${cls}">${escape(op)}</span>`;
+    };
+
+    let body = "";
+    body += `<div class="flex items-center justify-between mb-4">`;
+    body += `<a href="${lb}/${entry.name}/${encodeURIComponent(docId)}/edit" class="btn btn-sm btn-outline">← Back to edit</a>`;
+    body += `<a href="${lb}/${entry.name}" class="btn btn-sm btn-outline">← Back to list</a>`;
+    body += `</div>`;
+
+    body += `<p class="text-sm text-base-content/60 mb-4">Subcollection: <code>${escape(subcollection)}</code> · Showing up to ${limit} entries.</p>`;
+
+    if (errorMsg) {
+      body += `<div class="alert alert-error mb-4">${escape(errorMsg)}</div>`;
+    } else if (entries.length === 0) {
+      body += `<div class="alert">No history entries found.</div>`;
+    } else {
+      body += `<div class="overflow-x-auto"><table class="table table-zebra table-sm">`;
+      body += `<thead><tr><th>When</th><th>Op</th><th>User</th><th>Reason / Comment</th><th>Changes</th></tr></thead><tbody>`;
+      for (const e of entries) {
+        const meta = e.meta ?? {};
+        const reasonComment = [meta.reason, meta.comment]
+          .filter((x: unknown) => x != null && x !== "")
+          .map((x: unknown) => escape(String(x)))
+          .join(" — ");
+        let changesHtml = "";
+        const changeKeys = Object.keys(e.changes ?? {});
+        if (changeKeys.length === 0) {
+          changesHtml = '<span class="opacity-40">—</span>';
+        } else {
+          changesHtml =
+            '<ul class="space-y-1">' +
+            changeKeys
+              .map((k) => {
+                const c = e.changes[k];
+                return `<li><strong>${escape(k)}</strong>: ${fmtVal(c.oldValue)} → ${fmtVal(c.newValue)}</li>`;
+              })
+              .join("") +
+            "</ul>";
+        }
+        body += `<tr>`;
+        body += `<td class="whitespace-nowrap text-xs font-mono">${escape(fmtTs(e.historySetAt))}</td>`;
+        body += `<td>${opBadge(e.operation ?? "update")}</td>`;
+        body += `<td class="text-xs">${escape(meta.userEmail ?? meta.userId ?? "")}</td>`;
+        body += `<td class="text-xs">${reasonComment}</td>`;
+        body += `<td>${changesHtml}</td>`;
+        body += `</tr>`;
+      }
+      body += `</tbody></table></div>`;
+    }
+
+    sendHtml(
+      res,
+      renderPage(body, {
+        title: `History — ${entry.name} / ${docId}`,
+        basePath: lb,
+        breadcrumb: [
+          { label: "Repositories", href: lb },
+          { label: entry.name, href: `${lb}/${entry.name}` },
+          { label: `History ${docId}` },
+        ],
+      }),
+    );
   };
 
   return {
@@ -1040,5 +1694,24 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     handleEditForm,
     handleEditSubmit,
     handleDelete,
+    handlePanel,
+    handleBulkDelete,
+    handleBulkUpdate,
+    handleHistory,
   };
+}
+
+function sendJson(res: AnyRes, payload: unknown, status = 200): void {
+  res
+    .status(status)
+    .set("Content-Type", "application/json; charset=utf-8")
+    .send(JSON.stringify(payload));
+}
+
+/** Coerce a string filter value to the most likely runtime type for a Firestore where clause. */
+function coerceFilterValue(v: string): unknown {
+  if (v === "true") return true;
+  if (v === "false") return false;
+  if (v !== "" && !isNaN(Number(v))) return Number(v);
+  return v;
 }
