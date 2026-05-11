@@ -200,8 +200,8 @@ export const admin = servers.admin({
     mode: "cookie",
     // Required when loginPage is enabled (default in cookie/both modes).
     // Find both in Firebase Console → Project Settings → General → Web app.
-    apiKey: process.env["FIREBASE_WEB_API_KEY"],
-    authDomain: process.env["FIREBASE_AUTH_DOMAIN"],
+    apiKey: process.env["WEB_API_KEY"],
+    authDomain: process.env["AUTH_DOMAIN"],
     allow: () => true,
   }),
   basePath: "/",
@@ -269,8 +269,8 @@ export const crud = servers.crud({
     mode: "both",
     // Required when loginPage is enabled (default in cookie/both modes).
     // Find both in Firebase Console → Project Settings → General → Web app.
-    apiKey: process.env["FIREBASE_WEB_API_KEY"],
-    authDomain: process.env["FIREBASE_AUTH_DOMAIN"],
+    apiKey: process.env["WEB_API_KEY"],
+    authDomain: process.env["AUTH_DOMAIN"],
     allow: () => true,
   }),
 
@@ -368,8 +368,8 @@ export const sync = servers.sync({
     auth: firebaseAuth({
       getAuth: () => getAuth(),
       mode: "cookie",
-      apiKey: process.env["FIREBASE_WEB_API_KEY"],
-      authDomain: process.env["FIREBASE_AUTH_DOMAIN"],
+      apiKey: process.env["WEB_API_KEY"],
+      authDomain: process.env["AUTH_DOMAIN"],
       allow: () => true,
     }),
     basePath: "/",
