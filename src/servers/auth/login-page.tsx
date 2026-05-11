@@ -58,7 +58,7 @@ export function renderLoginPage(opts: LoginPageOptions): string {
     }
     @media (prefers-color-scheme: dark) {
       body { background: #1d1d1f; color: #f5f5f7; }
-      .card { background: #2c2c2e; }
+      .card { background: #2c2c2e !important; }
       input { background: #1d1d1f; color: #f5f5f7; border-color: #444; }
       input::placeholder { color: #888; }
       input:-webkit-autofill,
