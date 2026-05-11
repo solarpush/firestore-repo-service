@@ -343,8 +343,6 @@ export interface adminsyncBasicAuth {
  * Feature flags controlling which sync admin endpoints are enabled.
  */
 export interface adminsyncFeaturesFlag {
-  /** Show pending queue state (default: false) */
-  viewQueue?: boolean;
   /** Allow force-syncing an entire collection (default: false) */
   manualSync?: boolean;
   /** Schema health check: expected vs actual SQL columns (default: false) */

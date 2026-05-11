@@ -5,7 +5,6 @@
  * Features (gated by `featuresFlag`):
  *  - **healthCheck** — compare expected Zod-derived columns vs actual SQL columns
  *  - **manualSync** — force re-sync all documents in a Firestore collection
- *  - **viewQueue** — inspect pending items in the per-repo SyncQueue
  *
  * @example
  * ```typescript
@@ -13,7 +12,7 @@
  *   // …deps, adapter, etc.
  *   admin: {
  *     auth: { type: "basic", username: "admin", password: "secret" },
- *     featuresFlag: { healthCheck: true, manualSync: true, viewQueue: true },
+ *     featuresFlag: { healthCheck: true, manualSync: true },
  *   },
  * });
  *
@@ -213,10 +212,6 @@ export function createadminsyncServer(
       })
       .join("\n");
 
-    const queueLink = features.viewQueue
-      ? `<p><a class="btn" href="${lb}/queues">View Queues</a></p>`
-      : "";
-
     const configCheckLink = features.configCheck
       ? `<p style="margin-top:.5rem"><a class="btn" href="${lb}/config-check">⚙ Config Check</a></p>`
       : "";
@@ -229,7 +224,6 @@ export function createadminsyncServer(
           <thead><tr><th>Repository</th><th>Table</th><th>Type</th><th>Schema</th><th>Actions</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
-        ${queueLink}
         ${configCheckLink}
       </div>`,
     );
@@ -507,51 +501,6 @@ export function createadminsyncServer(
           <p>Synced <strong>${synced}</strong> documents to <code>${info.tableName}</code>.</p>
           ${errors > 0 ? `<p class="badge badge-warn">${errors} error(s)</p>` : ""}
           ${errorBlock}
-        </div>`,
-      );
-      sendHtml(res, html);
-    });
-  }
-
-  // -- View Queues --------------------------------------------------------
-  if (features.viewQueue) {
-    router.get(`${basePath}/queues`, (req, res) => {
-      const lb = getLinkBase(req, basePath);
-      const queueData: Array<{
-        repo: string;
-        table: string;
-        pending: number;
-      }> = [];
-
-      for (const info of repoInfos) {
-        const q = queues.get(info.name);
-        queueData.push({
-          repo: info.name,
-          table: info.tableName,
-          pending: q ? q.size : 0,
-        });
-      }
-
-      if (isJsonRequest(req)) {
-        sendJson(res, { queues: queueData });
-        return;
-      }
-
-      const rows = queueData
-        .map(
-          (q) =>
-            `<tr><td>${q.repo}</td><td>${q.table}</td><td>${q.pending === 0 ? '<span class="badge badge-ok">0</span>' : `<span class="badge badge-warn">${q.pending}</span>`}</td></tr>`,
-        )
-        .join("\n");
-
-      const html = page(
-        "Sync Queues",
-        lb,
-        `<div class="card">
-          <table>
-            <thead><tr><th>Repository</th><th>Table</th><th>Pending</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
         </div>`,
       );
       sendHtml(res, html);

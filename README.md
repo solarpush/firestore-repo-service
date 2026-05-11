@@ -433,7 +433,7 @@ export const { functions } = servers.sync({
   autoMigrate: true,
   admin: {
     auth: { type: "basic", username: "admin", password: "secret" },
-    featuresFlag: { healthCheck: true, manualSync: true, viewQueue: true, configCheck: true },
+    featuresFlag: { healthCheck: true, manualSync: true, configCheck: true },
   },
   repos: {
     users: { tableName: "users", columnMap: { docId: "user_id" } },
@@ -783,7 +783,7 @@ export const { functions } = servers.sync({
   autoMigrate: true,
   admin: {
     auth: { type: "basic", username: "admin", password: "secret" },
-    featuresFlag: { healthCheck: true, manualSync: true, viewQueue: true, configCheck: true },
+    featuresFlag: { healthCheck: true, manualSync: true, configCheck: true },
   },
   repos: {
     users: { tableName: "users", columnMap: { docId: "user_id" } },

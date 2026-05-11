@@ -361,7 +361,7 @@ export const sync = servers.sync({
   batchSize: 500,
   flushIntervalMs: 10_000,
   workerOptions: {
-    concurrency: 5,
+    concurrency: 250,
     maxInstances: 10,
   },
   admin: {
@@ -374,7 +374,6 @@ export const sync = servers.sync({
     }),
     basePath: "/",
     featuresFlag: {
-      viewQueue: true,
       manualSync: true,
       healthCheck: true,
       configCheck: true,

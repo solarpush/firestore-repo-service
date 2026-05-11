@@ -14,7 +14,7 @@
  *   autoMigrate: true,
  *   admin: {
  *     auth: { type: "basic", username: "admin", password: "secret" },
- *     featuresFlag: { healthCheck: true, manualSync: true, viewQueue: true },
+ *     featuresFlag: { healthCheck: true, manualSync: true },
  *   },
  *   repos: {
  *     users: { exclude: ["documentPath"], columnMap: { docId: "user_id" } },

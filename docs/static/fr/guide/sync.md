@@ -28,7 +28,10 @@ const servers = createServers(repos, { onRequest });
 const sync = servers.sync({
   deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
   adapter: new BigQueryAdapter({
-    bigquery: new BigQuery({ projectId: "my-project", location: "us-central1" }),
+    bigquery: new BigQuery({
+      projectId: "my-project",
+      location: "us-central1",
+    }),
     datasetId: "firestore_sync",
   }),
   topicPrefix: "firestore-sync",
@@ -39,7 +42,6 @@ const sync = servers.sync({
     featuresFlag: {
       healthCheck: true,
       manualSync: true,
-      viewQueue: true,
       configCheck: true,
     },
   },
@@ -75,17 +77,17 @@ export const {
 
 Le wrapper unifié qui crée les triggers, les workers et le serveur admin optionnel (à partir du registre déjà lié à `createServers`).
 
-| Option            | Type                   | Défaut             | Description                             |
-| ----------------- | ---------------------- | ------------------ | --------------------------------------- |
-| `deps`            | `SyncDeps`                     | requis             | Dépendances Firebase Functions + PubSub             |
-| `adapter`         | `SqlAdapter`                   | requis             | Adaptateur SQL (ex: `BigQueryAdapter`)              |
-| `topicPrefix`     | `string`                       | `"firestore-sync"` | Préfixe des topics Pub/Sub                          |
-| `batchSize`       | `number`                       | `100`              | Nombre max de lignes par flush                      |
-| `flushIntervalMs` | `number`                       | `5000`             | Intervalle de flush en ms                           |
-| `autoMigrate`     | `boolean`                      | `false`            | Créer/migrer les tables automatiquement             |
-| `workerOptions`   | `SyncWorkerOptions`            | —                  | Options CF v2 du worker (`concurrency`, `maxInstances`, …) |
-| `admin`           | `adminsyncConfig`              | —                  | Configuration optionnelle de l'admin                |
-| `repos`           | `TypedRepoSyncConfigs`         | —                  | Surcharges par repo                                 |
+| Option            | Type                   | Défaut             | Description                                                |
+| ----------------- | ---------------------- | ------------------ | ---------------------------------------------------------- |
+| `deps`            | `SyncDeps`             | requis             | Dépendances Firebase Functions + PubSub                    |
+| `adapter`         | `SqlAdapter`           | requis             | Adaptateur SQL (ex: `BigQueryAdapter`)                     |
+| `topicPrefix`     | `string`               | `"firestore-sync"` | Préfixe des topics Pub/Sub                                 |
+| `batchSize`       | `number`               | `100`              | Nombre max de lignes par flush                             |
+| `flushIntervalMs` | `number`               | `5000`             | Intervalle de flush en ms                                  |
+| `autoMigrate`     | `boolean`              | `false`            | Créer/migrer les tables automatiquement                    |
+| `workerOptions`   | `SyncWorkerOptions`    | —                  | Options CF v2 du worker (`concurrency`, `maxInstances`, …) |
+| `admin`           | `adminsyncConfig`      | —                  | Configuration optionnelle de l'admin                       |
+| `repos`           | `TypedRepoSyncConfigs` | —                  | Surcharges par repo                                        |
 
 ### Dépendances (`deps`)
 
@@ -108,6 +110,7 @@ Cloud Functions qui n'en ont pas besoin (ex: fonctions HTTP-only partageant le m
 deps: { firestoreTriggers, pubsubHandler, pubsub: () => new PubSub() },
 adapter: () => new BigQueryAdapter({ bigquery: new BigQuery(), datasetId: "sync" }),
 ```
+
 :::
 
 ### Config par repo (`repos`)
@@ -159,7 +162,7 @@ La librairie gère ça **au niveau applicatif** :
 
 4. Au sein d'un même batch, la queue dédoublonne les upserts par `docId` en ne gardant
    que la ligne avec la `version` la plus haute — ce qui évite l'erreur BigQuery
-   *"UPDATE/MERGE must match at most one source row for each target row"* quand
+   _"UPDATE/MERGE must match at most one source row for each target row"_ quand
    plusieurs updates du même document sont flush ensemble.
 
 **Aucune configuration nécessaire.** Les updates désordonnés sont silencieusement
@@ -199,21 +202,21 @@ ci-dessus).
 
 Trois leviers pour ajuster latence, throughput et pression sur les quotas BigQuery :
 
-| Option              | Où                     | Défaut  | Ce qu'il contrôle                                                              |
-| ------------------- | ---------------------- | ------- | ------------------------------------------------------------------------------ |
-| `batchSize`         | config top-level       | `100`   | Nombre max de lignes par `MERGE` BigQuery                                       |
-| `flushIntervalMs`   | config top-level       | `5000`  | Délai max avant de flush la queue mémoire                                       |
-| `workerOptions`     | config top-level       | —       | Options Cloud Functions v2 du worker (concurrence, scaling…)                    |
+| Option            | Où               | Défaut | Ce qu'il contrôle                                            |
+| ----------------- | ---------------- | ------ | ------------------------------------------------------------ |
+| `batchSize`       | config top-level | `100`  | Nombre max de lignes par `MERGE` BigQuery                    |
+| `flushIntervalMs` | config top-level | `5000` | Délai max avant de flush la queue mémoire                    |
+| `workerOptions`   | config top-level | —      | Options Cloud Functions v2 du worker (concurrence, scaling…) |
 
 ```typescript
 createServers(repos).sync({
   // ...
-  batchSize: 500,         // batches plus gros → moins de DML → moins de quota
+  batchSize: 500, // batches plus gros → moins de DML → moins de quota
   flushIntervalMs: 10_000, // attendre plus pour remplir les batches
   workerOptions: {
-    concurrency: 10,       // jusqu'à 10 messages traités en parallèle par instance
-    maxInstances: 10,      // limite du scaling horizontal
-    minInstances: 0,       // mettre à 1 pour éviter le cold start (~5-15$/mois)
+    concurrency: 100, // jusqu'à 100 messages traités en parallèle par instance
+    maxInstances: 10, // limite du scaling horizontal
+    minInstances: 0, // mettre à 1 pour éviter le cold start (~5-15$/mois)
     memory: "512MiB",
     timeoutSeconds: 120,
     region: "europe-west1",
@@ -234,11 +237,12 @@ Pub/Sub va retry. La solution la plus simple : `batchSize` plus grand et
 :::
 
 ::: tip Recommandations en prod
+
 - Faible trafic (< 10 writes/s/repo) : valeurs par défaut OK.
 - Moyen (10-100 writes/s/repo) : `batchSize: 500`, `flushIntervalMs: 10_000`,
   `concurrency: 5`, `maxInstances: 10`.
 - Élevé (> 100 writes/s/repo) : envisager la BigQuery Storage Write API.
-:::
+  :::
 
 ## Adaptateur BigQuery
 
@@ -276,7 +280,6 @@ L'endpoint admin optionnel fournit une interface web pour surveiller et gérer l
 | ---------------- | ------------- | ------------------------------------------------------------------------------- |
 | **Health Check** | `healthCheck` | Compare le schéma attendu (Zod) vs les colonnes SQL réelles                     |
 | **Force Sync**   | `manualSync`  | Re-synchronise tous les documents d'une collection Firestore                    |
-| **View Queues**  | `viewQueue`   | Inspecte les éléments en attente dans la queue par repo                         |
 | **Config Check** | `configCheck` | Vérifie APIs GCP, topics, tables et IAM — avec commandes `gcloud` pour corriger |
 
 ### Configuration
@@ -293,7 +296,6 @@ admin: {
   featuresFlag: {
     healthCheck: true,
     manualSync: true,
-    viewQueue: true,
     configCheck: true,
   },
 }
@@ -370,11 +372,11 @@ le republie dans le pipeline de sync.
 
 La réponse contient :
 
-| Champ          | Description                                              |
-| -------------- | -------------------------------------------------------- |
-| `processed`    | Total de documents lus depuis Firestore                  |
-| `published`    | Publishes Pub/Sub réussis                                |
-| `errors`       | Nombre de documents qui n'ont pas pu être publiés        |
+| Champ          | Description                                                   |
+| -------------- | ------------------------------------------------------------- |
+| `processed`    | Total de documents lus depuis Firestore                       |
+| `published`    | Publishes Pub/Sub réussis                                     |
+| `errors`       | Nombre de documents qui n'ont pas pu être publiés             |
 | `errorSamples` | 5 premières erreurs (`{ docId, message }`) pour diagnostiquer |
 
 Les erreurs sont également loggées via
@@ -422,10 +424,10 @@ import { setDateHandling } from "@lpdjs/firestore-repo-service";
 setDateHandling("normalize");
 ```
 
-| Mode          | Comportement                                                                  |
-| ------------- | ----------------------------------------------------------------------------- |
-| `"preserve"`  | (défaut) Les `Timestamp` Firestore sont retournés tels quels                  |
-| `"normalize"` | Convertit récursivement `Timestamp` → `Date` à chaque lecture                 |
+| Mode          | Comportement                                                  |
+| ------------- | ------------------------------------------------------------- |
+| `"preserve"`  | (défaut) Les `Timestamp` Firestore sont retournés tels quels  |
+| `"normalize"` | Convertit récursivement `Timestamp` → `Date` à chaque lecture |
 
 Recommandé avec la sync BigQuery (Zod `z.date()` → `TIMESTAMP`) pour que la
 validation Zod et la sérialisation SQL voient toutes les deux de vraies `Date`.
