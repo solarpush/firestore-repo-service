@@ -58,12 +58,12 @@
  * ```
  */
 
-import type { Middleware, RouteHandler, AnyReq } from "../admin/router";
-import { renderLoginPage } from "./login-page";
+import type { AnyReq, Middleware, RouteHandler } from "../admin/router";
 import { getLinkBase } from "../utils/link-base";
+import { renderLoginPage } from "./login-page";
 import {
-  createSessionHandler,
   createLogoutHandler,
+  createSessionHandler,
   parseCookies,
   SESSION_COOKIE_DEFAULT,
 } from "./session";
@@ -78,7 +78,10 @@ import {
  * decoupled from a specific firebase-admin version.
  */
 export interface FirebaseAdminAuthLike {
-  verifyIdToken(idToken: string, checkRevoked?: boolean): Promise<DecodedIdTokenLike>;
+  verifyIdToken(
+    idToken: string,
+    checkRevoked?: boolean,
+  ): Promise<DecodedIdTokenLike>;
   verifySessionCookie(
     sessionCookie: string,
     checkRevoked?: boolean,
@@ -326,16 +329,6 @@ export function firebaseAuth<TContext = unknown>(
   const sessionPath = "/__session";
   const logoutPath = "/__logout";
 
-  // ── Validate config ──────────────────────────────────────────────────────
-  if (loginEnabled) {
-    if (!config.apiKey || !config.authDomain) {
-      throw new Error(
-        "[firebaseAuth] `apiKey` and `authDomain` are required when `loginPage` is enabled. " +
-          "Find both in the Firebase Console under Project Settings → General → Web app config.",
-      );
-    }
-  }
-
   // ── Auxiliary handlers (kept in `routes` for hosting deployments
   // where users can mount them at known paths, AND invoked in-band by the
   // middleware on `?__action=session|logout` so vanilla Cloud Functions
@@ -360,6 +353,14 @@ export function firebaseAuth<TContext = unknown>(
     res: any,
     error: string | null = null,
   ): void {
+    // Validate lazily (at request time) so module loading during Firebase CLI
+    // analysis doesn't throw before env vars are injected.
+    if (!config.apiKey || !config.authDomain) {
+      throw new Error(
+        "[firebaseAuth] `apiKey` and `authDomain` are required when `loginPage` is enabled. " +
+          "Find both in the Firebase Console under Project Settings → General → Web app config.",
+      );
+    }
     const pageCfg: FirebaseAuthLoginPageConfig =
       typeof config.loginPage === "object" ? config.loginPage : {};
     // Build a same-function absolute URL: the function's external prefix
