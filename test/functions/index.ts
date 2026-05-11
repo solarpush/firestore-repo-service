@@ -26,7 +26,7 @@ setDateHandling("normalize");
 // Zod Schemas
 // ============================================
 
-const postSchema = z.object({
+export const postSchema = z.object({
   docId: z.string(),
   documentPath: z.string(),
   userId: z.string().nullish(),
@@ -40,7 +40,7 @@ const postSchema = z.object({
   updatedAt: z.date(),
 });
 
-const userSchema = z.object({
+export const userSchema = z.object({
   docId: z.string(),
   documentPath: z.string(),
   email: z.string(),
@@ -50,7 +50,7 @@ const userSchema = z.object({
   createdAt: z.date(),
   updatedAt: z.date(),
 });
-const CommentModel = z.object({
+export const CommentModel = z.object({
   docId: z.string(),
   documentPath: z.string(),
   postId: z.string(),
@@ -61,7 +61,7 @@ const CommentModel = z.object({
   updatedAt: z.date(),
 });
 
-const ComputeSchema = z.object({
+export const ComputeSchema = z.object({
   docId: z.string(),
   documentPath: z.string(),
   value1: z.number(),
@@ -159,92 +159,15 @@ const repositoryMappingWithRelations = buildRepositoryRelations(
 );
 
 // Step 3: Create the repository mapping
-const repos = createRepositoryMapping(db, repositoryMappingWithRelations);
+export const repos = createRepositoryMapping(
+  db,
+  repositoryMappingWithRelations,
+);
 
 export const server = onRequest(async (req, res) => {
   try {
-    const ressourcesSizes = 1;
-
-    // 1. Création d'un user
-    const user = await repos.users.create({
-      age: 28,
-      email: "john.doe@example.com",
-      isActive: true,
-      name: "John Doe",
-    });
-    const postL = await repos.posts.query.by({
-      where: [
-        ["userId", "==", user.docId],
-        ["status", "==", "published"],
-      ],
-      orWhere: [
-        ["address.city", "==", "Anytown"],
-        ["views", ">", 100],
-      ],
-      orderBy: [{ field: "status", direction: "asc" }],
-      select: ["title", "comment"],
-    });
-    postL?.forEach((p) => console.log("Queried Post:", p.address));
-    console.log("Created User:", user);
-    console.log("User docId:", user.docId);
-    console.log("User documentPath:", user.documentPath);
-    const g = await repos.posts.history?.list("examplePostId");
-    g?.forEach((h) => console.log("Post history entry:", h));
-    const r = await repos.posts.history?.byField("examplePostId", "address");
-    r?.forEach((h) => console.log("Post history by field:", h));
-    // 2. Récupération de ce user par docId
-    const fetchedUser = await repos.users.get.byDocId(user.docId);
-    console.log("Fetched User:", fetchedUser);
-
-    // 3. Création de 5 posts associés à ce user via batch
-    const postBatch = repos.posts.batch.create();
-    for (let i = 1; i <= 5 * ressourcesSizes; i++) {
-      const postId = `post-${i}-${Date.now()}`;
-      const postData = {
-        address: { street: `${i * 100} Main St`, city: "Anytown" },
-        content: `This is post number ${i} by ${user.name}.`,
-        status: (i % 2 === 0 ? "published" : "draft") as "draft" | "published",
-        title: `Post ${i}`,
-        userId: user.docId,
-        views: i * Math.floor(Math.random() * 100),
-      };
-      postBatch.set(postId, postData);
-    }
-    await postBatch.commit();
-    const firstPost = await repos.posts.get.byUserId(user.docId);
-
-    if (!firstPost) {
-      throw new Error("No posts were created.");
-    }
-    const commentBatch = repos.comments.batch.create();
-    const commentsData = [];
-    for (let i = 1; i <= 3 * ressourcesSizes; i++) {
-      const commentId = `comment-${i}-${Date.now()}`;
-      const commentData = {
-        postId: firstPost?.docId,
-        userId: user.docId,
-        content: `This is comment number ${i} on the post.`,
-        likes: i * 5,
-      };
-      commentBatch.set(firstPost.docId, commentId, commentData);
-      commentsData.push({ docId: commentId, ...commentData });
-    }
-    await commentBatch.commit();
-    console.log("Created Comments via batch:", commentsData);
-
-    // 5. Récupération des posts par userId
-    const userPosts = await repos.posts.get.byUserId(user.docId);
-    console.log("User Posts:", userPosts);
-
-    // 6. Récupération des comments par postId
-    const postComments = await repos.comments.get.byPostId(firstPost.docId);
-    console.log("Post Comments:", postComments);
-
     res.json({
       message: "Success!",
-      user: fetchedUser,
-      posts: userPosts,
-      comments: postComments,
     });
   } catch (error) {
     console.error("Error:", error);
@@ -261,6 +184,8 @@ import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
 import { getAuth } from "firebase-admin/auth";
 import * as firestoreTriggers from "firebase-functions/v2/firestore";
 import * as pubsubHandler from "firebase-functions/v2/pubsub";
+import { apis } from "./apis.js";
+import { routes } from "./domains/__generated__/routes";
 
 const servers = createServers(repos, {
   onRequest,
@@ -275,12 +200,8 @@ export const admin = servers.admin({
     mode: "cookie",
     // Required when loginPage is enabled (default in cookie/both modes).
     // Find both in Firebase Console → Project Settings → General → Web app.
-    apiKey:
-      process.env["FIREBASE_WEB_API_KEY"] ??
-      "AIzaSyBTs5eDLAdi-cO0p3BVzm1G0MTl_LnvVbA",
-    authDomain:
-      process.env["FIREBASE_AUTH_DOMAIN"] ??
-      "firestore-repo-services.firebaseapp.com",
+    apiKey: process.env["FIREBASE_WEB_API_KEY"],
+    authDomain: process.env["FIREBASE_AUTH_DOMAIN"],
     allow: () => true,
   }),
   basePath: "/",
@@ -348,12 +269,8 @@ export const crud = servers.crud({
     mode: "both",
     // Required when loginPage is enabled (default in cookie/both modes).
     // Find both in Firebase Console → Project Settings → General → Web app.
-    apiKey:
-      process.env["FIREBASE_WEB_API_KEY"] ??
-      "AIzaSyBTs5eDLAdi-cO0p3BVzm1G0MTl_LnvVbA",
-    authDomain:
-      process.env["FIREBASE_AUTH_DOMAIN"] ??
-      "firestore-repo-services.firebaseapp.com",
+    apiKey: process.env["FIREBASE_WEB_API_KEY"],
+    authDomain: process.env["FIREBASE_AUTH_DOMAIN"],
     allow: () => true,
   }),
 
@@ -451,10 +368,8 @@ export const sync = servers.sync({
     auth: firebaseAuth({
       getAuth: () => getAuth(),
       mode: "cookie",
-      apiKey: process.env["FIREBASE_WEB_API_KEY"] ?? "REPLACE_ME",
-      authDomain:
-        process.env["FIREBASE_AUTH_DOMAIN"] ??
-        "firestore-repo-services.firebaseapp.com",
+      apiKey: process.env["FIREBASE_WEB_API_KEY"],
+      authDomain: process.env["FIREBASE_AUTH_DOMAIN"],
       allow: () => true,
     }),
     basePath: "/",
@@ -483,3 +398,90 @@ export const history = servers.history({
   deps: { onDocumentWritten: firestoreTriggers.onDocumentWritten },
   defaults: { ttl: { days: 365 } },
 });
+
+/// honoServer et routes d'exemple — voir test/hono/index.ts et test/hono/domains/posts/useCases/createPost/routes.ts pour une implémentation complète.
+
+const auth = firebaseAuth({
+  getAuth: () => getAuth(),
+  // API REST → bearer token only, pas de login page UI.
+  mode: "bearer",
+  allow: (user) => user !== null, // tout utilisateur Firebase authentifié
+});
+
+// ---------------------------------------------------------------------------
+// Cloud Function : apiv1
+//
+// Montée sur https://<region>-<project>.cloudfunctions.net/apiv1
+// OpenAPI spec : /v1/__openapi.json
+// Scalar UI    : /v1/__docs
+// ---------------------------------------------------------------------------
+export type AppEnv = {
+  Variables: {
+    user: { uid: string; role: "admin" | "user"; email: string };
+  };
+};
+
+// defineRoute typé pour toute l'app
+
+export const api = apis.toFunctions(routes, onRequest, {
+  defaults: {
+    region: "us-central1",
+    invoker: "public",
+  },
+  // Passer `memory`, `timeoutSeconds`, etc. si besoin.
+});
+
+// export const api = new HonoServer({
+//   /**
+//    * Filtre les routes dont `api === "v1"`.
+//    * Permet de partager un seul manifest entre plusieurs fonctions
+//    * (ex : "v1", "webhooks", "admin") sans duplication.
+//    */
+//   api: "v1",
+
+//   /** Préfixe de toutes les routes — ex : /v1/posts. */
+//   basePath: "/v1",
+
+//   /** Manifest généré par le codegen. */
+//   routes,
+
+//   /** Configuration OpenAPI 3.1 — doc accessible sur /v1/__docs */
+//   openapi: {
+//     info: {
+//       title: "Mon API",
+//       version: "1.0.0",
+//       description: "Exemple Hono file-based API sur Firebase Functions v2",
+//     },
+//     servers: [
+//       { url: "https://us-central1-my-project.cloudfunctions.net/apiv1" },
+//       { url: "http://127.0.0.1:5001/my-project/us-central1/apiv1" },
+//     ],
+//     securitySchemes: {
+//       bearerAuth: {
+//         type: "http",
+//         scheme: "bearer",
+//         bearerFormat: "Firebase JWT",
+//       },
+//     },
+//     security: [{ bearerAuth: [] }],
+//   },
+//   interceptor: async ({ c, next, route }) => {
+//     const data = await next();
+
+//     return c.json({ data, intercepted: true });
+//   },
+//   onError: (err, c) => {
+//     console.error("Unhandled error in HonoServer:", err);
+//     return c.json({ error: "Internal Server Error" });
+//   },
+
+//   /** Valider aussi la réponse du handler contre le schéma `output` Zod. */
+//   validateOutput: false,
+//   middlewares: [enrichUser],
+//   /** Log chaque route montée au démarrage (utile en dev, désactiver en prod). */
+//   verbose: process.env["NODE_ENV"] !== "production",
+// }).toFunction(onRequest, {
+//   region: "us-central1",
+//   invoker: "public",
+//   // Passer `memory`, `timeoutSeconds`, etc. si besoin.
+// });

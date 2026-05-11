@@ -28,6 +28,6 @@
       "@lpdjs/firestore-repo-service/*": ["../../src/*"]
     }
   },
-  "include": ["index.ts"],
+  "include": ["index.ts", "app-env.d.ts"],
   "exclude": ["node_modules", "dist", "../../node_modules"]
 }

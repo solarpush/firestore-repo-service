@@ -12,6 +12,7 @@ const enSidebar = [
       { text: "Admin Server", link: "/guide/admin" },
       { text: "Change History", link: "/guide/history" },
       { text: "Firestore → SQL Sync", link: "/guide/sync" },
+      { text: "Hono API Server", link: "/guide/hono" },
     ],
   },
 ];
@@ -28,6 +29,7 @@ const frSidebar = [
       { text: "Serveur Admin", link: "/fr/guide/admin" },
       { text: "Historique des changements", link: "/fr/guide/history" },
       { text: "Firestore → SQL Sync", link: "/fr/guide/sync" },
+      { text: "Serveur API Hono", link: "/fr/guide/hono" },
     ],
   },
 ];

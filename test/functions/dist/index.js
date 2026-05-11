@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.history = exports.sync = exports.crud = exports.admin = exports.server = void 0;
+exports.api = exports.history = exports.sync = exports.crud = exports.admin = exports.server = exports.repos = exports.ComputeSchema = exports.CommentModel = exports.userSchema = exports.postSchema = void 0;
 const firestore_repo_service_1 = require("@lpdjs/firestore-repo-service");
 const app_1 = require("firebase-admin/app");
 const firestore_1 = require("firebase-admin/firestore");
@@ -55,7 +55,7 @@ const db = (0, firestore_1.getFirestore)();
 // ============================================
 // Zod Schemas
 // ============================================
-const postSchema = zod_1.default.object({
+exports.postSchema = zod_1.default.object({
     docId: zod_1.default.string(),
     documentPath: zod_1.default.string(),
     userId: zod_1.default.string().nullish(),
@@ -68,7 +68,7 @@ const postSchema = zod_1.default.object({
     createdAt: zod_1.default.date(),
     updatedAt: zod_1.default.date(),
 });
-const userSchema = zod_1.default.object({
+exports.userSchema = zod_1.default.object({
     docId: zod_1.default.string(),
     documentPath: zod_1.default.string(),
     email: zod_1.default.string(),
@@ -78,7 +78,7 @@ const userSchema = zod_1.default.object({
     createdAt: zod_1.default.date(),
     updatedAt: zod_1.default.date(),
 });
-const CommentModel = zod_1.default.object({
+exports.CommentModel = zod_1.default.object({
     docId: zod_1.default.string(),
     documentPath: zod_1.default.string(),
     postId: zod_1.default.string(),
@@ -88,7 +88,7 @@ const CommentModel = zod_1.default.object({
     createdAt: zod_1.default.date(),
     updatedAt: zod_1.default.date(),
 });
-const ComputeSchema = zod_1.default.object({
+exports.ComputeSchema = zod_1.default.object({
     docId: zod_1.default.string(),
     documentPath: zod_1.default.string(),
     value1: zod_1.default.number(),
@@ -102,7 +102,7 @@ const ComputeSchema = zod_1.default.object({
 // ============================================
 // Step 1: Build the base mapping
 const repositoryMapping = {
-    users: (0, firestore_repo_service_1.createRepositoryConfig)(userSchema)({
+    users: (0, firestore_repo_service_1.createRepositoryConfig)(exports.userSchema)({
         path: "users",
         isGroup: false,
         foreignKeys: ["docId", "email"],
@@ -114,7 +114,7 @@ const repositoryMapping = {
         refCb: (db, docId) => db.collection("users").doc(docId),
         history: { enabled: false },
     }),
-    posts: (0, firestore_repo_service_1.createRepositoryConfig)(postSchema)({
+    posts: (0, firestore_repo_service_1.createRepositoryConfig)(exports.postSchema)({
         path: "posts",
         isGroup: false,
         foreignKeys: ["docId", "userId"],
@@ -134,7 +134,7 @@ const repositoryMapping = {
             subcollection: "post_history",
         },
     }),
-    comments: (0, firestore_repo_service_1.createRepositoryConfig)(CommentModel)({
+    comments: (0, firestore_repo_service_1.createRepositoryConfig)(exports.CommentModel)({
         path: "comments",
         isGroup: true,
         foreignKeys: ["docId", "postId", "userId"],
@@ -146,7 +146,7 @@ const repositoryMapping = {
         refCb: (db, postId, docId) => db.collection("posts").doc(postId).collection("comments").doc(docId),
         history: { enabled: false },
     }),
-    compute: (0, firestore_repo_service_1.createRepositoryConfig)(ComputeSchema)({
+    compute: (0, firestore_repo_service_1.createRepositoryConfig)(exports.ComputeSchema)({
         path: "compute",
         isGroup: false,
         foreignKeys: ["docId"],
@@ -177,72 +177,11 @@ const repositoryMappingWithRelations = (0, firestore_repo_service_1.buildReposit
     },
 });
 // Step 3: Create the repository mapping
-const repos = (0, firestore_repo_service_1.createRepositoryMapping)(db, repositoryMappingWithRelations);
+exports.repos = (0, firestore_repo_service_1.createRepositoryMapping)(db, repositoryMappingWithRelations);
 exports.server = (0, https_1.onRequest)(async (req, res) => {
     try {
-        const ressourcesSizes = 1;
-        // 1. Création d'un user
-        const user = await repos.users.create({
-            age: 28,
-            email: "john.doe@example.com",
-            isActive: true,
-            name: "John Doe",
-        });
-        console.log("Created User:", user);
-        console.log("User docId:", user.docId);
-        console.log("User documentPath:", user.documentPath);
-        const g = await repos.posts.history?.list("examplePostId");
-        g?.forEach((h) => console.log("Post history entry:", h));
-        const r = await repos.posts.history?.byField("examplePostId", "address");
-        r?.forEach((h) => console.log("Post history by field:", h));
-        // 2. Récupération de ce user par docId
-        const fetchedUser = await repos.users.get.byDocId(user.docId);
-        console.log("Fetched User:", fetchedUser);
-        // 3. Création de 5 posts associés à ce user via batch
-        const postBatch = repos.posts.batch.create();
-        for (let i = 1; i <= 5 * ressourcesSizes; i++) {
-            const postId = `post-${i}-${Date.now()}`;
-            const postData = {
-                address: { street: `${i * 100} Main St`, city: "Anytown" },
-                content: `This is post number ${i} by ${user.name}.`,
-                status: (i % 2 === 0 ? "published" : "draft"),
-                title: `Post ${i}`,
-                userId: user.docId,
-                views: i * Math.floor(Math.random() * 100),
-            };
-            postBatch.set(postId, postData);
-        }
-        await postBatch.commit();
-        const firstPost = await repos.posts.get.byUserId(user.docId);
-        if (!firstPost) {
-            throw new Error("No posts were created.");
-        }
-        const commentBatch = repos.comments.batch.create();
-        const commentsData = [];
-        for (let i = 1; i <= 3 * ressourcesSizes; i++) {
-            const commentId = `comment-${i}-${Date.now()}`;
-            const commentData = {
-                postId: firstPost?.docId,
-                userId: user.docId,
-                content: `This is comment number ${i} on the post.`,
-                likes: i * 5,
-            };
-            commentBatch.set(firstPost.docId, commentId, commentData);
-            commentsData.push({ docId: commentId, ...commentData });
-        }
-        await commentBatch.commit();
-        console.log("Created Comments via batch:", commentsData);
-        // 5. Récupération des posts par userId
-        const userPosts = await repos.posts.get.byUserId(user.docId);
-        console.log("User Posts:", userPosts);
-        // 6. Récupération des comments par postId
-        const postComments = await repos.comments.get.byPostId(firstPost.docId);
-        console.log("Post Comments:", postComments);
         res.json({
             message: "Success!",
-            user: fetchedUser,
-            posts: userPosts,
-            comments: postComments,
         });
     }
     catch (error) {
@@ -260,7 +199,9 @@ const bigquery_2 = require("@lpdjs/firestore-repo-service/sync/bigquery");
 const auth_2 = require("firebase-admin/auth");
 const firestoreTriggers = __importStar(require("firebase-functions/v2/firestore"));
 const pubsubHandler = __importStar(require("firebase-functions/v2/pubsub"));
-const servers = (0, firestore_repo_service_1.createServers)(repos, {
+const apis_js_1 = require("./apis.js");
+const routes_1 = require("./domains/__generated__/routes");
+const servers = (0, firestore_repo_service_1.createServers)(exports.repos, {
     onRequest: https_1.onRequest,
     httpsOptions: { ingressSettings: "ALLOW_ALL", invoker: "public" },
 });
@@ -470,4 +411,68 @@ exports.history = servers.history({
     deps: { onDocumentWritten: firestoreTriggers.onDocumentWritten },
     defaults: { ttl: { days: 365 } },
 });
+/// honoServer et routes d'exemple — voir test/hono/index.ts et test/hono/domains/posts/useCases/createPost/routes.ts pour une implémentation complète.
+const auth = (0, auth_1.firebaseAuth)({
+    getAuth: () => (0, auth_2.getAuth)(),
+    // API REST → bearer token only, pas de login page UI.
+    mode: "bearer",
+    allow: (user) => user !== null, // tout utilisateur Firebase authentifié
+});
+// defineRoute typé pour toute l'app
+exports.api = apis_js_1.apis.toFunctions(routes_1.routes, https_1.onRequest, {
+    defaults: {
+        region: "us-central1",
+        invoker: "public",
+    },
+    // Passer `memory`, `timeoutSeconds`, etc. si besoin.
+});
+// export const api = new HonoServer({
+//   /**
+//    * Filtre les routes dont `api === "v1"`.
+//    * Permet de partager un seul manifest entre plusieurs fonctions
+//    * (ex : "v1", "webhooks", "admin") sans duplication.
+//    */
+//   api: "v1",
+//   /** Préfixe de toutes les routes — ex : /v1/posts. */
+//   basePath: "/v1",
+//   /** Manifest généré par le codegen. */
+//   routes,
+//   /** Configuration OpenAPI 3.1 — doc accessible sur /v1/__docs */
+//   openapi: {
+//     info: {
+//       title: "Mon API",
+//       version: "1.0.0",
+//       description: "Exemple Hono file-based API sur Firebase Functions v2",
+//     },
+//     servers: [
+//       { url: "https://us-central1-my-project.cloudfunctions.net/apiv1" },
+//       { url: "http://127.0.0.1:5001/my-project/us-central1/apiv1" },
+//     ],
+//     securitySchemes: {
+//       bearerAuth: {
+//         type: "http",
+//         scheme: "bearer",
+//         bearerFormat: "Firebase JWT",
+//       },
+//     },
+//     security: [{ bearerAuth: [] }],
+//   },
+//   interceptor: async ({ c, next, route }) => {
+//     const data = await next();
+//     return c.json({ data, intercepted: true });
+//   },
+//   onError: (err, c) => {
+//     console.error("Unhandled error in HonoServer:", err);
+//     return c.json({ error: "Internal Server Error" });
+//   },
+//   /** Valider aussi la réponse du handler contre le schéma `output` Zod. */
+//   validateOutput: false,
+//   middlewares: [enrichUser],
+//   /** Log chaque route montée au démarrage (utile en dev, désactiver en prod). */
+//   verbose: process.env["NODE_ENV"] !== "production",
+// }).toFunction(onRequest, {
+//   region: "us-central1",
+//   invoker: "public",
+//   // Passer `memory`, `timeoutSeconds`, etc. si besoin.
+// });
 //# sourceMappingURL=index.js.map

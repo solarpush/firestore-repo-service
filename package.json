@@ -1,6 +1,6 @@
 {
   "name": "@lpdjs/firestore-repo-service",
-  "version": "2.2.9-beta.6",
+  "version": "2.2.9",
   "workspaces": [
     "test/functions"
   ],
@@ -89,6 +89,16 @@
         "types": "./dist/servers/auth/index.d.ts",
         "default": "./dist/servers/auth/index.js"
       }
+    },
+    "./servers/hono": {
+      "require": {
+        "types": "./dist/servers/hono/index.d.cts",
+        "default": "./dist/servers/hono/index.cjs"
+      },
+      "import": {
+        "types": "./dist/servers/hono/index.d.ts",
+        "default": "./dist/servers/hono/index.js"
+      }
     }
   },
   "typesVersions": {
@@ -104,6 +114,9 @@
       ],
       "servers/auth": [
         "./dist/servers/auth/index.d.ts"
+      ],
+      "servers/hono": [
+        "./dist/servers/hono/index.d.ts"
       ],
       "sync": [
         "./dist/sync/index.d.ts"
@@ -121,6 +134,9 @@
     "README.md",
     "LICENSE"
   ],
+  "bin": {
+    "frs-hono": "./dist/servers/hono/cli.js"
+  },
   "authors": [
     {
       "name": "@LPDJS Pierre Nicolas",
@@ -210,7 +226,9 @@
     "zod": "^4.4.3"
   },
   "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^8.5.0",
     "@hono/node-server": "^1.19.14",
+    "@hono/zod-openapi": "^1.4.0",
     "hono": "^4.12.17"
   }
 }
