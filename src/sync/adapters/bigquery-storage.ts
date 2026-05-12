@@ -355,14 +355,44 @@ export class BigQueryStorageAdapter implements SqlAdapter {
     return `\`${this.datasetId}.${tableName}\``;
   }
 
+  /** ISO 8601 timestamp pattern (e.g. 2026-03-29T20:59:27.394Z) */
+  private static readonly ISO_TIMESTAMP_RE =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+
+  /**
+   * Convert a Date or epoch-millis number into the epoch-microseconds string
+   * required by the Storage Write API for TIMESTAMP columns.
+   *
+   * Unlike the legacy BigQueryAdapter (which builds SQL `TIMESTAMP('iso')`
+   * literals), the JSONWriter encodes through protobuf and a TIMESTAMP field
+   * is an `int64`. Passing an ISO string would make `Long.fromString` throw
+   * `interior hyphen` on the `-` characters.
+   */
+  private static toEpochMicros(d: Date): string {
+    const ms = d.getTime();
+    return (BigInt(ms) * 1000n).toString();
+  }
+
   /** Convert JS values into shapes accepted by JSONWriter. */
   private normalizeRow(row: Record<string, unknown>): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(row)) {
       if (v === undefined) continue;
       if (v instanceof Date) {
-        // Storage Write expects ISO strings or epoch micros for TIMESTAMP
-        out[k] = v.toISOString();
+        // TIMESTAMP column → int64 epoch micros (as string to preserve precision)
+        out[k] = BigQueryStorageAdapter.toEpochMicros(v);
+      } else if (
+        typeof v === "string" &&
+        BigQueryStorageAdapter.ISO_TIMESTAMP_RE.test(v)
+      ) {
+        // ISO timestamp produced upstream by `serializeDocument` (Firestore
+        // Timestamp → ISO string) — convert to epoch micros for protobuf.
+        const d = new Date(v);
+        if (!Number.isNaN(d.getTime())) {
+          out[k] = BigQueryStorageAdapter.toEpochMicros(d);
+        } else {
+          out[k] = v;
+        }
       } else if (typeof v === "object" && v !== null) {
         // JSON columns: serialise nested objects/arrays
         out[k] = JSON.stringify(v);
