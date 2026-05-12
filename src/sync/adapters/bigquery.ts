@@ -8,6 +8,50 @@ import type {
 } from "../types";
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when the BigQuery error is a "concurrent update" serialization
+ * conflict (code 400, reason "invalidQuery" containing "serialize access").
+ * These are safe to retry after a brief back-off.
+ */
+function isConcurrentUpdateError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as Record<string, unknown>;
+  if (e["code"] !== 400) return false;
+  const errors = Array.isArray(e["errors"]) ? e["errors"] : [];
+  return errors.some(
+    (x: any) =>
+      typeof x?.message === "string" &&
+      x.message.toLowerCase().includes("serialize access"),
+  );
+}
+
+/**
+ * Execute `fn`, retrying up to `maxRetries` times when BigQuery returns a
+ * concurrent-update error.  Uses full-jitter exponential back-off.
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 10,
+  baseMs = 500,
+): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err) {
+      attempt++;
+      if (!isConcurrentUpdateError(err) || attempt > maxRetries) throw err;
+      const cap = baseMs * Math.pow(2, attempt);
+      const delay = Math.random() * cap; // full jitter
+      await new Promise((res) => setTimeout(res, delay));
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Dialect (internal — used only by BigQueryAdapter)
 // ---------------------------------------------------------------------------
 
@@ -181,7 +225,7 @@ export class BigQueryAdapter implements SqlAdapter {
       `WHEN NOT MATCHED THEN INSERT (${insertCols}) VALUES (${insertVals});`,
     ].join("\n");
 
-    await this.bigquery.query({ query });
+    await withRetry(() => this.bigquery.query({ query }));
   }
 
   /** Delete rows by primary-key values. */
@@ -196,7 +240,7 @@ export class BigQueryAdapter implements SqlAdapter {
     const escaped = ids.map((v) => this.escapeValue(v)).join(", ");
     const query = `DELETE FROM ${this.fqn(tableName)} WHERE ${qi(primaryKey)} IN (${escaped});`;
 
-    await this.bigquery.query({ query });
+    await withRetry(() => this.bigquery.query({ query }));
   }
 
   /** Execute a raw SQL statement (used by the migration manager). */

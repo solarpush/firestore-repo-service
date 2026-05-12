@@ -98,7 +98,9 @@ export function createSyncWorker<M extends Record<string, any>>(
     const repoCfg = repoConfigs[repoName];
     const tableName = repoCfg?.tableName ?? repoName;
 
-    // On flush failure → log error + re-publish to PubSub dead-letter
+    // On flush failure → log error + re-publish to PubSub dead-letter.
+    // If the DLQ publish also fails, re-throw so the Cloud Function does NOT
+    // ack the PubSub message and PubSub retries it automatically.
     const onFlushError = async (
       events: SyncEvent[],
       error: unknown,
@@ -107,22 +109,15 @@ export function createSyncWorker<M extends Record<string, any>>(
         `[SyncWorker] Flush failed for "${repoName}" (${events.length} events):`,
         error,
       );
-      try {
-        const dlTopicName = `${topicPrefix}-${repoName}-dlq`;
-        const dlTopic = deps.pubsub.topic(dlTopicName);
-        const [exists] = await dlTopic.exists();
-        if (!exists) {
-          await dlTopic.create();
-          console.info(`[SyncWorker] Created DLQ topic "${dlTopicName}"`);
-        }
-        for (const evt of events) {
-          await dlTopic.publishMessage({ json: evt });
-        }
-      } catch (dlErr) {
-        console.error(
-          `[SyncWorker] Dead-letter publish also failed for ${repoName}:`,
-          dlErr,
-        );
+      const dlTopicName = `${topicPrefix}-${repoName}-dlq`;
+      const dlTopic = deps.pubsub.topic(dlTopicName);
+      const [exists] = await dlTopic.exists();
+      if (!exists) {
+        await dlTopic.create();
+        console.info(`[SyncWorker] Created DLQ topic "${dlTopicName}"`);
+      }
+      for (const evt of events) {
+        await dlTopic.publishMessage({ json: evt });
       }
     };
 
@@ -194,6 +189,9 @@ export function createSyncWorker<M extends Record<string, any>>(
       }
       await handleMessage(data);
       // Flush so data is persisted before the Cloud Function container shuts down.
+      // SyncQueue.flush() coalesces concurrent callers so when `concurrency > 1`
+      // every parallel handler awaits the same in-flight MERGE — guaranteeing
+      // each PubSub message is only acked once its event reached BigQuery.
       // Force-sync (admin) handles its own flush after the batch loop.
       const q = queues.get(data.repoName);
       if (q) await q.flush();

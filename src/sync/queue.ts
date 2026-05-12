@@ -31,6 +31,7 @@ export interface SyncQueueOptions {
 export class SyncQueue {
   private buffer: SyncEvent[] = [];
   private flushing = false;
+  private flushPromise: Promise<void> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
 
   private readonly adapter: SqlAdapter;
@@ -72,11 +73,30 @@ export class SyncQueue {
   /**
    * Flush all buffered events to the SQL adapter.
    * Upserts and deletes are batched separately.
+   *
+   * Concurrent callers (e.g. several PubSub messages handled in parallel
+   * inside the same Cloud Function instance with `concurrency > 1`) all
+   * await the same in-flight flush and then trigger a follow-up flush if
+   * new events were enqueued in the meantime. This guarantees that every
+   * caller's event is persisted before its `await flush()` resolves —
+   * which is required for safe PubSub ack semantics.
    */
   async flush(): Promise<void> {
-    if (this.flushing || this.buffer.length === 0) return;
-    this.flushing = true;
+    // If another flush is in progress, wait for it to finish first.
+    while (this.flushing && this.flushPromise) {
+      await this.flushPromise;
+    }
+    if (this.buffer.length === 0) return;
 
+    this.flushing = true;
+    this.flushPromise = this._doFlush().finally(() => {
+      this.flushing = false;
+      this.flushPromise = null;
+    });
+    await this.flushPromise;
+  }
+
+  private async _doFlush(): Promise<void> {
     // Drain the buffer atomically
     const batch = this.buffer.splice(0, this.batchSize);
 
@@ -119,23 +139,14 @@ export class SyncQueue {
       }
     } catch (err) {
       if (this.onFlushError) {
-        await this.onFlushError(batch, err).catch((handlerErr) => {
-          console.error(
-            `[SyncQueue] Flush error for ${this.tableName}:`,
-            err,
-          );
-          console.error(
-            `[SyncQueue] Error handler also failed:`,
-            handlerErr,
-          );
-        });
+        // If the error handler also fails, re-throw so the Cloud Function
+        // does NOT ack the PubSub message — it will be retried automatically.
+        await this.onFlushError(batch, err);
       } else {
         // Re-insert at the front so we retry next flush
         this.buffer.unshift(...batch);
         console.error(`[SyncQueue] Flush failed for ${this.tableName}:`, err);
       }
-    } finally {
-      this.flushing = false;
     }
   }
 

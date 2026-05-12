@@ -214,12 +214,13 @@ createServers(repos).sync({
   batchSize: 500, // batches plus gros → moins de DML → moins de quota
   flushIntervalMs: 10_000, // attendre plus pour remplir les batches
   workerOptions: {
-    concurrency: 100, // jusqu'à 100 messages traités en parallèle par instance
-    maxInstances: 10, // limite du scaling horizontal
+    concurrency: 5, // jusqu'à 5 messages traités en parallèle par instance
+    maxInstances: 1, // ⚠️ garder 1 par repo pour éviter les "serialize access" BigQuery
     minInstances: 0, // mettre à 1 pour éviter le cold start (~5-15$/mois)
     memory: "512MiB",
     timeoutSeconds: 120,
     region: "europe-west1",
+    retry: true, // PubSub retry sur throw → aucun event perdu
   },
 });
 ```
@@ -228,20 +229,60 @@ createServers(repos).sync({
 Tous les champs de [`PubSubOptions`](https://firebase.google.com/docs/reference/functions/2nd-gen/node/firebase-functions.v2.pubsub.pubsuboptions)
 sont acceptés (`cpu`, `vpcConnector`, `serviceAccount`, `secrets`, etc.).
 
-::: warning Quota DML BigQuery
-Le quota par défaut est de **2 DML concurrents par table**. Avec `concurrency: 10` et
-`maxInstances: 10` tu peux avoir jusqu'à 100 MERGE en vol ; assure-toi qu'ils ciblent
-des tables distinctes (i.e. des repos distincts) sinon tu vas hit `quotaExceeded` et
-Pub/Sub va retry. La solution la plus simple : `batchSize` plus grand et
-`flushIntervalMs` plus long.
+### Concurrence & sémantique d'ack PubSub
+
+Chaque repo possède sa propre `SyncQueue` partagée par toutes les invocations
+de l'instance (elle vit dans la closure du module worker). Avec
+`concurrency > 1`, plusieurs messages PubSub sont traités en parallèle **dans
+le même process Node.js** et enqueue tous dans le même buffer.
+
+`SyncQueue.flush()` coalesce les appels concurrents : chaque handler en
+parallèle attend le même `MERGE` BigQuery en cours et ne résout qu'une fois
+son event réellement écrit. C'est ce qui rend le `await q.flush()` final du
+handler safe — PubSub ack uniquement après confirmation BigQuery, donc un
+crash d'instance avant flush ne perd jamais d'event.
+
+::: warning Quota DML BigQuery & erreurs serialize-access
+
+BigQuery autorise seulement ~**2 DML concurrents par table**. Au-delà, tu
+reçois `Could not serialize access to table … due to concurrent update`
+(HTTP 400, `invalidQuery`). Ça arrive dès que **deux instances Cloud
+Function** flush la même table en même temps.
+
+La librairie atténue ça avec un retry exponentiel jitter dans
+`BigQueryAdapter` (10 tentatives, base 500 ms), mais la seule façon de
+**l'éliminer** c'est de sérialiser les MERGE par table. La recette la plus
+fiable :
+
+- `maxInstances: 1` par repo (un seul writer par table BigQuery).
+- `concurrency: 5–10` pour le parallélisme intra-instance (toujours safe —
+  `SyncQueue` sérialise les flushes dans le process).
+- `batchSize` plus grand (500–1000) et `flushIntervalMs` plus long (10–15 s)
+  pour amortir le coût des DML.
+
+Pour scaler horizontalement au-delà d'une instance, migrer vers la BigQuery
+Storage Write API (pas de sérialisation DML).
+:::
+
+::: tip Dead-letter & protection contre le retry infini
+
+`onFlushError` re-publie les events échoués sur `{topicPrefix}-{repoName}-dlq`
+et re-throw si ce publish échoue lui aussi — PubSub redélivre alors le
+message original au lieu d'ack. Pour éviter une boucle de redélivrance
+infinie sur un poison message, configurer une **dead-letter policy sur la
+subscription PubSub** (subscription Cloud Functions v2 / Eventarc) avec par
+exemple `maxDeliveryAttempts: 5`. Les events sont idempotents grâce à la
+colonne `__sync_version`, donc les retries ne corrompent jamais la donnée.
 :::
 
 ::: tip Recommandations en prod
 
-- Faible trafic (< 10 writes/s/repo) : valeurs par défaut OK.
+- Faible trafic (< 10 writes/s/repo) : valeurs par défaut OK
+  (`maxInstances: 1`, `concurrency: 1`).
 - Moyen (10-100 writes/s/repo) : `batchSize: 500`, `flushIntervalMs: 10_000`,
-  `concurrency: 5`, `maxInstances: 10`.
-- Élevé (> 100 writes/s/repo) : envisager la BigQuery Storage Write API.
+  `concurrency: 5`, `maxInstances: 1`.
+- Élevé (> 100 writes/s/repo) : garder `maxInstances: 1` par repo et migrer
+  vers la BigQuery Storage Write API (pas de sérialisation DML par table).
   :::
 
 ## Adaptateur BigQuery
