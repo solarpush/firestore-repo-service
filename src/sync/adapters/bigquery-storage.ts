@@ -433,8 +433,13 @@ export class BigQueryStorageAdapter implements SqlAdapter {
     );
 
     const destinationTable = `projects/${this.projectId}/datasets/${this.datasetId}/tables/${tableName}`;
+    // Pass `DefaultStream` as `streamId` (not `streamType`): the `_default`
+    // stream is implicit on every table, so the client must short-circuit to
+    // `${destinationTable}/streams/_default` instead of calling
+    // `createWriteStream({ type: DEFAULT })` which BigQuery rejects with
+    // `Unable to create a stream with type TYPE_UNSPECIFIED`.
     const connection = await this.writerClient.createStreamConnection({
-      streamType: ns.managedwriter.DefaultStream,
+      streamId: ns.managedwriter.DefaultStream,
       destinationTable,
     });
 

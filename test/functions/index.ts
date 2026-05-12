@@ -180,7 +180,7 @@ export const server = onRequest(async (req, res) => {
 import { BigQuery } from "@google-cloud/bigquery";
 import { PubSub } from "@google-cloud/pubsub";
 import { firebaseAuth } from "@lpdjs/firestore-repo-service/servers/auth";
-import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
+import { BigQueryStorageAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery-storage";
 import { getAuth } from "firebase-admin/auth";
 import * as firestoreTriggers from "firebase-functions/v2/firestore";
 import * as pubsubHandler from "firebase-functions/v2/pubsub";
@@ -352,21 +352,23 @@ export const sync = servers.sync({
     pubsubHandler,
     pubsub: new PubSub(),
   },
-  adapter: new BigQueryAdapter({
+  adapter: new BigQueryStorageAdapter({
     bigquery: new BigQuery({ projectId: "firestore-repo-services" }),
     datasetId: "firestore_sync",
+    projectId: "firestore-repo-services",
+    maxStaleness: "INTERVAL 1 MINUTE",
   }),
   topicPrefix: "firestore-sync",
   autoMigrate: true,
   batchSize: 500,
   flushIntervalMs: 10_000,
   workerOptions: {
-     concurrency: 40,
-   maxInstances: 1,
-   retry: true,
-   cpu: 1,
-   memory: "512MiB",
-   timeoutSeconds: 300,
+    concurrency: 40,
+    maxInstances: 5,
+    retry: true,
+    cpu: 1,
+    memory: "512MiB",
+    timeoutSeconds: 300,
   },
   admin: {
     auth: firebaseAuth({
