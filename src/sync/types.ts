@@ -196,8 +196,7 @@ export interface SqlAdapter {
    * adapters caching schema-derived state — e.g. Storage Write proto
    * descriptors / writer connections — can invalidate their cache.
    *
-   * Optional: adapters with no cache (legacy `BigQueryAdapter`) do not need
-   * to implement this.
+   * Optional: adapters with no cache do not need to implement this.
    */
   onSchemaChange?(tableName: string): void | Promise<void>;
 

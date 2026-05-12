@@ -423,84 +423,105 @@ describe("handleMessage with columnMap", () => {
 });
 
 // ---------------------------------------------------------------------------
-// BigQueryAdapter — escapeValue handles timestamps
+// BigQueryAdapter — normalizeRow handles timestamps for Storage Write
 // ---------------------------------------------------------------------------
 
-describe("BigQueryAdapter escapeValue", () => {
-  test("MERGE uses TIMESTAMP() for ISO date strings", async () => {
-    let capturedQuery = "";
-    const fakeBigquery = {
+describe("BigQueryAdapter normalizeRow (Storage Write CDC)", () => {
+  test("converts Date and ISO string to epoch microseconds", async () => {
+    let capturedRows: Record<string, unknown>[] = [];
+    const fakeWriter = {
+      appendRows: (rows: Record<string, unknown>[]) => {
+        capturedRows = rows;
+        return { getResult: async () => undefined };
+      },
+      close: () => {},
+    };
+    const fakeWriterClient = {
+      createStreamConnection: async () => ({}),
+      close: () => {},
+    };
+    const fakeBigquery: any = {
       dataset: () => ({
         table: () => ({
-          exists: async () => [true],
-          getMetadata: async () => [{ schema: { fields: [] } }],
+          getMetadata: async () => [
+            {
+              schema: {
+                fields: [
+                  { name: "post_id", type: "STRING" },
+                  { name: "createdAt", type: "TIMESTAMP" },
+                ],
+              },
+              tableConstraints: { primaryKey: { columns: ["post_id"] } },
+            },
+          ],
         }),
       }),
-      query: async ({ query }: { query: string }) => {
-        capturedQuery = query;
-      },
+      query: async () => {},
     };
 
-    const adapter = new BigQueryAdapter({
+    const adapter: any = new BigQueryAdapter({
       bigquery: fakeBigquery,
       datasetId: "test_ds",
+      projectId: "test-proj",
+      writerClient: fakeWriterClient,
     });
+    // Inject a pre-built writer so we don't load `@google-cloud/bigquery-storage`.
+    adapter.writers.set("posts", { writer: fakeWriter, primaryKey: "post_id" });
 
     await adapter.upsertRows(
       "posts",
       [
         {
           post_id: "p1",
-          title: "Hello",
           createdAt: "2026-03-29T20:59:27.394Z",
-          updatedAt: "2026-03-29T21:00:00.000Z",
+          updatedAtDate: new Date("2026-03-29T21:00:00.000Z"),
         },
       ],
       "post_id",
     );
 
-    // Timestamps should use TIMESTAMP() not bare string literals
-    expect(capturedQuery).toContain("TIMESTAMP('2026-03-29T20:59:27.394Z')");
-    expect(capturedQuery).toContain("TIMESTAMP('2026-03-29T21:00:00.000Z')");
-    // Regular strings should stay as plain string literals
-    expect(capturedQuery).toContain("'p1'");
-    expect(capturedQuery).toContain("'Hello'");
-    expect(capturedQuery).not.toContain("TIMESTAMP('p1')");
+    expect(capturedRows).toHaveLength(1);
+    const row = capturedRows[0]!;
+    expect(row["post_id"]).toBe("p1");
+    // ISO strings → epoch micros (string of digits, no hyphen)
+    expect(typeof row["createdAt"]).toBe("string");
+    expect(row["createdAt"]).not.toContain("-");
+    expect(BigInt(row["createdAt"] as string)).toBe(
+      BigInt(Date.parse("2026-03-29T20:59:27.394Z")) * 1000n,
+    );
+    // Date instances → epoch micros too
+    expect(BigInt(row["updatedAtDate"] as string)).toBe(
+      BigInt(Date.parse("2026-03-29T21:00:00.000Z")) * 1000n,
+    );
+    // CDC metadata
+    expect(row["_CHANGE_TYPE"]).toBe("UPSERT");
+    expect(typeof row["_CHANGE_SEQUENCE_NUMBER"]).toBe("string");
+    expect((row["_CHANGE_SEQUENCE_NUMBER"] as string).length).toBe(16);
   });
 
-  test("MERGE handles null, boolean, number, and JSON values", async () => {
-    let capturedQuery = "";
-    const fakeBigquery = {
-      dataset: () => ({
-        table: () => ({ exists: async () => [true] }),
-      }),
-      query: async ({ query }: { query: string }) => {
-        capturedQuery = query;
+  test("DELETE rows carry max sequence number so they win over concurrent UPSERTs", async () => {
+    let capturedRows: Record<string, unknown>[] = [];
+    const fakeWriter = {
+      appendRows: (rows: Record<string, unknown>[]) => {
+        capturedRows = rows;
+        return { getResult: async () => undefined };
       },
+      close: () => {},
     };
-
-    const adapter = new BigQueryAdapter({
-      bigquery: fakeBigquery,
+    const adapter: any = new BigQueryAdapter({
+      bigquery: { dataset: () => ({ table: () => ({}) }), query: async () => {} } as any,
       datasetId: "test_ds",
+      projectId: "test-proj",
+      writerClient: { createStreamConnection: async () => ({}), close: () => {} },
     });
+    adapter.writers.set("posts", { writer: fakeWriter, primaryKey: "post_id" });
 
-    await adapter.upsertRows(
-      "items",
-      [
-        {
-          id: "i1",
-          count: 42,
-          active: true,
-          tags: '[\"a\",\"b\"]',
-          meta: null,
-        },
-      ],
-      "id",
-    );
+    await adapter.deleteRows("posts", "post_id", ["p1", "p2"]);
 
-    expect(capturedQuery).toContain("42");
-    expect(capturedQuery).toContain("TRUE");
-    expect(capturedQuery).toContain("PARSE_JSON(");
-    expect(capturedQuery).toContain("NULL");
+    expect(capturedRows).toHaveLength(2);
+    for (const row of capturedRows) {
+      expect(row["_CHANGE_TYPE"]).toBe("DELETE");
+      expect(row["_CHANGE_SEQUENCE_NUMBER"]).toBe("ffffffffffffffff");
+    }
   });
 });

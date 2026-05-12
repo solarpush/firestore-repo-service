@@ -11,7 +11,6 @@ export default defineConfig({
     "servers/hono/cli": "src/servers/hono/cli.ts",
     "sync/index": "src/sync/index.ts",
     "sync/bigquery": "src/sync/adapters/bigquery.ts",
-    "sync/bigquery-storage": "src/sync/adapters/bigquery-storage.ts",
     "history/index": "src/history/index.ts",
   },
   format: ["cjs", "esm"],

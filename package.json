@@ -1,6 +1,6 @@
 {
   "name": "@lpdjs/firestore-repo-service",
-  "version": "2.3.6",
+  "version": "2.4.0",
   "workspaces": [
     "test/functions"
   ],
@@ -38,16 +38,6 @@
       "import": {
         "types": "./dist/sync/bigquery.d.ts",
         "default": "./dist/sync/bigquery.js"
-      }
-    },
-    "./sync/bigquery-storage": {
-      "require": {
-        "types": "./dist/sync/bigquery-storage.d.cts",
-        "default": "./dist/sync/bigquery-storage.cjs"
-      },
-      "import": {
-        "types": "./dist/sync/bigquery-storage.d.ts",
-        "default": "./dist/sync/bigquery-storage.js"
       }
     },
     "./history": {
@@ -133,9 +123,6 @@
       ],
       "sync/bigquery": [
         "./dist/sync/bigquery.d.ts"
-      ],
-      "sync/bigquery-storage": [
-        "./dist/sync/bigquery-storage.d.ts"
       ],
       "history": [
         "./dist/history/index.d.ts"

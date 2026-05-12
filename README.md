@@ -427,7 +427,9 @@ export const { functions } = servers.sync({
   deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
   adapter: new BigQueryAdapter({
     bigquery: new BigQuery({ projectId: "my-project" }),
+    projectId: "my-project",
     datasetId: "firestore_sync",
+    maxStaleness: "INTERVAL 15 MINUTE",
   }),
   topicPrefix: "firestore-sync",
   autoMigrate: true,
@@ -777,7 +779,9 @@ export const { functions } = servers.sync({
   deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
   adapter: new BigQueryAdapter({
     bigquery: new BigQuery({ projectId: "my-project" }),
+    projectId: "my-project",
     datasetId: "firestore_sync",
+    maxStaleness: "INTERVAL 15 MINUTE",
   }),
   topicPrefix: "firestore-sync",
   autoMigrate: true,

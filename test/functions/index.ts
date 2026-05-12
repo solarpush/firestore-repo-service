@@ -180,7 +180,7 @@ export const server = onRequest(async (req, res) => {
 import { BigQuery } from "@google-cloud/bigquery";
 import { PubSub } from "@google-cloud/pubsub";
 import { firebaseAuth } from "@lpdjs/firestore-repo-service/servers/auth";
-import { BigQueryStorageAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery-storage";
+import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
 import { getAuth } from "firebase-admin/auth";
 import * as firestoreTriggers from "firebase-functions/v2/firestore";
 import * as pubsubHandler from "firebase-functions/v2/pubsub";
@@ -352,7 +352,7 @@ export const sync = servers.sync({
     pubsubHandler,
     pubsub: new PubSub(),
   },
-  adapter: new BigQueryStorageAdapter({
+  adapter: new BigQueryAdapter({
     bigquery: new BigQuery({ projectId: "firestore-repo-services" }),
     datasetId: "firestore_sync",
     projectId: "firestore-repo-services",

@@ -1,6 +1,5 @@
 /**
- * BigQuery type-name utilities shared by the legacy `BigQueryAdapter` (DML
- * MERGE) and the new `BigQueryStorageAdapter` (Storage Write API).
+ * BigQuery type-name utilities used by the {@link BigQueryAdapter}.
  *
  * - {@link normalizeBigQueryType} canonicalises BigQuery type strings so that
  *   `INTEGER`/`INT64`, `FLOAT`/`FLOAT64`, `BOOLEAN`/`BOOL`, etc. compare

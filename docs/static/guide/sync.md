@@ -236,32 +236,10 @@ PubSub messages are handled in parallel **inside the same Node.js process**
 and all enqueue into the same buffer.
 
 `SyncQueue.flush()` coalesces concurrent callers: every parallel handler
-awaits the same in-flight BigQuery `MERGE` and only resolves once its event
-has actually been written. This is what makes `await q.flush()` at the end
+awaits the same in-flight write and only resolves once its event has
+actually been persisted. This is what makes `await q.flush()` at the end
 of the handler safe — PubSub only acks after BigQuery confirmed the write,
 so an instance crash before flush never loses an event.
-
-::: warning BigQuery DML quota & serialize-access errors
-
-BigQuery only allows ~**2 concurrent DML statements per table**. Beyond that
-you get `Could not serialize access to table … due to concurrent update`
-(HTTP 400, `invalidQuery`). This happens as soon as **two Cloud Function
-instances** flush the same table at the same time.
-
-The library mitigates this with an exponential-backoff retry inside
-`BigQueryAdapter` (10 attempts, jitter, base 500 ms), but the only way to
-**eliminate** it is to serialize MERGEs per table. The simplest reliable
-recipe:
-
-- `maxInstances: 1` per repo (one writer per BigQuery table).
-- `concurrency: 5–10` for in-instance parallelism (still safe — `SyncQueue`
-  serializes flushes inside the process).
-- Larger `batchSize` (500–1000) and longer `flushIntervalMs` (10–15 s) to
-  amortize the DML cost.
-
-If you need horizontal scaling beyond one instance, migrate to the BigQuery
-Storage Write API instead (no DML serialization).
-:::
 
 ::: tip Dead-letter & infinite retry protection
 
@@ -276,93 +254,83 @@ subscription** (Cloud Functions v2 / Eventarc subscription) with e.g.
 
 ::: tip Recommended defaults for production
 
-- Low traffic (< 10 writes/s/repo): defaults are fine
-  (`maxInstances: 1`, `concurrency: 1`).
-- Medium (10-100 writes/s/repo): `batchSize: 500`, `flushIntervalMs: 10_000`,
+- Low traffic (< 10 writes/s/repo): `batchSize: 100`, `flushIntervalMs: 5_000`,
   `concurrency: 5`, `maxInstances: 1`.
-- High (> 100 writes/s/repo): keep `maxInstances: 1` per repo and migrate
-  inserts to the BigQuery Storage Write API (no per-table DML serialization).
+- Medium (10-100 writes/s/repo): `batchSize: 500`, `flushIntervalMs: 10_000`,
+  `concurrency: 20`, `maxInstances: 3`.
+- High (> 100 writes/s/repo): `batchSize: 500–1000`, `flushIntervalMs: 10_000`,
+  `concurrency: 40`, `maxInstances: 5+` — the Storage Write API has no
+  per-table concurrency cap, so scale horizontally as needed.
   :::
 
 ## BigQuery Adapter
 
+The library ships a single BigQuery adapter that streams rows through the
+**BigQuery Storage Write API** in **CDC mode** (Change Data Capture).
+Multiple Cloud Function instances can write in parallel with no
+concurrency cap, it is ~50% cheaper than legacy streaming inserts, and
+out-of-order events are deduplicated by `_CHANGE_SEQUENCE_NUMBER` derived
+from each event's `__sync_version`.
+
+The Storage Write client is an **optional peer dependency** — install it
+in your functions project:
+
+```bash
+npm install @google-cloud/bigquery-storage @google-cloud/bigquery
+```
+
 ```typescript
-import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
 import { BigQuery } from "@google-cloud/bigquery";
+import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
 
 const adapter = new BigQueryAdapter({
-  bigquery: new BigQuery({ projectId: "my-project" }),
+  projectId: "my-project",
   datasetId: "firestore_sync",
+  bigquery: new BigQuery({ projectId: "my-project" }),
+  // Background CDC merge cadence — see "About maxStaleness" below.
+  maxStaleness: "INTERVAL 15 MINUTE",
 });
 ```
 
 The adapter handles:
 
-- Table creation via DDL
-- MERGE-based upserts (INSERT … ON CONFLICT / MERGE)
-- Delete by primary key
+- Table creation via DDL with `PRIMARY KEY ... NOT ENFORCED` and clustering
+  on the PK (required by CDC mode)
+- Streaming UPSERTs and DELETEs through the default stream (at-least-once,
+  no stream finalization needed)
 - Schema introspection (for health checks)
-- Automatic column migration (`addColumns`)
-- ISO 8601 strings in `TIMESTAMP` columns are wrapped as `TIMESTAMP('...')` literals
+- Automatic column migration (`addColumns`) with type-drift detection
+- ISO 8601 strings and `Date` instances in `TIMESTAMP` columns are encoded
+  as epoch microseconds (the wire format the Storage Write API expects)
 
 ### Authentication
 
 - **Production (Cloud Run / Cloud Functions)**: credentials are automatic via ADC — just pass `projectId`
 - **Local development**: run `gcloud auth application-default login`
-
-## BigQuery Storage Write Adapter (recommended for high throughput)
-
-`BigQueryAdapter` uses MERGE/DELETE DML which is bounded by BigQuery's
-**~2 concurrent DML statements per table** quota. Once you flush more than
-that — typically when scaling out Cloud Run instances or sustaining high
-write rates per collection — you start seeing:
-
-```
-ApiError: Could not serialize access to table firestore_sync.posts
-due to concurrent update (code 400, reason: invalidQuery)
-```
-
-`BigQueryStorageAdapter` is a drop-in replacement that streams rows through
-the **BigQuery Storage Write API** in **CDC mode** (Change Data Capture).
-Multiple instances can write in parallel with no concurrency cap, it is
-~50% cheaper than legacy streaming inserts, and it preserves the same
-out-of-order protection because each event carries its `__sync_version`
-as `_CHANGE_SEQUENCE_NUMBER`.
-
-```bash
-npm install @google-cloud/bigquery-storage
-```
-
-```typescript
-import { BigQuery } from "@google-cloud/bigquery";
-import { BigQueryStorageAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery-storage";
-
-const adapter = new BigQueryStorageAdapter({
-  projectId: "my-project",
-  datasetId: "firestore_sync",
-  bigquery: new BigQuery({ projectId: "my-project" }),
-  // Background CDC merge cadence — 15 min in prod, 1 min in dev.
-  // Without this option BigQuery defaults to 0, which means a merge
-  // happens on every read and gets very expensive.
-  maxStaleness: "INTERVAL 15 MINUTE",
-});
-```
-
-### Requirements
-
-- The destination tables must declare `PRIMARY KEY (...) NOT ENFORCED`
-  and be clustered on that key. `createTable` (and therefore `autoMigrate`)
-  emits the right DDL automatically.
 - The service account needs `bigquery.tables.updateData` (granted by
-  `roles/bigquery.dataEditor`).
-- IAM scope `bigquery.tables.updateData` requires
-  `https://www.googleapis.com/auth/bigquery.insertdata` — already covered
-  by ADC on Cloud Run.
+  `roles/bigquery.dataEditor`)
 
-### Migrating existing tables
+### About `maxStaleness`
 
-Tables originally created by `BigQueryAdapter` (legacy) **do not** have a
-PK constraint. Before switching, run once per table:
+CDC writes land in BigQuery's **change buffer**; rows only become visible
+in the base table once an asynchronous **MERGE** applies the buffer.
+`max_staleness` is the SLO for that merge:
+
+- **`INTERVAL 0`** (BigQuery's silent default if you omit the option) —
+  every `SELECT` triggers a synchronous merge of the entire buffer before
+  returning results. Cheap-looking, but it makes reads slow and expensive
+  on busy tables and defeats the point of CDC.
+- **`INTERVAL N MINUTE`** — BigQuery runs the MERGE in the background at
+  most every N minutes (free, doesn't block reads). Reads against the
+  table see data up to N minutes stale. The library defaults to
+  **15 minutes** — a good production tradeoff between cost and freshness.
+- For development you can set `INTERVAL 1 MINUTE` if you need to see your
+  writes quickly in the BigQuery UI.
+
+### Migrating tables created by older versions of this library
+
+Tables originally created by the legacy MERGE-based adapter (≤ 2.3.x) do
+not have a PK constraint. Before deploying, run once per table:
 
 ```sql
 ALTER TABLE `dataset.posts`
@@ -373,35 +341,6 @@ ALTER TABLE `dataset.posts`
 (Clustering can only be set at table creation; if your table is not
 clustered on the PK, recreate it with `CREATE TABLE … AS SELECT …` or
 accept the read-time penalty — Storage Write CDC still works.)
-
-### Tuning with this adapter
-
-You no longer need `maxInstances: 1` to avoid serialize-access errors.
-Recommended starting point:
-
-```ts
-workerOptions: {
-  maxInstances: 5,
-  concurrency: 40,
-  cpu: 1,
-  memory: "512MiB",
-  timeoutSeconds: 300,
-  retry: true,
-}
-```
-
-`batchSize: 500` and `flushIntervalMs: 10_000` remain a good default.
-
-### What changes vs. the MERGE adapter
-
-| Aspect | `BigQueryAdapter` (DML) | `BigQueryStorageAdapter` (CDC) |
-| --- | --- | --- |
-| Concurrency cap | ~2 per table | None (per-stream throughput limits only) |
-| Cost (writes) | Streaming inserts (~$0.01 / 200 MB) | Storage Write API (~50% cheaper, 2 TiB/mo free) |
-| Latency to query | Immediate | Up to `max_staleness` for un-merged rows |
-| PK requirement | None | `PRIMARY KEY ... NOT ENFORCED` |
-| Out-of-order safety | `MERGE` guard on `__sync_version` | `_CHANGE_SEQUENCE_NUMBER` from `__sync_version` |
-| Hot-path failure mode | DLQ on serialize-access | Transient gRPC retries (built-in) |
 
 ## Schema Evolution
 
