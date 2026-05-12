@@ -177,6 +177,30 @@ async function withRetry<T>(
 // Adapter
 // ---------------------------------------------------------------------------
 
+/**
+ * Minimal structural shape of `@google-cloud/bigquery`'s `BigQuery` client
+ * actually used by the adapter (`.dataset(...)` and `.query(...)`).
+ *
+ * Why structural and not just `BigQuery`: TypeScript treats classes with
+ * private fields nominally. When a consumer's `node_modules` ends up with
+ * a *second* copy of `@google-cloud/bigquery` (very common in workspace
+ * setups, peer-dep dedup misses, monorepo nesting), the `BigQuery` they
+ * import is *technically* a different type than the one this library's
+ * `BigQuery` references — even though they are runtime-identical — and
+ * assignment fails with `Types have separate declarations of a private
+ * property '_universeDomain'`.
+ *
+ * Accepting a structural superset sidesteps the duplicate-install issue
+ * without giving up type safety on the methods we actually call.
+ */
+export interface BigQueryLike {
+  dataset(datasetId: string): {
+    table(tableName: string): any;
+    [key: string]: any;
+  };
+  query(options: { query: string; params?: unknown[] } | string): Promise<any>;
+}
+
 export interface BigQueryAdapterOptions {
   /** GCP project id that owns the dataset. */
   projectId: string;
@@ -186,11 +210,14 @@ export interface BigQueryAdapterOptions {
    * BigQuery client used for DDL operations (createTable, addColumns,
    * getMetadata, executeRaw). Storage Write only handles inserts.
    *
-   * Typed as `BigQuery` from `@google-cloud/bigquery` (peer dependency —
-   * the type-only import is erased at compile time so the runtime stays
-   * free of that module unless the consumer instantiates a client).
+   * Typed as the structural {@link BigQueryLike} (a superset satisfied by
+   * `BigQuery` from `@google-cloud/bigquery`) to avoid TypeScript nominal
+   * mismatches when the consumer's project ends up with two copies of
+   * `@google-cloud/bigquery` in different `node_modules`. Pass
+   * `new BigQuery({...})` from your own install — it satisfies this shape
+   * structurally.
    */
-  bigquery: BigQuery;
+  bigquery: BigQueryLike | BigQuery;
   /**
    * Optional pre-built Storage Write `WriterClient`. When omitted a new
    * one is created lazily on first use.
@@ -235,7 +262,7 @@ export interface BigQueryAdapterOptions {
  * in CDC mode. See module-level docstring for the rationale.
  */
 export class BigQueryAdapter implements SqlAdapter {
-  private readonly bigquery: BigQuery;
+  private readonly bigquery: BigQueryLike;
   private readonly projectId: string;
   private readonly datasetId: string;
   private readonly maxStaleness: string | null;
