@@ -40,6 +40,16 @@
         "default": "./dist/sync/bigquery.js"
       }
     },
+    "./sync/bigquery-storage": {
+      "require": {
+        "types": "./dist/sync/bigquery-storage.d.cts",
+        "default": "./dist/sync/bigquery-storage.cjs"
+      },
+      "import": {
+        "types": "./dist/sync/bigquery-storage.d.ts",
+        "default": "./dist/sync/bigquery-storage.js"
+      }
+    },
     "./history": {
       "require": {
         "types": "./dist/history/index.d.cts",
@@ -124,6 +134,9 @@
       "sync/bigquery": [
         "./dist/sync/bigquery.d.ts"
       ],
+      "sync/bigquery-storage": [
+        "./dist/sync/bigquery-storage.d.ts"
+      ],
       "history": [
         "./dist/history/index.d.ts"
       ]
@@ -195,6 +208,7 @@
   "homepage": "https://frs.lpdjs.fr",
   "peerDependencies": {
     "@google-cloud/bigquery": "^7.0.0 || ^8.0.0",
+    "@google-cloud/bigquery-storage": "^4.0.0 || ^5.0.0",
     "@google-cloud/pubsub": "^4.0.0 || ^5.0.0",
     "firebase-admin": "^11.0.0 || ^12.0.0 || ^13.0.0",
     "firebase-functions": "^5.0.0 || ^6.0.0 || ^7.0.0",
@@ -208,12 +222,16 @@
     "@google-cloud/bigquery": {
       "optional": true
     },
+    "@google-cloud/bigquery-storage": {
+      "optional": true
+    },
     "@google-cloud/pubsub": {
       "optional": true
     }
   },
   "devDependencies": {
     "@google-cloud/bigquery": "^8.3.0",
+    "@google-cloud/bigquery-storage": "^5.1.0",
     "@google-cloud/pubsub": "^5.3.0",
     "@types/bun": "latest",
     "@types/express": "latest",

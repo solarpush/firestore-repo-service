@@ -6,6 +6,7 @@ import type {
   SqlDialect,
   SqlTableDef,
 } from "../types";
+import { normalizeBigQueryType } from "./bigquery-types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -132,6 +133,23 @@ export class BigQueryAdapter implements SqlAdapter {
     const [metadata] = await this.dataset.table(tableName).getMetadata();
     const fields: Array<{ name: string }> = metadata.schema?.fields ?? [];
     return fields.map((f) => f.name);
+  }
+
+  /**
+   * Return existing columns with their normalized BigQuery type strings.
+   * Used by the worker to detect type drift before applying schema changes.
+   */
+  async getTableColumnsWithTypes(
+    tableName: string,
+  ): Promise<Map<string, string>> {
+    const [metadata] = await this.dataset.table(tableName).getMetadata();
+    const fields: Array<{ name: string; type: string }> =
+      metadata.schema?.fields ?? [];
+    const result = new Map<string, string>();
+    for (const f of fields) {
+      result.set(f.name, normalizeBigQueryType(f.type));
+    }
+    return result;
   }
 
   /** Create a table using a fully-qualified name. */

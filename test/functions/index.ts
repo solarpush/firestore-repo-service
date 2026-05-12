@@ -361,11 +361,12 @@ export const sync = servers.sync({
   batchSize: 500,
   flushIntervalMs: 10_000,
   workerOptions: {
-     concurrency: 5,
+     concurrency: 40,
    maxInstances: 1,
    retry: true,
+   cpu: 1,
    memory: "512MiB",
-   timeoutSeconds: 120,
+   timeoutSeconds: 300,
   },
   admin: {
     auth: firebaseAuth({

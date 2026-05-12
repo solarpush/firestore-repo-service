@@ -8,6 +8,7 @@
  */
 
 import { z } from "zod";
+import { isBigQueryTypeCompatible } from "./adapters/bigquery-types";
 import { SYNC_VERSION_COLUMN } from "./constants";
 import { SyncQueue } from "./queue";
 import { zodSchemaToColumns } from "./schema-mapper";
@@ -24,6 +25,35 @@ import type {
 
 /** Set of repo names that have already been migrated in this process lifetime. */
 const migratedRepos = new Set<string>();
+
+/**
+ * Thrown by {@link ensureMigrated} when an existing column has a SQL type
+ * that is not compatible with what the current Zod schema would produce.
+ *
+ * BigQuery (and Storage Write CDC in particular) cannot silently coerce
+ * incompatible types. We fail fast so the user fixes the schema explicitly
+ * (rename the column, recreate the table, or add a transform) instead of
+ * losing events to an infinite DLQ loop.
+ */
+export class SchemaTypeMismatchError extends Error {
+  constructor(
+    readonly tableName: string,
+    readonly column: string,
+    readonly existingType: string,
+    readonly desiredType: string,
+  ) {
+    super(
+      `Schema drift detected on \`${tableName}\`: column \`${column}\` has ` +
+        `type ${existingType} in BigQuery but the current Zod schema maps ` +
+        `it to ${desiredType}. BigQuery cannot safely convert between these ` +
+        `types — to resolve, either (a) keep the BigQuery type and add a ` +
+        `transform in your repo to coerce values, (b) rename the field in ` +
+        `your Zod schema (creates a new column), or (c) drop & recreate ` +
+        `the table.`,
+    );
+    this.name = "SchemaTypeMismatchError";
+  }
+}
 
 async function ensureMigrated(
   repoName: string,
@@ -46,10 +76,44 @@ async function ensureMigrated(
   if (!exists) {
     await adapter.createTable({ tableName, columns });
   } else {
-    const existing = new Set(await adapter.getTableColumns(tableName));
-    const newCols = columns.filter((c) => !existing.has(c.name));
-    if (newCols.length > 0) {
-      await adapter.addColumns(tableName, newCols);
+    // Prefer typed lookup when the adapter supports it: this lets us detect
+    // type drift (e.g. number → string) and fail fast with an explicit
+    // error, instead of every flush failing inside BigQuery with a cryptic
+    // cast error and looping forever via the DLQ.
+    if (adapter.getTableColumnsWithTypes) {
+      const existing = await adapter.getTableColumnsWithTypes(tableName);
+      const missing: typeof columns = [];
+      for (const col of columns) {
+        const existingType = existing.get(col.name);
+        if (existingType === undefined) {
+          missing.push(col);
+          continue;
+        }
+        // Only meaningful for BigQuery dialects; other dialects can opt-in
+        // by implementing getTableColumnsWithTypes with their own tokens.
+        if (
+          adapter.dialect.name === "bigquery" &&
+          !isBigQueryTypeCompatible(existingType, col.sqlType)
+        ) {
+          throw new SchemaTypeMismatchError(
+            tableName,
+            col.name,
+            existingType,
+            col.sqlType,
+          );
+        }
+      }
+      if (missing.length > 0) {
+        await adapter.addColumns(tableName, missing);
+        await adapter.onSchemaChange?.(tableName);
+      }
+    } else {
+      const existing = new Set(await adapter.getTableColumns(tableName));
+      const newCols = columns.filter((c) => !existing.has(c.name));
+      if (newCols.length > 0) {
+        await adapter.addColumns(tableName, newCols);
+        await adapter.onSchemaChange?.(tableName);
+      }
     }
   }
 

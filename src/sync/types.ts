@@ -144,6 +144,19 @@ export interface SqlAdapter {
   getTableColumns(tableName: string): Promise<string[]>;
 
   /**
+   * Return existing columns with their dialect-specific SQL type strings.
+   * Used by the worker to detect type drift (e.g. Zod field changes from
+   * `number` to `string`) and fail fast with an explicit error rather than
+   * letting MERGE/Storage Write fail silently on every event.
+   *
+   * Optional for backwards-compat: if the adapter does not implement it,
+   * the worker skips type-drift detection but still adds new columns.
+   */
+  getTableColumnsWithTypes?(
+    tableName: string,
+  ): Promise<Map<string, string>>;
+
+  /**
    * Create a table. Should be idempotent (IF NOT EXISTS).
    */
   createTable(table: SqlTableDef): Promise<void>;
@@ -177,6 +190,16 @@ export interface SqlAdapter {
    * The adapter is responsible for qualifying table names (e.g. dataset.table).
    */
   addColumns(tableName: string, columns: SqlColumn[]): Promise<void>;
+
+  /**
+   * Hook called by the worker after a schema change (`addColumns`) so that
+   * adapters caching schema-derived state — e.g. Storage Write proto
+   * descriptors / writer connections — can invalidate their cache.
+   *
+   * Optional: adapters with no cache (legacy `BigQueryAdapter`) do not need
+   * to implement this.
+   */
+  onSchemaChange?(tableName: string): void | Promise<void>;
 
   /**
    * Execute a raw SQL statement.

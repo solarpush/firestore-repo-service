@@ -311,6 +311,139 @@ L'adaptateur gère :
 - **Production (Cloud Run / Cloud Functions)** : les credentials sont automatiques via ADC — passez juste `projectId`
 - **Développement local** : lancez `gcloud auth application-default login`
 
+## Adapter BigQuery Storage Write (recommandé pour les gros volumes)
+
+`BigQueryAdapter` utilise des MERGE/DELETE DML, limités à environ
+**~2 statements DML concurrents par table** par BigQuery. Dès que vous
+flushez plus que ça — typiquement avec plusieurs instances Cloud Run ou
+des taux d'écriture élevés sur une même collection — vous voyez :
+
+```
+ApiError: Could not serialize access to table firestore_sync.posts
+due to concurrent update (code 400, reason: invalidQuery)
+```
+
+`BigQueryStorageAdapter` est un remplaçant direct qui streame les lignes
+via la **BigQuery Storage Write API** en mode **CDC** (Change Data
+Capture). Plusieurs instances peuvent écrire en parallèle sans plafond
+de concurrence, c'est ~50% moins cher que le streaming legacy, et la
+protection contre l'ordre d'arrivée est conservée car chaque event
+porte son `__sync_version` comme `_CHANGE_SEQUENCE_NUMBER`.
+
+```bash
+npm install @google-cloud/bigquery-storage
+```
+
+```typescript
+import { BigQuery } from "@google-cloud/bigquery";
+import { BigQueryStorageAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery-storage";
+
+const adapter = new BigQueryStorageAdapter({
+  projectId: "my-project",
+  datasetId: "firestore_sync",
+  bigquery: new BigQuery({ projectId: "my-project" }),
+  // Cadence du merge CDC — 15 min en prod, 1 min en dev.
+  // Sans cette option, BigQuery met 0 par défaut, ce qui force un merge
+  // à chaque lecture et coûte très cher.
+  maxStaleness: "INTERVAL 15 MINUTE",
+});
+```
+
+### Pré-requis
+
+- Les tables cibles doivent déclarer `PRIMARY KEY (...) NOT ENFORCED`
+  et être clusterisées sur cette clé. `createTable` (et donc
+  `autoMigrate`) émet le DDL adéquat automatiquement.
+- Le service account doit avoir `bigquery.tables.updateData` (rôle
+  `roles/bigquery.dataEditor`).
+
+### Migrer des tables existantes
+
+Les tables créées par l'ancien `BigQueryAdapter` n'ont **pas** de
+contrainte PK. Avant de switcher, lancez une fois par table :
+
+```sql
+ALTER TABLE `dataset.posts`
+  ADD PRIMARY KEY (post_id) NOT ENFORCED,
+  SET OPTIONS (max_staleness = INTERVAL 15 MINUTE);
+```
+
+(Le clustering ne se définit qu'à la création ; si la table n'est pas
+clusterisée sur la PK, recréez-la avec `CREATE TABLE … AS SELECT …` ou
+acceptez la pénalité au moment des reads — Storage Write CDC fonctionne
+quand même.)
+
+### Tuning avec cet adapter
+
+Vous n'avez plus besoin de `maxInstances: 1` pour éviter les serialize
+errors. Point de départ recommandé :
+
+```ts
+workerOptions: {
+  maxInstances: 5,
+  concurrency: 40,
+  cpu: 1,
+  memory: "512MiB",
+  timeoutSeconds: 300,
+  retry: true,
+}
+```
+
+`batchSize: 500` et `flushIntervalMs: 10_000` restent de bonnes valeurs
+par défaut.
+
+### Différences vs l'adapter MERGE
+
+| Aspect | `BigQueryAdapter` (DML) | `BigQueryStorageAdapter` (CDC) |
+| --- | --- | --- |
+| Plafond de concurrence | ~2 par table | Aucun (limites de débit par stream uniquement) |
+| Coût (écritures) | Streaming inserts (~$0.01 / 200 Mo) | Storage Write API (~50% moins cher, 2 Tio/mois gratuits) |
+| Latence en lecture | Immédiate | Jusqu'à `max_staleness` pour les lignes non mergées |
+| PK obligatoire | Non | `PRIMARY KEY ... NOT ENFORCED` |
+| Protection ordre | Garde `MERGE` sur `__sync_version` | `_CHANGE_SEQUENCE_NUMBER` depuis `__sync_version` |
+| Erreurs hot-path | DLQ sur serialize-access | Retries gRPC transitoires (intégrés) |
+
+## Évolution de schéma
+
+`autoMigrate` ajoute des colonnes quand votre schéma Zod gagne de
+nouveaux champs. Il **ne change jamais** le type d'une colonne
+existante — BigQuery n'autorise que des élargissements étroits
+(`INT64 → NUMERIC → BIGNUMERIC`, `DATE → DATETIME → TIMESTAMP`), et une
+mauvaise conversion implicite corromprait silencieusement les données.
+
+À partir de v2.3.x le worker détecte donc le drift de type et lève un
+`SchemaTypeMismatchError` dès le premier event :
+
+```
+Schema drift detected on `posts`: column `view_count` has type STRING in
+BigQuery but the current Zod schema maps it to INT64. BigQuery cannot
+safely convert between these types — to resolve, either (a) keep the
+BigQuery type and add a transform in your repo to coerce values,
+(b) rename the field in your Zod schema (creates a new column), or
+(c) drop & recreate the table.
+```
+
+C'est un **fail-fast** volontaire : sinon chaque flush échouerait avec
+une erreur de cast cryptique, le DLQ saturerait, et PubSub re-tenterait
+indéfiniment.
+
+### Workflow recommandé
+
+Traitez les schémas Firestore comme **append-only**. Quand vous devez
+changer le type d'un champ :
+
+1. **Renommez le champ dans Zod** (`view_count` → `view_count_v2`). La
+   prochaine migration ajoute la nouvelle colonne ; les anciennes
+   lignes restent à `NULL` jusqu'au backfill.
+2. **Backfill** avec un job SQL one-shot :
+   `UPDATE … SET view_count_v2 = CAST(view_count AS INT64)`.
+3. **Supprimez l'ancienne colonne** une fois les écritures basculées.
+
+Si vous devez vraiment muter une colonne en place, faites-le
+manuellement avant de déployer le nouveau code
+(`ALTER TABLE x ALTER COLUMN y SET DATA TYPE …` — autorisé seulement
+pour les élargissements supportés par BigQuery).
+
 ## Sync Admin
 
 L'endpoint admin optionnel fournit une interface web pour surveiller et gérer le pipeline de sync.
