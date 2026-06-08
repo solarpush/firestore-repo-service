@@ -43,52 +43,75 @@
 
 import type { Env } from "hono";
 import type { z } from "zod";
+import type { HttpsOptions } from "firebase-functions/v2/https";
 
 import type {
   AnyRouteDef,
   HonoServerOptions,
   RouteDef,
+  RouteHandler,
 } from "./types";
 import { HonoServer } from "./server";
+import type { AnyServicesContainer } from "./services";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type OnRequestFn = (...args: any[]) => any;
 
 /**
  * Per-API configuration. Same shape as {@link HonoServerOptions} minus the
- * `routes` (resolved by the registry) and `api` (the registry key).
+ * `routes` (resolved by the registry), `api` (the registry key) and
+ * `services` (set globally on the registry — see
+ * {@link createApiRegistry}).
  */
 export type ApiConfig<TEnv extends Env = Env> = Omit<
   HonoServerOptions<TEnv>,
-  "routes" | "api"
+  "routes" | "api" | "services"
 >;
 
 /** Map of API tag → its config. */
 export type ApiConfigMap = Record<string, ApiConfig>;
 
-export interface ApiRegistry<TMap extends ApiConfigMap> {
+/**
+ * Options accepted by {@link createApiRegistry} alongside the per-API
+ * configs.
+ */
+export interface ApiRegistryOptions<
+  TServices extends AnyServicesContainer = AnyServicesContainer,
+> {
+  /**
+   * Global DI services container shared across every API. See
+   * {@link ServicesContainer} / `createServices`. When provided, every
+   * `HonoServer` mounted by the registry receives it and exposes
+   * `services` to every handler / interceptor.
+   */
+  services?: TServices;
+}
+
+export interface ApiRegistry<
+  TMap extends ApiConfigMap,
+  TServices extends AnyServicesContainer = AnyServicesContainer,
+> {
   /** The registered configs (read-only). */
   readonly configs: TMap;
 
   /**
-   * Typed `defineRoute` — the `api` field is constrained to `keyof TMap`.
-   *
-   * To expose the same logical endpoint under several APIs with different
-   * `input` / `output` schemas, call `defineRoute` once per route and wrap
-   * them in an array — per-call inference is preserved:
-   *
-   * ```ts
-   * export default [
-   *   defineRoute({ api: "v1", input: V1Input, handler: ({ input }) => ... }),
-   *   defineRoute({ api: "v2", input: V2Input, handler: ({ input }) => ... }),
-   * ];
-   * ```
+   * Typed `defineRoute` — the `api` field is constrained to `keyof TMap`,
+   * and `handler({ services })` is typed with the concrete services
+   * container passed to {@link createApiRegistry}.
    */
   defineRoute<
     TIn extends z.ZodTypeAny | undefined = undefined,
     TOut extends z.ZodTypeAny | undefined = undefined,
   >(
-    def: Omit<RouteDef<TIn, TOut>, "api"> & { api: keyof TMap & string },
+    def: Omit<RouteDef<TIn, TOut>, "api" | "handler"> & {
+      api: keyof TMap & string;
+      handler: RouteHandler<
+        TIn extends z.ZodTypeAny ? z.infer<TIn> : void,
+        TOut extends z.ZodTypeAny ? z.infer<TOut> : unknown,
+        Env,
+        TServices
+      >;
+    },
   ): RouteDef<TIn, TOut> & { api: keyof TMap & string };
 
   /**
@@ -104,8 +127,10 @@ export interface ApiRegistry<TMap extends ApiConfigMap> {
     routes: AnyRouteDef[],
     onRequest: OnRequestFn,
     opts?: {
-      defaults?: Record<string, unknown>;
-      per?: Partial<Record<keyof TMap & string, Record<string, unknown>>>;
+      /** Shared `HttpsOptions` applied to every generated function. */
+      defaults?: HttpsOptions;
+      /** Per-API overrides — merged on top of {@link defaults}. */
+      per?: Partial<Record<keyof TMap & string, HttpsOptions>>;
     },
   ): { [K in keyof TMap & string]: ReturnType<OnRequestFn> };
 
@@ -119,10 +144,19 @@ export interface ApiRegistry<TMap extends ApiConfigMap> {
 /**
  * Factory — declare every API tag once and get back a typed `defineRoute`
  * + `toFunctions`. See the file-level example.
+ *
+ * @param configs  API-tag → per-API config.
+ * @param options  Cross-API options (shared services container, etc).
  */
-export function createApiRegistry<const TMap extends ApiConfigMap>(
+export function createApiRegistry<
+  const TMap extends ApiConfigMap,
+  TServices extends AnyServicesContainer = AnyServicesContainer,
+>(
   configs: TMap,
-): ApiRegistry<TMap> {
+  options?: ApiRegistryOptions<TServices>,
+): ApiRegistry<TMap, TServices> {
+  const sharedServices = options?.services;
+
   return {
     configs,
 
@@ -138,7 +172,7 @@ export function createApiRegistry<const TMap extends ApiConfigMap>(
           `[ApiRegistry] unknown api "${api}". Registered: ${Object.keys(configs).join(", ")}`,
         );
       }
-      return new HonoServer({ ...cfg, api, routes });
+      return new HonoServer({ ...cfg, api, routes, services: sharedServices });
     },
 
     toFunctions(routes, onRequest, opts) {
@@ -148,7 +182,12 @@ export function createApiRegistry<const TMap extends ApiConfigMap>(
           ...(opts?.defaults ?? {}),
           ...(opts?.per?.[api] ?? {}),
         };
-        const server = new HonoServer({ ...configs[api], api, routes });
+        const server = new HonoServer({
+          ...configs[api],
+          api,
+          routes,
+          services: sharedServices,
+        });
         out[api] = Object.keys(httpsOpts).length
           ? server.toFunction(onRequest, httpsOpts)
           : server.toFunction(onRequest);

@@ -102,20 +102,23 @@ if (post) {
 }
 
 // Update
-const updated = await repos.users.update("user123", { name: "New name", age: 31 });
+const updated = await repos.users.update("user123", {
+  name: "New name",
+  age: 31,
+});
 ```
 
 ## API reference
 
 ### `createRepositoryConfig()`
 
-| Option        | Description                                             |
-| ------------- | ------------------------------------------------------- |
-| `path`        | Collection path in Firestore                            |
-| `isGroup`     | `true` for collection group, `false` for simple         |
-| `foreignKeys` | Keys for `get.by*` methods (single document lookup)     |
-| `queryKeys`   | Keys for `query.by*` methods (multi-document query)     |
-| `refCb`       | Function that returns the document reference            |
+| Option        | Description                                         |
+| ------------- | --------------------------------------------------- |
+| `path`        | Collection path in Firestore                        |
+| `isGroup`     | `true` for collection group, `false` for simple     |
+| `foreignKeys` | Keys for `get.by*` methods (single document lookup) |
+| `queryKeys`   | Keys for `query.by*` methods (multi-document query) |
+| `refCb`       | Function that returns the document reference        |
 
 **Sub-collection example:**
 
@@ -134,8 +137,8 @@ comments: createRepositoryConfig<CommentModel>()({
 
 ```typescript
 interface QueryOptions<T> {
-  where?: [keyof T, WhereFilterOp, any][];      // AND conditions
-  orWhere?: [keyof T, WhereFilterOp, any][][];  // OR conditions
+  where?: [keyof T, WhereFilterOp, any][]; // AND conditions
+  orWhere?: [keyof T, WhereFilterOp, any][][]; // OR conditions
   orderBy?: { field: keyof T; direction?: "asc" | "desc" }[];
   limit?: number;
   offset?: number;
@@ -226,7 +229,9 @@ const page = await repos.posts.query.paginate({
 ```typescript
 import { count, sum, average } from "@lpdjs/firestore-repo-service";
 
-const activeCount = await repos.users.aggregate.count({ where: [["isActive", "==", true]] });
+const activeCount = await repos.users.aggregate.count({
+  where: [["isActive", "==", true]],
+});
 const totalViews = await repos.posts.aggregate.sum("views");
 const avgAge = await repos.users.aggregate.average("age");
 ```
@@ -237,7 +242,9 @@ const avgAge = await repos.users.aggregate.average("age");
 const result = await repos.users.transaction.run(async (txn) => {
   const user = await txn.get(repos.users.documentRef("user123"));
   if (user.exists()) {
-    txn.update(repos.users.documentRef("user123"), { age: user.data().age + 1 });
+    txn.update(repos.users.documentRef("user123"), {
+      age: user.data().age + 1,
+    });
   }
   return { success: true };
 });
@@ -249,8 +256,14 @@ const result = await repos.users.transaction.run(async (txn) => {
 // (status = 'active' AND age >= 18) OR (status = 'pending' AND verified = true)
 const users = await repos.users.query.by({
   orWhere: [
-    [["status", "==", "active"], ["age", ">=", 18]],
-    [["status", "==", "pending"], ["verified", "==", true]],
+    [
+      ["status", "==", "active"],
+      ["age", ">=", 18],
+    ],
+    [
+      ["status", "==", "pending"],
+      ["verified", "==", true],
+    ],
   ],
 });
 ```
@@ -304,9 +317,9 @@ npm i -D @asteasolutions/zod-to-openapi
 ### Bootstrap
 
 ```bash
-npx frs-hono init          # interactive — creates apis.ts + manifest stub
-npx frs-hono new createPost --domain posts --method post --api v1
-npx frs-hono gen --root src/domains   # refresh manifest (run before each build)
+npx frs init          # interactive — creates apis.ts + manifest stub
+npx frs new createPost --domain posts --method post --api v1
+npx frs gen --root src/domains   # refresh manifest (run before each build)
 ```
 
 ### Configure your APIs (`apis.ts`)
@@ -337,7 +350,7 @@ import { z } from "zod";
 import { defineRoute } from "../../../../apis.js";
 
 export default defineRoute({
-  api: "v1",           // typed: only registered tags accepted
+  api: "v1", // typed: only registered tags accepted
   method: "post",
   input: z.object({ title: z.string() }),
   output: z.object({ id: z.string() }),
@@ -365,16 +378,16 @@ export const { v1 } = apis.toFunctions(routes, onRequest, {
 
 ### Key features
 
-| Feature | Details |
-| --- | --- |
-| **File-based routing** | `routes.ts` next to each useCase, scanned at build time |
-| **Multi-API registry** | One Cloud Function per tag, typed `api` field |
-| **Zod validation** | Body / query / path params + optional response validation |
-| **OpenAPI 3.1** | Auto-generated from Zod schemas; Scalar UI at `/docs` |
-| **Interceptor** | Around-style hook for envelopes, error mapping, tracing |
-| **Middlewares** | Per-API and per-route Hono middlewares |
-| **Typed context** | Augment `ContextVariableMap` once, `c.get("user")` typed everywhere |
-| **CLI** | `init` / `new` (interactive) / `gen` |
+| Feature                | Details                                                             |
+| ---------------------- | ------------------------------------------------------------------- |
+| **File-based routing** | `routes.ts` next to each useCase, scanned at build time             |
+| **Multi-API registry** | One Cloud Function per tag, typed `api` field                       |
+| **Zod validation**     | Body / query / path params + optional response validation           |
+| **OpenAPI 3.1**        | Auto-generated from Zod schemas; Scalar UI at `/docs`               |
+| **Interceptor**        | Around-style hook for envelopes, error mapping, tracing             |
+| **Middlewares**        | Per-API and per-route Hono middlewares                              |
+| **Typed context**      | Augment `ContextVariableMap` once, `c.get("user")` typed everywhere |
+| **CLI**                | `init` / `new` (interactive) / `gen`                                |
 
 Full documentation: [frs.lpdjs.fr/guide/hono](https://frs.lpdjs.fr/guide/hono)
 
@@ -446,9 +459,18 @@ export const { functions } = servers.sync({
 
 // Spread Cloud Functions into your exports
 export const {
-  users_onCreate, users_onUpdate, users_onDelete, sync_users,
-  posts_onCreate, posts_onUpdate, posts_onDelete, sync_posts,
-  comments_onCreate, comments_onUpdate, comments_onDelete, sync_comments,
+  users_onCreate,
+  users_onUpdate,
+  users_onDelete,
+  sync_users,
+  posts_onCreate,
+  posts_onUpdate,
+  posts_onDelete,
+  sync_posts,
+  comments_onCreate,
+  comments_onUpdate,
+  comments_onDelete,
+  sync_comments,
   adminsync,
 } = functions;
 ```
@@ -487,7 +509,6 @@ Firestore emulator runs on `localhost:8080`, UI on `http://localhost:4000`.
 ## License
 
 MIT
-
 
 ## Installation
 
@@ -579,20 +600,23 @@ if (post) {
 }
 
 // Update
-const updated = await repos.users.update("user123", { name: "New name", age: 31 });
+const updated = await repos.users.update("user123", {
+  name: "New name",
+  age: 31,
+});
 ```
 
 ## API reference
 
 ### `createRepositoryConfig()`
 
-| Option        | Description                                             |
-| ------------- | ------------------------------------------------------- |
-| `path`        | Collection path in Firestore                            |
-| `isGroup`     | `true` for collection group, `false` for simple         |
-| `foreignKeys` | Keys for `get.by*` methods (single document lookup)     |
-| `queryKeys`   | Keys for `query.by*` methods (multi-document query)     |
-| `refCb`       | Function that returns the document reference            |
+| Option        | Description                                         |
+| ------------- | --------------------------------------------------- |
+| `path`        | Collection path in Firestore                        |
+| `isGroup`     | `true` for collection group, `false` for simple     |
+| `foreignKeys` | Keys for `get.by*` methods (single document lookup) |
+| `queryKeys`   | Keys for `query.by*` methods (multi-document query) |
+| `refCb`       | Function that returns the document reference        |
 
 **Sub-collection example:**
 
@@ -611,8 +635,8 @@ comments: createRepositoryConfig<CommentModel>()({
 
 ```typescript
 interface QueryOptions<T> {
-  where?: [keyof T, WhereFilterOp, any][];      // AND conditions
-  orWhere?: [keyof T, WhereFilterOp, any][][];  // OR conditions
+  where?: [keyof T, WhereFilterOp, any][]; // AND conditions
+  orWhere?: [keyof T, WhereFilterOp, any][][]; // OR conditions
   orderBy?: { field: keyof T; direction?: "asc" | "desc" }[];
   limit?: number;
   offset?: number;
@@ -703,7 +727,9 @@ const page = await repos.posts.query.paginate({
 ```typescript
 import { count, sum, average } from "@lpdjs/firestore-repo-service";
 
-const activeCount = await repos.users.aggregate.count({ where: [["isActive", "==", true]] });
+const activeCount = await repos.users.aggregate.count({
+  where: [["isActive", "==", true]],
+});
 const totalViews = await repos.posts.aggregate.sum("views");
 const avgAge = await repos.users.aggregate.average("age");
 ```
@@ -714,7 +740,9 @@ const avgAge = await repos.users.aggregate.average("age");
 const result = await repos.users.transaction.run(async (txn) => {
   const user = await txn.get(repos.users.documentRef("user123"));
   if (user.exists()) {
-    txn.update(repos.users.documentRef("user123"), { age: user.data().age + 1 });
+    txn.update(repos.users.documentRef("user123"), {
+      age: user.data().age + 1,
+    });
   }
   return { success: true };
 });
@@ -726,8 +754,14 @@ const result = await repos.users.transaction.run(async (txn) => {
 // (status = 'active' AND age >= 18) OR (status = 'pending' AND verified = true)
 const users = await repos.users.query.by({
   orWhere: [
-    [["status", "==", "active"], ["age", ">=", 18]],
-    [["status", "==", "pending"], ["verified", "==", true]],
+    [
+      ["status", "==", "active"],
+      ["age", ">=", 18],
+    ],
+    [
+      ["status", "==", "pending"],
+      ["verified", "==", true],
+    ],
   ],
 });
 ```
@@ -798,9 +832,18 @@ export const { functions } = servers.sync({
 
 // Spread Cloud Functions into your exports
 export const {
-  users_onCreate, users_onUpdate, users_onDelete, sync_users,
-  posts_onCreate, posts_onUpdate, posts_onDelete, sync_posts,
-  comments_onCreate, comments_onUpdate, comments_onDelete, sync_comments,
+  users_onCreate,
+  users_onUpdate,
+  users_onDelete,
+  sync_users,
+  posts_onCreate,
+  posts_onUpdate,
+  posts_onDelete,
+  sync_posts,
+  comments_onCreate,
+  comments_onUpdate,
+  comments_onDelete,
+  sync_comments,
   adminsync,
 } = functions;
 ```
@@ -837,4 +880,3 @@ Firestore emulator runs on `localhost:8080`, UI on `http://localhost:4000`.
 ## License
 
 MIT
-

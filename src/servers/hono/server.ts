@@ -16,6 +16,7 @@ import { getRequestListener } from "@hono/node-server";
 import { z, ZodError } from "zod";
 import type { Env } from "hono";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { HttpsOptions } from "firebase-functions/v2/https";
 
 import type {
   AnyRouteDef,
@@ -26,6 +27,10 @@ import type {
 } from "./types";
 import { ValidationError } from "./types";
 import { buildOpenApiDocument, renderDocsHtml } from "./openapi";
+import {
+  createRequestContextMiddleware,
+  type AnyServicesContainer,
+} from "./services";
 
 /**
  * Minimal shape of `firebase-functions/v2/https` `onRequest` so the package
@@ -34,6 +39,14 @@ import { buildOpenApiDocument, renderDocsHtml } from "./openapi";
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type OnRequestFn = (...args: any[]) => any;
+
+/**
+ * Sentinel passed to handlers / interceptors when the server is started
+ * without a `services` container. Frozen so accidental writes throw.
+ */
+const EMPTY_SERVICES: AnyServicesContainer = Object.freeze(
+  {},
+) as unknown as AnyServicesContainer;
 
 export class HonoServer<TEnv extends Env = Env> {
   private readonly app: Hono<TEnv>;
@@ -45,6 +58,12 @@ export class HonoServer<TEnv extends Env = Env> {
     this.options = options;
     this.app = new Hono<TEnv>();
     this.mountedRoutes = filterRoutes(options.routes, options.api);
+
+    // Install the request-context middleware FIRST so the AsyncLocalStorage
+    // is populated before any user middleware / handler runs.
+    if (options.services) {
+      this.app.use("*", createRequestContextMiddleware());
+    }
 
     const globalMws = [
       ...(options.middlewares ?? []),
@@ -79,7 +98,7 @@ export class HonoServer<TEnv extends Env = Env> {
    * @param httpsOptions  Options forwarded as the first argument to
    *                      `onRequest()` (region, memory, invoker, etc.).
    */
-  toFunction(onRequest: OnRequestFn, httpsOptions?: Record<string, unknown>) {
+  toFunction(onRequest: OnRequestFn, httpsOptions?: HttpsOptions) {
     const handler = this.nodeHandler;
     if (httpsOptions) {
       return onRequest(httpsOptions, handler);
@@ -126,6 +145,7 @@ export class HonoServer<TEnv extends Env = Env> {
         source,
         validateOutput,
         this.options.interceptor as RouteInterceptor | undefined,
+        this.options.services,
       );
       const httpMethod = route.method.toUpperCase() as
         | "GET"
@@ -232,10 +252,14 @@ function makeRouteHandler(
   source: PayloadSource,
   validateOutput: boolean,
   interceptor: RouteInterceptor | undefined,
+  services: AnyServicesContainer | undefined,
 ) {
   const inputSchema = route.input as z.ZodTypeAny | undefined;
   const outputSchema = route.output as z.ZodTypeAny | undefined;
   const status = route.status ?? 200;
+  // Empty fallback so handlers/interceptors always see a `services` field
+  // even when the server was started without a container.
+  const servicesArg = (services ?? (EMPTY_SERVICES as AnyServicesContainer));
 
   return async (
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -269,7 +293,8 @@ function makeRouteHandler(
         input: any;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         c: any;
-      }) => unknown)({ input: payload, c });
+        services: AnyServicesContainer;
+      }) => unknown)({ input: payload, c, services: servicesArg });
 
       if (validateOutput && outputSchema && !(result instanceof Response)) {
         const checked = outputSchema.safeParse(result);
@@ -284,7 +309,7 @@ function makeRouteHandler(
     let result: unknown;
     if (interceptor) {
       // Interceptor owns the response shape — including validation errors.
-      result = await interceptor({ next: callNext, route, c });
+      result = await interceptor({ next: callNext, route, c, services: servicesArg });
     } else {
       // Default behaviour — handles ValidationError / BadRequestError with
       // a JSON envelope, lets unknown errors bubble to onError / Hono.

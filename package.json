@@ -1,6 +1,6 @@
 {
   "name": "@lpdjs/firestore-repo-service",
-  "version": "2.4.3",
+  "version": "2.6.0",
   "workspaces": [
     "test/functions"
   ],
@@ -135,7 +135,7 @@
     "LICENSE"
   ],
   "bin": {
-    "frs-hono": "./dist/servers/hono/cli.js"
+    "frs": "./dist/servers/hono/cli.js"
   },
   "authors": [
     {

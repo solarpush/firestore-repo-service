@@ -10,6 +10,7 @@
 
 import type { z, ZodError } from "zod";
 import type { Context, Env, MiddlewareHandler } from "hono";
+import type { AnyServicesContainer } from "./services";
 
 export type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -17,11 +18,22 @@ export type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 export type PayloadSource = "json" | "query" | "form" | "param";
 
 /** Handler signature — receives a single typed context object. */
-export type RouteHandler<TIn, TOut, TEnv extends Env = Env> = (ctx: {
+export type RouteHandler<
+  TIn,
+  TOut,
+  TEnv extends Env = Env,
+  TServices extends AnyServicesContainer = AnyServicesContainer,
+> = (ctx: {
   /** Validated (and typed) request payload. `void` when no `input` schema is defined. */
   input: TIn;
   /** Raw Hono `Context` for headers, set status, redirect, etc. */
   c: Context<TEnv>;
+  /**
+   * Global DI services container — same instance shared by every handler.
+   * Empty `ServicesContainer` when the server was started without a
+   * `services` option.
+   */
+  services: TServices;
 }) => Promise<TOut | Response> | TOut | Response;
 
 /**
@@ -148,7 +160,10 @@ export class ValidationError extends Error {
  * }
  * ```
  */
-export type RouteInterceptor<TEnv extends Env = Env> = (ctx: {
+export type RouteInterceptor<
+  TEnv extends Env = Env,
+  TServices extends AnyServicesContainer = AnyServicesContainer,
+> = (ctx: {
   /**
    * Calls validation + handler and returns the raw value.
    * Throws {@link ValidationError} on Zod failure or any error thrown by the handler.
@@ -158,6 +173,8 @@ export type RouteInterceptor<TEnv extends Env = Env> = (ctx: {
   route: AnyRouteDef;
   /** Hono request context. */
   c: Context<TEnv>;
+  /** Global DI services container. See {@link RouteHandler}. */
+  services: TServices;
 }) => Promise<Response | unknown> | Response | unknown;
 
 /** OpenAPI document info (subset of the spec used by the helper). */
@@ -231,4 +248,17 @@ export interface HonoServerOptions<TEnv extends Env = Env> {
    * See {@link RouteInterceptor}.
    */
   interceptor?: RouteInterceptor<TEnv>;
+
+  /**
+   * Global DI services container (see {@link createServices}).
+   *
+   * When provided:
+   *  - a middleware is installed automatically so the built-in `ctx`
+   *    service resolves to the current request via `AsyncLocalStorage`;
+   *  - `services` is passed into every handler and the interceptor.
+   *
+   * The same container instance should be shared across every API of your
+   * project — declare it once and pass it to {@link createApiRegistry}.
+   */
+  services?: AnyServicesContainer;
 }

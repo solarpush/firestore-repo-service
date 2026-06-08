@@ -1,11 +1,11 @@
 import { createApiRegistry } from "@lpdjs/firestore-repo-service/servers/hono";
 import { enrichUser } from "./auth.middleware";
+import { services } from "./services";
 
-export const apis = createApiRegistry({
-  v1: {
-    basePath: "/v1",
-
-    /** Configuration OpenAPI 3.1 — doc accessible sur /v1/__docs */
+export const apis = createApiRegistry(
+  {
+    v1: {
+    basePath: "/",
     openapi: {
       info: {
         title: "Mon API",
@@ -42,7 +42,7 @@ export const apis = createApiRegistry({
     verbose: process.env["NODE_ENV"] !== "production",
   } as const,
   v2: {
-    basePath: "/v2",
+    basePath: "/",
 
     /** Configuration OpenAPI 3.1 — doc accessible sur /v2/__docs */
     openapi: {
@@ -80,5 +80,7 @@ export const apis = createApiRegistry({
     /** Log chaque route montée au démarrage (utile en dev, désactiver en prod). */
     verbose: process.env["NODE_ENV"] !== "production",
   } as const,
-});
+  },
+  { services },
+);
 export const defineRoute = apis.defineRoute;

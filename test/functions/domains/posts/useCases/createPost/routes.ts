@@ -8,7 +8,6 @@ export default [
     method: "post",
 
     input: z.object({
-      // POST → lu depuis le body JSON
       example: z.string(),
     }),
 
@@ -19,11 +18,8 @@ export default [
     summary: "Creer un post mock standard",
     tags: ["posts"],
 
-    handler: async ({ input, c }) => {
-      const useCase = new CreatePostUseCase();
-      const data = await useCase.execute(input, c);
-      return data;
-    },
+    handler: async ({ input, services }) =>
+      new CreatePostUseCase(services).execute(input),
   }),
   defineRoute({
     api: "v1",
@@ -31,7 +27,6 @@ export default [
     source: "form",
     input: z.object({
       id: z.string(),
-      // POST → lu depuis le body JSON
       example: z.string(),
     }),
     output: z.object({
@@ -39,17 +34,13 @@ export default [
     }),
     summary: "Creer un post mock standard",
     tags: ["posts"],
-    handler: async ({ input, c }) => {
-      const useCase = new CreatePostUseCase();
-      const data = await useCase.execute(input, c);
-      return data;
-    },
+    handler: async ({ input, services }) =>
+      new CreatePostUseCase(services).execute(input),
   }),
   defineRoute({
     api: "v1",
     method: "put",
     input: z.object({
-      // POST → lu depuis le body JSON
       example: z.string(),
     }),
     output: z.object({
@@ -57,10 +48,7 @@ export default [
     }),
     summary: "Mettre à jour un post mock standard",
     tags: ["posts"],
-    handler: async ({ input, c }) => {
-      const useCase = new CreatePostUseCase();
-      const data = await useCase.execute(input, c);
-      return data;
-    },
+    handler: async ({ input, services }) =>
+      new CreatePostUseCase(services).execute(input),
   }),
 ];

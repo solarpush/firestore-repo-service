@@ -24,9 +24,26 @@
  */
 
 export { HonoServer } from "./server";
-export { createApiRegistry, type ApiConfig, type ApiConfigMap, type ApiRegistry } from "./api-registry";
+export {
+  createApiRegistry,
+  type ApiConfig,
+  type ApiConfigMap,
+  type ApiRegistry,
+  type ApiRegistryOptions,
+} from "./api-registry";
 export { buildOpenApiDocument, renderDocsHtml } from "./openapi";
 export { ValidationError } from "./types";
+export {
+  createServices,
+  createRequestContextMiddleware,
+  withRequestContext,
+  type RequestContext,
+  type ServicesOf,
+  type ServiceProvider,
+  type ServiceProviderMap,
+  type ServicesContainer,
+  type AnyServicesContainer,
+} from "./services";
 
 // Codegen exports — useful when wiring custom build pipelines without the CLI.
 export {

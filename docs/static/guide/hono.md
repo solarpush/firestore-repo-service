@@ -2,7 +2,7 @@
 
 A typed, file-based HTTP server built on [Hono](https://hono.dev/), designed
 to ship one (or many) **Firebase Cloud Function v2** per logical API. It pairs
-a tiny prebuild codegen (`frs-hono gen`) with a typed multi-API registry
+a tiny prebuild codegen (`frs gen`) with a typed multi-API registry
 (`createApiRegistry`) so you can write Zod-validated routes next to your
 business logic and forget about wiring.
 
@@ -18,7 +18,7 @@ business logic and forget about wiring.
 | **Interceptor + onError** | Single around-style hook per API for envelopes, error mapping, tracing. Plus a Hono-style `onError`. |
 | **Middlewares** | Per-API and per-route Hono middlewares with full type propagation. |
 | **Typed context** | Augment Hono's `ContextVariableMap` once and `c.get("user")` is fully typed in every handler. |
-| **CLI scaffolder** | `frs-hono init` bootstraps `apis.ts` + manifest stub. `frs-hono new` scaffolds a useCase + route + Vitest test (interactive prompts when flags are missing). |
+| **CLI scaffolder** | `frs init` bootstraps `apis.ts` + manifest stub. `frs new` scaffolds a useCase + route + Vitest test (interactive prompts when flags are missing). |
 | **One function per API** | `apis.toFunctions(routes, onRequest, { defaults, per })` returns a map ready to spread into your `index.ts`. |
 
 ## Install
@@ -28,12 +28,12 @@ npm i @lpdjs/firestore-repo-service hono @hono/node-server zod
 npm i -D @asteasolutions/zod-to-openapi
 ```
 
-The `frs-hono` CLI is exposed via the package's `bin` field.
+The `frs` CLI is exposed via the package's `bin` field.
 
 ## Bootstrap a project
 
 ```bash
-npx frs-hono init
+npx frs init
 ```
 
 The interactive prompt asks for:
@@ -51,7 +51,7 @@ After `init` you'll have:
 src/
 ├── apis.ts                      ← createApiRegistry(...) + export defineRoute
 └── domains/
-    └── __generated__/routes.ts  ← empty stub (refreshed by `frs-hono gen`)
+    └── __generated__/routes.ts  ← empty stub (refreshed by `frs gen`)
 ```
 
 ## Wire it in your Cloud Functions entrypoint
@@ -119,7 +119,7 @@ export const defineRoute = apis.defineRoute;
 ## Write a route
 
 ```bash
-npx frs-hono new createPost --domain posts --method post --api v1
+npx frs new createPost --domain posts --method post --api v1
 ```
 
 Generates:
@@ -159,7 +159,7 @@ The URL is derived from the file path: `posts/useCases/createPost` →
 name, the final URL is `…/v1/v1/posts/createPost` (or `…/v1/posts/createPost`
 if you only set `basePath: "/"`). You can also set `path` explicitly.
 
-`frs-hono new` prompts interactively when flags are missing (route name,
+`frs new` prompts interactively when flags are missing (route name,
 domain, method, api, with-usecase, with-test). Pass `--yes` to accept defaults.
 
 ### Same endpoint, several APIs (different schemas)
@@ -188,7 +188,7 @@ export default [
 ## Refresh the manifest
 
 ```bash
-npx frs-hono gen --root src/domains
+npx frs gen --root src/domains
 ```
 
 Wire it into `package.json` as a prebuild step:
@@ -196,7 +196,7 @@ Wire it into `package.json` as a prebuild step:
 ```json
 {
   "scripts": {
-    "build": "frs-hono gen --root src/domains && tsc -p tsconfig.build.json",
+    "build": "frs gen --root src/domains && tsc -p tsconfig.build.json",
     "build:watch": "tsc -w -p tsconfig.build.json"
   }
 }
@@ -222,6 +222,173 @@ declare module "hono" {
 Then inside any handler / middleware, `c.get("user")` is fully typed — no
 generics to plumb through.
 
+## Services & dependency injection
+
+Declare every singleton your project needs — repositories, SDK clients,
+loggers, useCases — **once** in a global container and let the server
+inject it into every handler, interceptor, cron job, trigger or test.
+
+### Why
+
+Without DI, every route has to `new MyUseCase()` and forward `c` so the
+useCase can read `c.get("user")`. That's boilerplate-heavy and couples
+your business code to Hono.
+
+With the built-in container:
+
+- Each service is instantiated **lazily** on first access and cached for
+  the process lifetime — ideal for Cloud Functions cold-start.
+- Inter-service dependencies are inferred by destructuring the factory
+  argument — no manual wiring.
+- A built-in `ctx` service exposes the current request's Hono `Context`
+  via `AsyncLocalStorage`, so useCases can read `this.ctx.c.get("user")`
+  without ever receiving `c` as a parameter.
+
+### Declare the container (`src/services.ts`)
+
+The container holds **shared infrastructure only** — SPIs, repositories,
+SDK clients, loggers. UseCases live *outside* the container and are
+instantiated by the routes that need them, receiving the services they
+depend on through their constructor. That boundary keeps `Services`
+free of any reference back to itself (no circular type alias) and makes
+useCases trivial to unit-test with hand-rolled fakes.
+
+```ts
+import { createServices } from "@lpdjs/firestore-repo-service/servers/hono";
+import { PostRepo } from "./domains/posts/PostRepo.js";
+import { BigQuery } from "@google-cloud/bigquery";
+
+export const services = createServices({
+  postRepo: ({ ctx }) => new PostRepo(ctx),
+  bigquery: () => new BigQuery({ projectId: "..." }),
+});
+
+export type Services = typeof services;
+```
+
+> **Two provider forms:** factory `({ ctx, db }) => new PostRepo(db)`
+> (recommended, deps explicit) or class `postRepo: PostRepo` (auto-injects
+> the full proxy). Only use the class form for SPIs that don't import
+> `Services`, otherwise TypeScript will emit *"type alias refers to itself
+> circularly"* and infer `any`.
+
+### Wire it into the registry (`src/apis.ts`)
+
+```ts
+import { createApiRegistry } from "@lpdjs/firestore-repo-service/servers/hono";
+import { services } from "./services.js";
+
+export const apis = createApiRegistry(
+  {
+    v1: { basePath: "/v1", openapi: { info: { title: "API", version: "1.0.0" } } },
+  },
+  { services },
+);
+
+export const defineRoute = apis.defineRoute;
+```
+
+### Use services in a route — instantiate the useCase on the spot
+
+The route handler receives the shared `services` proxy. Build the useCase
+inline with the deps it needs (you can also wrap that in a tiny local
+helper if you call it from several routes).
+
+```ts
+import { CreatePostUseCase } from "./useCase.js";
+
+defineRoute({
+  api: "v1",
+  method: "post",
+  input: z.object({ title: z.string() }),
+  output: z.object({ id: z.string() }),
+  handler: async ({ input, services }) => {
+    const uc = new CreatePostUseCase(services.ctx, services.postRepo);
+    return uc.execute(input);
+  },
+});
+```
+
+### Use `this.ctx` and injected deps in a useCase
+
+Each useCase declares its dependencies as constructor parameters of their
+**individual** types — never `Services` as a field, which would create a
+circular type alias.
+
+```ts
+import type { RequestContext } from "@lpdjs/firestore-repo-service/servers/hono";
+import type { PostRepo } from "./PostRepo.js";
+
+export class CreatePostUseCase {
+  constructor(
+    private readonly ctx: RequestContext,
+    private readonly posts: PostRepo,
+  ) {}
+
+  async execute(input: { title: string }) {
+    const user = this.ctx.c.get("user");
+    return this.posts.create({ ...input, authorId: user.id });
+  }
+}
+```
+
+### Reuse services outside HTTP (cron, triggers, tests)
+
+`services.ctx.c` throws when accessed outside a request. Wrap non-HTTP
+code paths in `withRequestContext` to supply a synthetic context, then
+build your useCase the same way as in a route:
+
+```ts
+import { withRequestContext } from "@lpdjs/firestore-repo-service/servers/hono";
+import { services } from "./services.js";
+import { CreatePostUseCase } from "./domains/posts/useCases/createPost/useCase.js";
+
+export const dailyTask = onSchedule("every 24 hours", async () => {
+  await withRequestContext({ c: fakeContext() }, async () => {
+    const uc = new CreatePostUseCase(services.ctx, services.postRepo);
+    await uc.execute({ title: "daily digest" });
+  });
+});
+```
+
+In Vitest the useCase is just a class — no `withRequestContext` needed,
+inject a hand-rolled context + fake services:
+
+```ts
+import { CreatePostUseCase } from "./useCase.js";
+
+it("creates a post", async () => {
+  const ctx = { c: { get: () => ({ id: "u1" }) } } as any;
+  const repo = { create: async (p: any) => ({ id: "p1", ...p }) } as any;
+  const uc = new CreatePostUseCase(ctx, repo);
+  expect((await uc.execute({ title: "hello" })).id).toBe("p1");
+});
+```
+
+### Async resources — lazy connections
+
+Don't make factories `async` — they're sync by design. Instead, lazy-load
+async resources inside the service:
+
+```ts
+export class BigQueryService {
+  private _client: BigQuery | undefined;
+  get client(): BigQuery {
+    return (this._client ??= new BigQuery({ projectId: "..." }));
+  }
+}
+```
+
+### Scaffold a service
+
+```bash
+frs add service postRepo
+```
+
+Creates `src/services/postRepo.ts` and inserts an `import` + a factory
+line into `src/services.ts`. Pass `--services-file` / `--services-dir` if
+your layout differs.
+
 ## OpenAPI
 
 When `openapi.info` is set on an API, the server exposes:
@@ -240,11 +407,12 @@ Zod schemas are picked up without ceremony.
 
 | Command | Purpose |
 | --- | --- |
-| `frs-hono init` | Bootstrap `apis.ts` + an empty manifest stub. Interactive unless `--yes`. |
-| `frs-hono gen --root <dir>` | Scan `<dir>` for `routes.ts` files and emit `__generated__/routes.ts`. |
-| `frs-hono new <name> --domain <d>` | Scaffold a useCase + route + Vitest test. Prompts when flags are missing. |
+| `frs init` | Bootstrap `apis.ts` + an empty manifest stub. Interactive unless `--yes`. |
+| `frs gen --root <dir>` | Scan `<dir>` for `routes.ts` files and emit `__generated__/routes.ts`. |
+| `frs new <name> --domain <d>` | Scaffold a useCase + route + Vitest test. Prompts when flags are missing. |
+| `frs add service <name>` | Scaffold a service file and register it in `services.ts`. |
 
-Run `frs-hono help` for the full flag list.
+Run `frs help` for the full flag list.
 
 ## Programmatic API (escape hatches)
 
