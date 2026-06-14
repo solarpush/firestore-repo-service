@@ -98,8 +98,9 @@ type IsAny<T> = 0 extends 1 & T ? true : false;
  * - `"create"` — field is accepted in create requests / create form
  * - `"mutable"` — field is accepted in update requests / edit form
  * - `"filterable"` — field can be used in query filters / filter bar
+ * - `"orderable"` — field can be used in `orderBy` / sort
  */
-export type FieldRole = "create" | "mutable" | "filterable";
+export type FieldRole = "create" | "mutable" | "filterable" | "orderable";
 
 /**
  * Field paths on the model, **excluding** auto-managed system keys.
@@ -185,6 +186,10 @@ export interface CrudRepoConfig<
    * - `"create"` — field is accepted in create requests
    * - `"mutable"` — field is accepted in update requests (PUT/PATCH)
    * - `"filterable"` — field can be used in query filters
+   * - `"orderable"` — field can be used in `orderBy` / sort. When no field
+   *   declares `"orderable"`, the `"filterable"` set is reused so existing
+   *   configs keep sorting on their filterable fields (fail-closed: fields
+   *   that are neither filterable nor orderable cannot be sorted on).
    *
    * If `fieldsConfig` is omitted, all non-system schema fields are allowed
    * for all roles, and all fields (including system keys) are filterable.
@@ -349,6 +354,8 @@ export interface CrudRepoEntry {
   pageSize: number;
   /** Resolved from fieldsConfig: fields with role "filterable" */
   filterableFields?: string[];
+  /** Resolved from fieldsConfig: fields with role "orderable" (falls back to filterableFields) */
+  orderableFields?: string[];
   /** Resolved from fieldsConfig: fields with role "mutable" */
   mutableFields?: string[];
   /** Resolved from fieldsConfig: fields with role "create" */
@@ -433,6 +440,15 @@ export interface CrudServerOptions<
 
   /** Whether to parse JSON bodies. Default: true. */
   parseBody?: boolean;
+
+  /**
+   * Baseline security response headers (X-Frame-Options, nosniff,
+   * Referrer-Policy, Cache-Control, optional CSP). Enabled by default; for
+   * this JSON API the CSP is omitted unless you provide one (so the bundled
+   * `/__docs` UI keeps working). Pass an options object to customise or
+   * `false` to disable (issue #12).
+   */
+  securityHeaders?: import("../utils/security-headers").SecurityHeadersOptions | false;
 
   /**
    * Authentication guard executed before every request.

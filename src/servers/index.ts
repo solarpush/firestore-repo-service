@@ -88,3 +88,10 @@ export {
   renderPage,
 } from "./admin/renderer";
 export type { PageOptions } from "./admin/renderer";
+
+// ── Security headers middleware (re-exported for manual use) ────────────────
+export {
+  DEFAULT_HTML_CSP,
+  securityHeaders,
+} from "./utils/security-headers";
+export type { SecurityHeadersOptions } from "./utils/security-headers";

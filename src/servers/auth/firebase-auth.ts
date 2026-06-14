@@ -201,6 +201,24 @@ export interface FirebaseAuthConfig<TContext = unknown> {
   sameSite?: "Strict" | "Lax" | "None";
 
   /**
+   * Enable the built-in CSRF defense: state-changing requests
+   * (`POST`/`PUT`/`PATCH`/`DELETE`) authenticated by **session cookie** must
+   * carry an `Origin`/`Referer` header matching the request host. Bearer
+   * requests are exempt (a browser never auto-attaches an `Authorization`
+   * header, so they are not CSRF-able).
+   *
+   * **Defaults to `true` only when `sameSite: "None"`** (and not in `bearer`
+   * mode). With the default `Lax`/`Strict` cookie the browser already blocks
+   * the session cookie on cross-site mutations, so the check is unnecessary
+   * and is left off to avoid false positives behind proxies whose `Host`
+   * differs from the public origin (e.g. Cloud Functions v2 / Cloud Run).
+   * Set to `true` to force the check on regardless of `sameSite`, or `false`
+   * to disable it even with `sameSite: "None"` (only if you implement your
+   * own CSRF protection upstream).
+   */
+  csrfProtection?: boolean;
+
+  /**
    * Behaviour when authentication fails or `allow()` returns `null`.
    * - `"redirect"` (default in cookie mode) → 302 to the login page,
    * - `"401"` (default in bearer mode)     → JSON 401 response.
@@ -248,6 +266,47 @@ function methodOf(req: AnyReq): string {
   return String(req.method ?? "GET").toUpperCase();
 }
 
+/**
+ * Strip a redirect / `next` target down to a safe **same-origin path**.
+ *
+ * Rejects protocol-relative (`//evil.com`), backslash-escaped (`/\evil.com`)
+ * and absolute (`https://…`) targets that would let an attacker turn the
+ * post-login redirect into an open redirect / phishing vector (issue #07).
+ * Anything suspicious collapses to `"/"`.
+ */
+function sanitizeNextPath(next: string): string {
+  if (typeof next !== "string" || next.length === 0) return "/";
+  if (!next.startsWith("/")) return "/";
+  if (next.startsWith("//") || next.startsWith("/\\")) return "/";
+  if (next.includes("://")) return "/";
+  return next;
+}
+
+function headerOf(req: AnyReq, name: string): string | undefined {
+  const raw = req.headers?.[name];
+  if (Array.isArray(raw)) return raw[0];
+  return typeof raw === "string" ? raw : undefined;
+}
+
+const CSRF_SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * Same-origin check used as a CSRF defense for state-changing requests.
+ * Compares the request `Origin` (or `Referer`) host against the request host.
+ * Returns `true` only when they match. A missing/invalid Origin fails closed.
+ */
+function isSameOriginRequest(req: AnyReq): boolean {
+  const originHeader = headerOf(req, "origin") ?? headerOf(req, "referer");
+  if (!originHeader) return false;
+  const host = headerOf(req, "x-forwarded-host") ?? headerOf(req, "host");
+  if (!host) return false;
+  try {
+    return new URL(originHeader).host === host;
+  } catch {
+    return false;
+  }
+}
+
 function isPublic(
   path: string,
   patterns: (string | RegExp)[] | undefined,
@@ -265,12 +324,11 @@ function isPublic(
 
 function wantsHtml(req: AnyReq): boolean {
   const accept = String(req.headers?.accept ?? "");
-  // Browsers send "text/html" early in their Accept header.
-  // Fall back: treat GET requests with no Accept as HTML so platforms
-  // that strip the header (or send "*/*") still get the login page.
-  if (accept.includes("text/html")) return true;
-  if (!accept || accept === "*/*") return methodOf(req) === "GET";
-  return false;
+  // Strict: only real browser navigations advertise `text/html`. Treating
+  // `*/*` or a missing Accept header as HTML caused curl, healthchecks and
+  // server-to-server fetches to receive a 200 login page instead of a clear
+  // 401 (issue #16).
+  return accept.includes("text/html");
 }
 
 function extractBearer(req: AnyReq): string | null {
@@ -319,6 +377,28 @@ export function firebaseAuth<TContext = unknown>(
   const ttlDays = config.sessionTtlDays ?? 5;
   const secure = config.secureCookie ?? true;
   const sameSite = config.sameSite ?? "Lax";
+  // The Origin/Referer (CSRF) check is only needed when `SameSite=None`:
+  // with the default `Lax` (or `Strict`) the browser already refuses to send
+  // the session cookie on cross-site state-changing requests, so a cross-site
+  // POST/PUT/DELETE is unauthenticated and harmless. Enforcing the Origin
+  // check unconditionally also breaks legitimate same-origin requests on
+  // platforms where the container's `Host` differs from the public origin
+  // (e.g. Cloud Functions v2 / Cloud Run, where `Host` is the internal
+  // `*.run.app` host while `Origin` is the `*.cloudfunctions.net` domain).
+  // Can be forced on/off explicitly via `csrfProtection`.
+  const csrfProtection =
+    config.csrfProtection ?? (mode !== "bearer" && sameSite === "None");
+  if (mode !== "bearer" && sameSite === "None") {
+    console.warn(
+      "[firebaseAuth] `sameSite: \"None\"` disables the browser's built-in " +
+        "SameSite CSRF protection. " +
+        (csrfProtection
+          ? "The same-origin (Origin/Referer) check is active as the primary " +
+            "defense — ensure state-changing requests are sent same-origin or " +
+            "carry a bearer token."
+          : "`csrfProtection` is disabled — your endpoints are CSRF-exposed."),
+    );
+  }
   const onUnauth = config.onUnauthenticated ?? defaultUnauth(mode);
   const loginEnabled =
     config.loginPage === undefined
@@ -352,6 +432,7 @@ export function firebaseAuth<TContext = unknown>(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     res: any,
     error: string | null = null,
+    status = 200,
   ): void {
     // Validate lazily (at request time) so module loading during Firebase CLI
     // analysis doesn't throw before env vars are injected.
@@ -370,7 +451,13 @@ export function firebaseAuth<TContext = unknown>(
     // include the function name on Cloud Functions.
     const prefix = getLinkBase(req, "/");
     const inner = req.url ?? "/";
-    const fullPath = `${prefix}${inner.startsWith("/") ? inner : `/${inner}`}`;
+    // Sanitize to a same-origin path so a crafted request URL (e.g.
+    // `//evil.com/...` on a custom domain where the prefix is empty) cannot
+    // turn the post-login redirect or the form action into an open redirect
+    // (issue #07).
+    const fullPath = sanitizeNextPath(
+      `${prefix}${inner.startsWith("/") ? inner : `/${inner}`}`,
+    );
     const sep = fullPath.includes("?") ? "&" : "?";
     const sessionAction = `${fullPath}${sep}__action=session`;
     const html = renderLoginPage({
@@ -383,7 +470,7 @@ export function firebaseAuth<TContext = unknown>(
       error,
     });
     res
-      .status(200)
+      .status(status)
       .set("Content-Type", "text/html; charset=utf-8")
       .set("Cache-Control", "no-store")
       .send(html);
@@ -422,11 +509,43 @@ export function firebaseAuth<TContext = unknown>(
   // ── Middleware ───────────────────────────────────────────────────────────
   const middleware: Middleware = async (req, res, next) => {
     const path = pathOf(req);
+    const method = methodOf(req);
 
-    // 1. In-band action endpoints (work on ANY URL, no separate route needed).
-    //    Used by the inline login page since the helper can't know the function's
-    //    public URL prefix on Cloud Functions.
-    if (loginEnabled && methodOf(req) === "POST") {
+    // 0. CSRF defense for cookie sessions (only active when `SameSite=None`,
+    //    or when `csrfProtection` is explicitly forced on — see config). With
+    //    the default Lax/Strict cookie the browser already blocks the session
+    //    cookie on cross-site state-changing requests, so this is skipped to
+    //    avoid breaking legitimate same-origin requests behind proxies. When
+    //    active it runs FIRST so it also protects the in-band
+    //    `?__action=logout|session` shortcut below (issues #05, #06).
+    if (
+      csrfProtection &&
+      mode !== "bearer" &&
+      !CSRF_SAFE_METHODS.has(method) &&
+      !extractBearer(req) &&
+      !isSameOriginRequest(req)
+    ) {
+      res
+        .status(403)
+        .set("Content-Type", "application/json; charset=utf-8")
+        .send(
+          JSON.stringify({
+            success: false,
+            error: "Origin check failed (possible CSRF)",
+          }),
+        );
+      return;
+    }
+
+    // 1. In-band action endpoints. The bundled login page posts the session
+    //    exchange (and logout) to the CURRENT url with `?__action=session`
+    //    (resp. `logout`) rather than to the mounted `/__session` route,
+    //    because on vanilla Cloud Functions the helper cannot reliably know
+    //    the function's public URL prefix to address a separate route. These
+    //    actions are inherently public (login/logout need no prior auth) and
+    //    are protected against cross-site abuse by the same-origin guard
+    //    above (issue #06).
+    if (loginEnabled && method === "POST") {
       const action = queryAction(req);
       if (action === "session") {
         await sessionHandler(req, res);
@@ -509,8 +628,10 @@ export function firebaseAuth<TContext = unknown>(
   /**
    * Reject according to the configured policy:
    * - cookie/both + GET HTML browser request → render the login page inline
-   *   on the SAME URL (works on Cloud Functions where there's no separate
-   *   `/__login` route reachable from the public URL).
+   *   on the SAME URL with a `401` status (works on Cloud Functions where
+   *   there's no separate `/__login` route reachable from the public URL).
+   *   A 401 keeps the response HTTP-compliant for monitoring/healthchecks
+   *   while browsers still render the page (issue #16).
    * - bearer mode or non-HTML clients → JSON 401.
    */
   function rejectUnauthenticated(
@@ -524,7 +645,7 @@ export function firebaseAuth<TContext = unknown>(
       methodOf(req) === "GET" &&
       wantsHtml(req)
     ) {
-      renderInlineLogin(req, res, null);
+      renderInlineLogin(req, res, null, 401);
       return;
     }
     res

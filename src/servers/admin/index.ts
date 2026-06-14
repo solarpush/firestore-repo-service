@@ -47,7 +47,10 @@ import type { AdminRepoEntry, RepoRegistry } from "./handlers";
 import { createAdminHandlers } from "./handlers";
 import type { RelationalFieldMeta } from "./renderer";
 import { type Middleware, MiniRouter } from "./router";
-
+import {
+  type SecurityHeadersOptions,
+  securityHeaders,
+} from "../utils/security-headers";
 // ---------------------------------------------------------------------------
 // Public option types
 // ---------------------------------------------------------------------------
@@ -233,6 +236,14 @@ export interface AdminServerOptions<
   parseBody?: boolean;
 
   /**
+   * Baseline security response headers (CSP, X-Frame-Options, nosniff,
+   * Referrer-Policy, Cache-Control). Enabled by default with HTML-safe
+   * defaults (see {@link DEFAULT_HTML_CSP}). Pass an options object to
+   * customise, or `false` to disable entirely (issues #12, #13).
+   */
+  securityHeaders?: SecurityHeadersOptions | false;
+
+  /**
    * Authentication guard executed before every request.
    * - Pass an {@link AuthExtension} (e.g. result of `firebaseAuth({...})`) to
    *   wire Firebase Auth with a bundled `/__login` page and session cookie.
@@ -416,6 +427,7 @@ export function createAdminServer<
     basePath = "/",
     repos,
     parseBody = true,
+    securityHeaders: securityHeadersOpt,
     auth,
     middleware: extraMiddleware = [],
     httpsOptions,
@@ -516,6 +528,15 @@ export function createAdminServer<
 
   // ── Router ─────────────────────────────────────────────────────────────
   const router = new MiniRouter();
+
+  // ── 0. Security headers (runs first so every response carries them) ──────
+  if (securityHeadersOpt !== false) {
+    router.use(
+      securityHeaders(
+        securityHeadersOpt === undefined ? {} : securityHeadersOpt,
+      ),
+    );
+  }
 
   // ── 1. Body-parsing middleware ──────────────────────────────────────────
   if (parseBody) {

@@ -50,13 +50,36 @@ export function serializeValue(value: unknown): unknown {
  * Recursively flatten a nested object into a flat key-value map
  * using underscore-separated keys: `{ address: { street: "x" } }` → `{ address_street: "x" }`.
  * Arrays and non-plain-object values are serialized as leaves.
+ *
+ * Guards against pathological inputs that would otherwise crash the worker
+ * (and trigger an infinite PubSub redelivery loop, see issue #11):
+ * - **Cycles** (`obj.self = obj`) → emitted once as a `{ __cycle: true }` marker.
+ * - **Excessive depth** → truncated past {@link MAX_FLATTEN_DEPTH}.
+ * - **Excessive width** → stops emitting past {@link MAX_FLATTEN_KEYS}
+ *   (BigQuery caps tables at 10k columns).
  */
+const MAX_FLATTEN_DEPTH = 32;
+const MAX_FLATTEN_KEYS = 5000;
+
 function flattenObject(
   obj: Record<string, unknown>,
   prefix: string,
   result: Record<string, unknown>,
+  seen: WeakSet<object> = new WeakSet(),
+  depth = 0,
 ): void {
+  if (depth > MAX_FLATTEN_DEPTH) {
+    result[prefix || "_truncated"] = JSON.stringify({ __truncated: true });
+    return;
+  }
+  if (seen.has(obj)) {
+    result[prefix || "_cycle"] = JSON.stringify({ __cycle: true });
+    return;
+  }
+  seen.add(obj);
+
   for (const [key, value] of Object.entries(obj)) {
+    if (Object.keys(result).length >= MAX_FLATTEN_KEYS) break;
     const flatKey = prefix ? `${prefix}__${key}` : key;
 
     if (
@@ -73,11 +96,21 @@ function flattenObject(
       !("latitude" in (value as object) && "longitude" in (value as object))
     ) {
       // Plain object → recurse
-      flattenObject(value as Record<string, unknown>, flatKey, result);
+      flattenObject(
+        value as Record<string, unknown>,
+        flatKey,
+        result,
+        seen,
+        depth + 1,
+      );
     } else {
       result[flatKey] = serializeValue(value);
     }
   }
+
+  // Allow the same object to appear in sibling branches (only direct
+  // ancestors form a cycle), so drop it from the path on the way out.
+  seen.delete(obj);
 }
 
 /**

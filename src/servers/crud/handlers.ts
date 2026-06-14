@@ -10,6 +10,7 @@
  *   DELETE /:repoName/:id       → delete document
  */
 
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import {
   coerceToDate,
@@ -90,11 +91,23 @@ function sendQueryError(
 const _idChars =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
-/** Generate a random 20-char alphanumeric ID matching Firestore's native format. */
+/**
+ * Generate a random 20-char alphanumeric ID matching Firestore's native format.
+ *
+ * Uses a CSPRNG (`crypto.randomBytes`) — not `Math.random()` — so generated
+ * ids are unpredictable, matching Firestore's own `doc().id`. Rejection
+ * sampling (dropping the biased tail `>= 62*4`) keeps the distribution uniform
+ * across the 62-char alphabet.
+ */
 function generateFirestoreId(): string {
   let id = "";
-  for (let i = 0; i < 20; i++) {
-    id += _idChars.charAt(Math.floor(Math.random() * _idChars.length));
+  while (id.length < 20) {
+    const bytes = randomBytes(20);
+    for (let i = 0; i < bytes.length && id.length < 20; i++) {
+      const byte = bytes[i]!;
+      if (byte >= _idChars.length * 4) continue; // drop biased tail (248..255)
+      id += _idChars.charAt(byte % _idChars.length);
+    }
   }
   return id;
 }
@@ -154,6 +167,18 @@ function wrapDateSchemas(schema: z.ZodType): z.ZodType {
  *
  * - `fields` undefined or empty  → all schema fields minus systemKeys
  * - `fields` with values          → only those fields, minus systemKeys
+ *
+ * Security contract (issue #17): the returned schema is rebuilt from scratch
+ * with `z.object(...)`, which **strips** any key not explicitly listed —
+ * even when the user's root schema was declared `.passthrough()`. This
+ * guarantees attacker-supplied keys (e.g. `__sync_version`, forged
+ * timestamps, arbitrary metadata) can never reach Firestore via create /
+ * update payloads. System keys are removed here too, so they cannot be
+ * client-overridden.
+ *
+ * Note: a field explicitly declared as `z.any()` / `z.record(z.unknown())`
+ * in the user schema is still accepted as-is by design — document such
+ * free-form fields carefully, as their contents are persisted verbatim.
  */
 function pickSchemaFields(
   schema: z.ZodObject<any>,
@@ -585,6 +610,10 @@ export function createCrudHandlers(
       }
 
       if (orderBy) {
+        if (entry.orderableFields && !entry.orderableFields.includes(orderBy)) {
+          sendError(res, `Field not orderable: ${orderBy}`, 400);
+          return;
+        }
         queryOptions.orderBy = [{ field: orderBy, direction: orderDir }];
       }
 
@@ -775,6 +804,18 @@ export function createCrudHandlers(
 
       // Order by
       if (body.orderBy && body.orderBy.length > 0) {
+        if (entry.orderableFields) {
+          const allowed = new Set(entry.orderableFields);
+          const invalid = body.orderBy.filter((o) => !allowed.has(o.field));
+          if (invalid.length > 0) {
+            sendError(
+              res,
+              `Fields not orderable: ${invalid.map((o) => o.field).join(", ")}`,
+              400,
+            );
+            return;
+          }
+        }
         queryOptions.orderBy = body.orderBy;
       }
 

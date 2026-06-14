@@ -79,7 +79,11 @@ class BigQueryDialect implements SqlDialect {
   }
 
   quoteIdentifier(id: string): string {
-    return `\`${id}\``;
+    // BigQuery escapes identifiers with backticks; a literal backtick inside
+    // an identifier must be doubled. Without this, an identifier containing a
+    // backtick (e.g. a column name propagated from a Firestore document key)
+    // would break out of the quoting and enable DDL injection.
+    return "`" + id.replace(/`/g, "``") + "`";
   }
 }
 
@@ -270,7 +274,7 @@ export class BigQueryAdapter implements SqlAdapter {
   /** Cache of `{ writer, primaryKey }` per table name. */
   private readonly writers = new Map<
     string,
-    { writer: any; primaryKey: string }
+    { writer: any; primaryKey: string; timestampColumns?: Set<string> }
   >();
 
   constructor(options: BigQueryAdapterOptions) {
@@ -385,8 +389,9 @@ export class BigQueryAdapter implements SqlAdapter {
     // Plain inserts have no PK matching, but in CDC mode every row needs a
     // _CHANGE_TYPE. We treat them as UPSERT.
     const writer = await this.getOrCreateWriter(tableName);
+    const timestampColumns = this.writers.get(tableName)?.timestampColumns;
     const cdc = rows.map((row) => ({
-      ...this.normalizeRow(row),
+      ...this.normalizeRow(row, timestampColumns),
       _CHANGE_TYPE: "UPSERT",
       _CHANGE_SEQUENCE_NUMBER: formatChangeSequenceNumber(
         row[SYNC_VERSION_COLUMN],
@@ -402,8 +407,9 @@ export class BigQueryAdapter implements SqlAdapter {
   ): Promise<void> {
     if (rows.length === 0) return;
     const writer = await this.getOrCreateWriter(tableName, primaryKey);
+    const timestampColumns = this.writers.get(tableName)?.timestampColumns;
     const cdc = rows.map((row) => ({
-      ...this.normalizeRow(row),
+      ...this.normalizeRow(row, timestampColumns),
       _CHANGE_TYPE: "UPSERT",
       _CHANGE_SEQUENCE_NUMBER: formatChangeSequenceNumber(
         row[SYNC_VERSION_COLUMN],
@@ -439,7 +445,10 @@ export class BigQueryAdapter implements SqlAdapter {
   }
 
   private fqn(tableName: string): string {
-    return `\`${this.datasetId}.${tableName}\``;
+    // Escape backticks in both identifier parts to prevent DDL/DML injection
+    // (BigQuery doubles backticks to embed a literal one).
+    const esc = (s: string) => s.replace(/`/g, "``");
+    return `\`${esc(this.datasetId)}.${esc(tableName)}\``;
   }
 
   /** ISO 8601 timestamp pattern (e.g. 2026-03-29T20:59:27.394Z) */
@@ -460,7 +469,10 @@ export class BigQueryAdapter implements SqlAdapter {
   }
 
   /** Convert JS values into shapes accepted by JSONWriter. */
-  private normalizeRow(row: Record<string, unknown>): Record<string, unknown> {
+  private normalizeRow(
+    row: Record<string, unknown>,
+    timestampColumns?: Set<string>,
+  ): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(row)) {
       if (v === undefined) continue;
@@ -469,7 +481,7 @@ export class BigQueryAdapter implements SqlAdapter {
         out[k] = BigQueryAdapter.toEpochMicros(v);
       } else if (
         typeof v === "string" &&
-        BigQueryAdapter.ISO_TIMESTAMP_RE.test(v)
+        this.shouldCoerceTimestamp(k, v, timestampColumns)
       ) {
         // ISO timestamp produced upstream by `serializeDocument` (Firestore
         // Timestamp → ISO string) — convert to epoch micros for protobuf.
@@ -489,6 +501,30 @@ export class BigQueryAdapter implements SqlAdapter {
       }
     }
     return out;
+  }
+
+  /**
+   * Decide whether a string value should be coerced to an epoch-micros
+   * timestamp.
+   *
+   * When the destination table's column types are known (writer already
+   * built from table metadata), coerce **only** when the column is actually
+   * TIMESTAMP/DATETIME/DATE. This prevents a business string that merely
+   * looks like an ISO date (a log line, a slug, a formatted id) from being
+   * silently rewritten — and avoids type-mismatch write errors on STRING
+   * columns (issue #15).
+   *
+   * When column types are unavailable (e.g. a writer injected directly, or
+   * metadata not yet fetched), fall back to the ISO-shape heuristic so
+   * behaviour is unchanged.
+   */
+  private shouldCoerceTimestamp(
+    column: string,
+    value: string,
+    timestampColumns?: Set<string>,
+  ): boolean {
+    if (timestampColumns) return timestampColumns.has(column);
+    return BigQueryAdapter.ISO_TIMESTAMP_RE.test(value);
   }
 
   private async appendWithRetry(
@@ -548,6 +584,20 @@ export class BigQueryAdapter implements SqlAdapter {
       ns.adapt.withChangeSequenceNumber(),
     );
 
+    // Track which columns are actually TIMESTAMP-like so `normalizeRow` only
+    // coerces ISO-looking strings when the destination column expects a
+    // timestamp — a business string that merely *looks* like an ISO date must
+    // not be silently converted to epoch micros (see issue #15).
+    const timestampColumns = new Set<string>(
+      (bqSchema.fields as Array<{ name: string; type?: string }>)
+        .filter((f) =>
+          ["TIMESTAMP", "DATETIME", "DATE"].includes(
+            String(f.type ?? "").toUpperCase(),
+          ),
+        )
+        .map((f) => f.name),
+    );
+
     const destinationTable = `projects/${this.projectId}/datasets/${this.datasetId}/tables/${tableName}`;
     // Pass `DefaultStream` as `streamId` (not `streamType`): the `_default`
     // stream is implicit on every table, so the client must short-circuit to
@@ -564,7 +614,11 @@ export class BigQueryAdapter implements SqlAdapter {
       protoDescriptor,
     });
 
-    this.writers.set(tableName, { writer, primaryKey: primaryKey ?? "" });
+    this.writers.set(tableName, {
+      writer,
+      primaryKey: primaryKey ?? "",
+      timestampColumns,
+    });
     return writer;
   }
 

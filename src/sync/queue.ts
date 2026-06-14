@@ -76,27 +76,53 @@ export class SyncQueue {
    *
    * Concurrent callers (e.g. several PubSub messages handled in parallel
    * inside the same Cloud Function instance with `concurrency > 1`) all
-   * await the same in-flight flush and then trigger a follow-up flush if
-   * new events were enqueued in the meantime. This guarantees that every
-   * caller's event is persisted before its `await flush()` resolves —
-   * which is required for safe PubSub ack semantics.
+   * await the same in-flight drain cycle. A drain cycle empties the buffer
+   * completely (see {@link _drain}), so by the time `await flush()` resolves
+   * every event that was buffered when the call started has been persisted
+   * (or handed to `onFlushError`) — which is required for safe PubSub
+   * at-least-once ack semantics.
    */
   async flush(): Promise<void> {
-    // If another flush is in progress, wait for it to finish first.
-    while (this.flushing && this.flushPromise) {
+    // If a drain cycle is in progress, wait for it to finish first. Since a
+    // cycle drains to empty, our buffered events are persisted by it unless
+    // they were enqueued after it already emptied the buffer.
+    while (this.flushPromise) {
       await this.flushPromise;
     }
     if (this.buffer.length === 0) return;
 
     this.flushing = true;
-    this.flushPromise = this._doFlush().finally(() => {
+    this.flushPromise = this._drain().finally(() => {
       this.flushing = false;
       this.flushPromise = null;
     });
     await this.flushPromise;
   }
 
-  private async _doFlush(): Promise<void> {
+  /**
+   * Drain the buffer to empty. A single {@link _doFlush} only removes up to
+   * `batchSize` events, so loop until nothing remains. Without this loop,
+   * bursts larger than `batchSize` would leave events buffered after
+   * `flush()` resolved — and a container shutdown before the next interval
+   * would lose them permanently (breaking at-least-once).
+   */
+  private async _drain(): Promise<void> {
+    while (this.buffer.length > 0) {
+      const progressed = await this._doFlush();
+      // When there is no onFlushError handler, a failed batch is re-buffered.
+      // Stop the drain loop in that case to avoid a hot infinite retry loop;
+      // the next interval tick (or caller) will retry.
+      if (!progressed) break;
+    }
+  }
+
+  /**
+   * Flush a single batch (up to `batchSize` events) to the adapter.
+   * @returns `true` when the batch was processed (or routed to the error
+   * handler) and the loop may continue; `false` when the batch was
+   * re-buffered after a failure with no `onFlushError` handler.
+   */
+  private async _doFlush(): Promise<boolean> {
     // Drain the buffer atomically
     const batch = this.buffer.splice(0, this.batchSize);
 
@@ -146,8 +172,10 @@ export class SyncQueue {
         // Re-insert at the front so we retry next flush
         this.buffer.unshift(...batch);
         console.error(`[SyncQueue] Flush failed for ${this.tableName}:`, err);
+        return false;
       }
     }
+    return true;
   }
 
   /** Stop the auto-flush timer and flush remaining events. */

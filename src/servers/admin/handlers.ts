@@ -11,6 +11,7 @@
  *   POST /:repoName/:id/delete   → delete document
  */
 
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import type { ConfiguredRepository } from "../../repositories/types";
 import type { RepositoryConfig } from "../../shared/types";
@@ -97,11 +98,20 @@ export type RepoRegistry = Record<string, AdminRepoEntry>;
 const _idChars =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
-/** Generate a random 20-char alphanumeric ID matching Firestore's native format. */
+/**
+ * Generate a random 20-char alphanumeric ID matching Firestore's native format.
+ * Uses a CSPRNG (`crypto.randomBytes`) with rejection sampling for a uniform,
+ * unpredictable id — see issue #02.
+ */
 function generateFirestoreId(): string {
   let id = "";
-  for (let i = 0; i < 20; i++) {
-    id += _idChars.charAt(Math.floor(Math.random() * _idChars.length));
+  while (id.length < 20) {
+    const bytes = randomBytes(20);
+    for (let i = 0; i < bytes.length && id.length < 20; i++) {
+      const byte = bytes[i]!;
+      if (byte >= _idChars.length * 4) continue; // drop biased tail (248..255)
+      id += _idChars.charAt(byte % _idChars.length);
+    }
   }
   return id;
 }
@@ -771,7 +781,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     // Sort
     const sortField = query["ob"] ?? "";
     const sortDir = (query["od"] === "desc" ? "desc" : "asc") as "asc" | "desc";
-    const sortState = sortField
+    let sortState = sortField
       ? { field: sortField, dir: sortDir }
       : undefined;
 
@@ -783,6 +793,14 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     const allColumns = entry.listColumns ?? Object.keys(entry.schema.shape);
     const docKey = entry.documentKey ?? "docId";
     const columns = [docKey, ...allColumns.filter((c: string) => c !== docKey)];
+    // Whitelist the sort field against listColumns ∪ docKey (fail-closed, #04):
+    // an unknown `?ob=` is dropped rather than passed straight into the
+    // Firestore `orderBy`, preventing schema probing, FAILED_PRECONDITION
+    // crashes on arbitrary fields and unbounded query cost.
+    if (sortState) {
+      const orderableColumns = new Set<string>([docKey, ...allColumns]);
+      if (!orderableColumns.has(sortState.field)) sortState = undefined;
+    }
     // Restrict filterable columns to filterableFields when defined.
     // Dot-notation paths (e.g. "address.city") are passed through directly;
     // top-level keys expand to sub-fields via buildColumnMeta as before.

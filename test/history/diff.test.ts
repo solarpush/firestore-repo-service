@@ -44,6 +44,25 @@ describe("valuesEqual", () => {
     expect(valuesEqual(a, b)).toBe(true);
     expect(valuesEqual(a, Timestamp.fromMillis(99))).toBe(false);
   });
+
+  test("object comparison is key-order insensitive (#14)", () => {
+    expect(valuesEqual({ a: 1, b: 2 }, { b: 2, a: 1 })).toBe(true);
+    expect(valuesEqual({ a: { x: 1, y: 2 } }, { a: { y: 2, x: 1 } })).toBe(true);
+    expect(valuesEqual({ a: 1 }, { a: 1, b: 2 })).toBe(false);
+  });
+
+  test("cycles do not throw and compare structurally (#14)", () => {
+    const a: any = { name: "x" };
+    a.self = a;
+    const b: any = { name: "x" };
+    b.self = b;
+    expect(() => valuesEqual(a, b)).not.toThrow();
+    expect(valuesEqual(a, b)).toBe(true);
+  });
+
+  test("array vs non-array are not equal", () => {
+    expect(valuesEqual([1], { 0: 1 } as any)).toBe(false);
+  });
 });
 
 describe("computeDiff", () => {

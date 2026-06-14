@@ -118,6 +118,14 @@ export interface SyncEvent {
    * versions; the worker treats `undefined` as "always apply".
    */
   version?: number;
+  /**
+   * DLQ retry bookkeeping. Set by the worker when an event is re-published to
+   * the dead-letter topic after a flush failure. Used to cap retries of a
+   * poison message (see issue #09). Absent on first-time events.
+   */
+  attempts?: number;
+  /** Epoch millis of the first flush failure for this event (DLQ only). */
+  firstFailedAt?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +333,12 @@ export interface SyncWorkerConfig<M = Record<string, any>> {
   autoMigrate?: boolean;
   /** PubSub topic prefix (default: "firestore-sync") */
   topicPrefix?: string;
+  /**
+   * Maximum number of times an event may be re-published to the dead-letter
+   * topic before it is dropped (poison-message cap). Default: 5. Set to 0 to
+   * disable the cap (events are re-published indefinitely). See issue #09.
+   */
+  maxDlqAttempts?: number;
   /**
    * Cloud Functions v2 options forwarded to `onMessagePublished()` for every
    * worker handler. Use to tune `concurrency`, `maxInstances`, `minInstances`,

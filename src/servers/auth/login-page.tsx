@@ -195,6 +195,18 @@ export function renderLoginPage(opts: LoginPageOptions): string {
     const SESSION_PATH = "${jsonEscape(opts.sessionPath)}";
     const NEXT = ${JSON.stringify(opts.next)};
 
+    // Defense-in-depth against open redirect (issue #07): only ever navigate
+    // to a same-origin path, even though the server already sanitizes next.
+    function safeNext(raw) {
+      try {
+        const u = new URL(raw, window.location.origin);
+        if (u.origin !== window.location.origin) return "/";
+        return u.pathname + u.search + u.hash;
+      } catch {
+        return "/";
+      }
+    }
+
     const errEl = document.getElementById("err");
     const okEl  = document.getElementById("ok");
     function showError(msg) {
@@ -223,7 +235,7 @@ export function renderLoginPage(opts: LoginPageOptions): string {
       // Sign out client-side immediately — we only needed the id token.
       try { await auth.signOut(); } catch {}
       showOk("Signed in. Redirecting…");
-      window.location.replace(NEXT);
+      window.location.replace(safeNext(NEXT));
     }
 
     const pwdForm = document.getElementById("pwd-form");

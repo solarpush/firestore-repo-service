@@ -145,6 +145,7 @@ export function createSyncWorker<M extends Record<string, any>>(
     flushIntervalMs = 5_000,
     autoMigrate = false,
     topicPrefix = "firestore-sync",
+    maxDlqAttempts = 5,
     workerOptions,
     repos: repoConfigs = {} as Record<
       string,
@@ -165,6 +166,23 @@ export function createSyncWorker<M extends Record<string, any>>(
     // On flush failure → log error + re-publish to PubSub dead-letter.
     // If the DLQ publish also fails, re-throw so the Cloud Function does NOT
     // ack the PubSub message and PubSub retries it automatically.
+    const dlTopicName = `${topicPrefix}-${repoName}-dlq`;
+    const dlTopic = deps.pubsub.topic(dlTopicName);
+    let dlTopicEnsured = false;
+
+    // Create the DLQ topic at most once, tolerating the race where two
+    // concurrent failures both try to create it (gRPC ALREADY_EXISTS = 6).
+    const ensureDlTopic = async (): Promise<void> => {
+      if (dlTopicEnsured) return;
+      try {
+        await dlTopic.create();
+        console.info(`[SyncWorker] Created DLQ topic "${dlTopicName}"`);
+      } catch (e: unknown) {
+        if ((e as { code?: number })?.code !== 6) throw e; // 6 = ALREADY_EXISTS
+      }
+      dlTopicEnsured = true;
+    };
+
     const onFlushError = async (
       events: SyncEvent[],
       error: unknown,
@@ -173,16 +191,29 @@ export function createSyncWorker<M extends Record<string, any>>(
         `[SyncWorker] Flush failed for "${repoName}" (${events.length} events):`,
         error,
       );
-      const dlTopicName = `${topicPrefix}-${repoName}-dlq`;
-      const dlTopic = deps.pubsub.topic(dlTopicName);
-      const [exists] = await dlTopic.exists();
-      if (!exists) {
-        await dlTopic.create();
-        console.info(`[SyncWorker] Created DLQ topic "${dlTopicName}"`);
-      }
-      for (const evt of events) {
-        await dlTopic.publishMessage({ json: evt });
-      }
+      await ensureDlTopic();
+
+      // Publish in parallel (a sequential await-loop over 100 events can blow
+      // the Cloud Function timeout) and cap retries so a poison message can't
+      // be re-queued forever (issue #09).
+      await Promise.all(
+        events.map((evt) => {
+          const attempts = (evt.attempts ?? 0) + 1;
+          if (maxDlqAttempts > 0 && attempts > maxDlqAttempts) {
+            console.error(
+              `[SyncWorker] Dropping event for "${repoName}" after ${attempts - 1} DLQ attempts:`,
+              { docId: evt.docId, operation: evt.operation },
+            );
+            return Promise.resolve();
+          }
+          const payload: SyncEvent = {
+            ...evt,
+            attempts,
+            firstFailedAt: evt.firstFailedAt ?? Date.now(),
+          };
+          return dlTopic.publishMessage({ json: payload });
+        }),
+      );
     };
 
     q = new SyncQueue({

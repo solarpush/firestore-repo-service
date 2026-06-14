@@ -35,8 +35,18 @@ export function valueType(v: unknown): HistoryValueType {
   return "object";
 }
 
-/** Cheap structural equality good enough for change detection. */
-export function valuesEqual(a: unknown, b: unknown): boolean {
+/**
+ * Structural equality good enough for change detection.
+ *
+ * Order-insensitive for object keys (Firestore does not guarantee key order
+ * after partial updates / re-fetch, so `JSON.stringify` comparison produced
+ * phantom diffs). Cycle-safe via a `seen` map, and never throws — see #14.
+ */
+export function valuesEqual(
+  a: unknown,
+  b: unknown,
+  seen: WeakMap<object, unknown> = new WeakMap(),
+): boolean {
   if (a === b) return true;
   if (a === null || b === null || a === undefined || b === undefined) {
     return a === b;
@@ -49,20 +59,47 @@ export function valuesEqual(a: unknown, b: unknown): boolean {
     return a.getTime() === b.getTime();
   }
 
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    if (seen.get(a) === b) return true;
+    seen.set(a, b);
     for (let i = 0; i < a.length; i++) {
-      if (!valuesEqual(a[i], b[i])) return false;
+      if (!valuesEqual(a[i], b[i], seen)) return false;
     }
     return true;
   }
 
   if (typeof a === "object" && typeof b === "object") {
-    try {
-      return JSON.stringify(a) === JSON.stringify(b);
-    } catch {
+    // A plain object is never equal to a special boxed value (one is a
+    // Date/Timestamp, the other a plain object).
+    if (
+      a instanceof Date ||
+      b instanceof Date ||
+      a instanceof Timestamp ||
+      b instanceof Timestamp
+    ) {
       return false;
     }
+    if (seen.get(a) === b) return true;
+    seen.set(a, b);
+    const ka = Object.keys(a as Record<string, unknown>);
+    const kb = Object.keys(b as Record<string, unknown>);
+    if (ka.length !== kb.length) return false;
+    for (const k of ka) {
+      if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+      if (
+        !valuesEqual(
+          (a as Record<string, unknown>)[k],
+          (b as Record<string, unknown>)[k],
+          seen,
+        )
+      ) {
+        return false;
+      }
+    }
+    return true;
   }
 
   return false;

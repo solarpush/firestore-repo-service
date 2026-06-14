@@ -117,6 +117,7 @@ function scalarDocsHtml(title: string, specUrl: string): string {
 }
 
 import { getLinkBase } from "../utils/link-base";
+import { securityHeaders } from "../utils/security-headers";
 
 // ---------------------------------------------------------------------------
 // Body parser
@@ -231,6 +232,7 @@ export function createCrudServer<
     basePath = "/",
     repos,
     parseBody = true,
+    securityHeaders: securityHeadersOpt,
     auth,
     middleware: extraMiddleware = [],
     verbose = false,
@@ -254,21 +256,30 @@ export function createCrudServer<
 
     // Resolve fieldsConfig → separate arrays for runtime
     let filterableFields: string[] | undefined;
+    let orderableFields: string[] | undefined;
     let mutableFields: string[] | undefined;
     let createFields: string[] | undefined;
     if (cfg.fieldsConfig) {
       const fc = cfg.fieldsConfig as Record<string, readonly string[]>;
       filterableFields = [];
+      orderableFields = [];
       mutableFields = [];
       createFields = [];
       for (const [field, roles] of Object.entries(fc)) {
         for (const role of roles) {
           if (role === "filterable") filterableFields.push(field);
+          else if (role === "orderable") orderableFields.push(field);
           else if (role === "mutable") mutableFields.push(field);
           else if (role === "create") createFields.push(field);
         }
       }
+      // Fail-closed sort whitelist: when no field is explicitly "orderable",
+      // reuse the filterable set so existing configs keep working but fields
+      // that are neither filterable nor orderable cannot be sorted on (#03).
+      if (orderableFields.length === 0) orderableFields = filterableFields;
       if (filterableFields.length === 0) filterableFields = undefined;
+      if (orderableFields && orderableFields.length === 0)
+        orderableFields = undefined;
       if (mutableFields.length === 0) mutableFields = undefined;
       if (createFields.length === 0) createFields = undefined;
     }
@@ -298,6 +309,7 @@ export function createCrudServer<
       createdKey: (cfg.repo as any)._createdKey ?? undefined,
       pageSize: cfg.pageSize ?? 25,
       filterableFields,
+      orderableFields,
       mutableFields,
       createFields,
       allowDelete: cfg.allowDelete ?? false,
@@ -333,6 +345,14 @@ export function createCrudServer<
 
   // ── Router ─────────────────────────────────────────────────────────────
   const router = new MiniRouter();
+
+  // ── Security headers (runs first). CSP defaults off for the JSON API so the
+  //    bundled Scalar docs UI keeps loading; callers can opt in via options.
+  if (securityHeadersOpt !== false) {
+    const base0 =
+      securityHeadersOpt === undefined ? { csp: false as const } : securityHeadersOpt;
+    router.use(securityHeaders(base0));
+  }
 
   // ── CORS middleware ─────────────────────────────────────────────────────
   router.use((req, res, next) => {
