@@ -340,28 +340,52 @@ export const apis = createApiRegistry({
 });
 
 export const defineRoute = apis.defineRoute;
+export const useCaseRoute = apis.useCaseRoute;
 ```
 
 ### Write a route
 
-```typescript
-// src/domains/posts/useCases/createPost/routes.ts
-import { z } from "zod";
-import { defineRoute } from "../../../../apis.js";
+A useCase owns its Zod `input` / `output` schemas (as `static` members) and the
+business logic; `useCaseRoute` wires it into an endpoint in one line.
 
-export default defineRoute({
-  api: "v1", // typed: only registered tags accepted
-  method: "post",
-  input: z.object({ title: z.string() }),
-  output: z.object({ id: z.string() }),
-  summary: "Create a post",
-  tags: ["posts"],
-  handler: async ({ input }) => ({ id: input.title }),
-});
+```typescript
+// src/domains/posts/useCases/createPost/useCase.ts
+import { z } from "zod";
+import { UseCase } from "@lpdjs/firestore-repo-service/servers/hono";
+import type { Services } from "../../../../services.js";
+
+const input = z.object({ title: z.string() });
+const output = z.object({ id: z.string() });
+
+export class CreatePostUseCase extends UseCase<typeof input, typeof output, Services> {
+  static readonly input = input;
+  static readonly output = output;
+
+  async execute(payload: z.infer<typeof input>): Promise<z.infer<typeof output>> {
+    return { id: payload.title };
+  }
+}
 ```
 
-Export an **array** of `defineRoute(...)` to expose the same logic under
-multiple APIs with different schemas — each call infers `input` independently.
+```typescript
+// src/domains/posts/useCases/createPost/routes.ts
+import { defineRoutes } from "@lpdjs/firestore-repo-service/servers/hono";
+import { useCaseRoute } from "../../../../apis.js";
+import { CreatePostUseCase } from "./useCase.js";
+
+export default defineRoutes([
+  useCaseRoute(CreatePostUseCase, {
+    api: "v1", // typed: only registered tags accepted
+    method: "post",
+    summary: "Create a post",
+    tags: ["posts"],
+  }),
+]);
+```
+
+Need full control (no useCase)? Use `defineRoute({...})` with an inline
+`handler` instead. Expose the same useCase under several APIs by adding more
+`useCaseRoute(...)` entries to the `defineRoutes([...])` array.
 
 ### Wire Cloud Functions
 

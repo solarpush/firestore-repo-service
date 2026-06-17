@@ -336,40 +336,51 @@ async function runNew(
 
     const className = `${routeName.charAt(0).toUpperCase()}${routeName.slice(1)}UseCase`;
 
+    const pkgHono = "@lpdjs/firestore-repo-service/servers/hono";
+    const servicesImport = inferServicesImportPath(rootAbs, dirAbs);
+
+    const inputComment =
+      method === "get"
+        ? "// GET → lu depuis les query params"
+        : `// ${method.toUpperCase()} → lu depuis le body JSON`;
+
     const useCaseSrc = `/**
  * ${className} — pure business logic, no HTTP awareness.
- * Reusable across multiple routes / cron jobs / triggers.
+ *
+ * Owns its Zod \`input\` / \`output\` schemas (declared as \`static\` members, the
+ * single source of truth shared with \`routes.ts\`) and runs the logic in
+ * \`execute\`. The shared \`services\` container is injected by the \`UseCase\` base
+ * class via the constructor.
  */
 
-export interface ${className}Input {
-  // TODO: define the input shape
-  example: string;
-}
+import { z } from "zod";
+import { UseCase } from "${pkgHono}";
+import type { Services } from "${servicesImport}";
 
-export interface ${className}Output {
-  // TODO: define the output shape
-  id: string;
-}
+const input = z.object({
+  ${inputComment}
+  example: z.string(),
+});
 
-export class ${className} {
-  // TODO: inject repositories / services via the constructor.
-  // constructor(private readonly repo: SomeRepository) {}
+const output = z.object({
+  id: z.string(),
+});
 
-  async execute(input: ${className}Input): Promise<${className}Output> {
-    // TODO: implement
-    return { id: input.example };
+export class ${className} extends UseCase<typeof input, typeof output, Services> {
+  static readonly input = input;
+  static readonly output = output;
+
+  async execute(
+    payload: z.infer<typeof input>,
+  ): Promise<z.infer<typeof output>> {
+    // TODO: implement using \`this.services\`
+    return { id: payload.example };
   }
 }
 `;
 
-    const inputZodSnippet =
-      method === "get"
-        ? `z.object({\n    // GET → lu depuis les query params\n    example: z.string(),\n  })`
-        : `z.object({\n    // ${method.toUpperCase()} → lu depuis le body JSON\n    example: z.string(),\n  })`;
-
-    const handlerBody = withUseCase
-      ? `    const useCase = new ${className}();\n    const data = await useCase.execute(input);\n    return data;`
-      : `    // TODO: business logic\n    return { id: input.example };`;
+    const sourceMeta =
+      method === "get" ? `\n    source: "query",` : "";
 
     const useCaseImport = withUseCase
       ? `import { ${className} } from "./useCase.js";\n`
@@ -379,26 +390,46 @@ export class ${className} {
       asString(flags["apis-import"]) ??
       inferApisImportPath(rootAbs, dirAbs);
 
-    const routesSrc = `import { z } from "zod";
-import { defineRoute } from "${apisImport}";
+    const routesSrc = withUseCase
+      ? `import { defineRoutes } from "${pkgHono}";
+import { useCaseRoute } from "${apisImport}";
 ${useCaseImport}
-export default defineRoute({
-  api: "${api}",
-  method: "${method}",
-
-  input: ${inputZodSnippet},
-
-  output: z.object({
-    id: z.string(),
+export default defineRoutes([
+  useCaseRoute(${className}, {
+    api: "${api}",
+    method: "${method}",${sourceMeta}
+    summary: "TODO: ${routeName}",
+    tags: ["${domain}"],
   }),
+]);
+`
+      : `import { z } from "zod";
+import { defineRoutes } from "${pkgHono}";
+import { defineRoute } from "${apisImport}";
 
-  summary: "TODO: ${routeName}",
-  tags: ["${domain}"],
+export default defineRoutes([
+  defineRoute({
+    api: "${api}",
+    method: "${method}",
 
-  handler: async ({ input }) => {
-${handlerBody}
-  },
-});
+    input: z.object({
+      ${inputComment}
+      example: z.string(),
+    }),
+
+    output: z.object({
+      id: z.string(),
+    }),
+
+    summary: "TODO: ${routeName}",
+    tags: ["${domain}"],
+
+    handler: async ({ input }) => {
+      // TODO: business logic
+      return { id: input.example };
+    },
+  }),
+]);
 `;
 
     const written: string[] = [];
@@ -417,11 +448,15 @@ ${handlerBody}
     if (withUseCase) writeIfPossible(useCaseFile, useCaseSrc);
     if (withUseCase && withTest) {
       const testSrc = `import { describe, it, expect } from "vitest";
+import type { Services } from "${servicesImport}";
 import { ${className} } from "./useCase.js";
 
 describe("${className}", () => {
   it("returns a response shaped like the output schema", async () => {
-    const useCase = new ${className}();
+    // TODO: replace with real mocks for the services the useCase consumes.
+    const services = {} as unknown as Services;
+
+    const useCase = new ${className}(services);
     const result = await useCase.execute({ example: "hello" });
     expect(result).toMatchObject({ id: expect.any(String) });
   });
@@ -540,8 +575,9 @@ ${apisBody}
   { services },
 );
 
-/** Typed helper used inside every route file. */
+/** Typed helpers used inside every route file. */
 export const defineRoute = apis.defineRoute;
+export const useCaseRoute = apis.useCaseRoute;
 `;
 
     writeIfPossible(apisAbs, apisSrc);
@@ -822,6 +858,28 @@ function inferApisImportPath(rootAbs: string, routeDirAbs: string): string {
     }
   }
   return "../../../../apis.js";
+}
+
+function inferServicesImportPath(rootAbs: string, routeDirAbs: string): string {
+  const candidates = ["services.ts", "services.js"];
+  // services.ts is scaffolded as a sibling of apis.ts (see `frs init`).
+  const searchRoots = [
+    rootAbs,
+    dirname(rootAbs),
+    dirname(dirname(rootAbs)),
+  ];
+  for (const dir of searchRoots) {
+    for (const c of candidates) {
+      const full = resolve(dir, c);
+      if (existsSync(full)) {
+        let rel = relative(routeDirAbs, full).replace(/\\/g, "/");
+        rel = rel.replace(/\.ts$/, ".js");
+        if (!rel.startsWith(".")) rel = `./${rel}`;
+        return rel;
+      }
+    }
+  }
+  return "../../../../services.js";
 }
 
 async function main(): Promise<void> {

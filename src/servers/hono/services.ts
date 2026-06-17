@@ -21,14 +21,14 @@
  *
  * @example
  * ```ts
- * // src/services.ts
+ * // src/services.ts — infrastructure singletons only (no useCases here)
  * import { createServices } from "@lpdjs/firestore-repo-service/servers/hono";
  * import { PostRepo } from "./domains/posts/PostRepo.js";
- * import { CreatePostUseCase } from "./domains/posts/useCases/createPost/useCase.js";
+ * import { Mailer } from "./services/Mailer.js";
  *
  * export const services = createServices({
- *   postRepo: PostRepo,                   // class form (auto-injected)
- *   createPostUseCase: CreatePostUseCase, // class form (auto-injected)
+ *   postRepo: PostRepo,           // class form (auto-injected)
+ *   mailer: ({ ctx }) => new Mailer(ctx), // factory form
  * });
  *
  * export type Services = typeof services;
@@ -46,15 +46,21 @@
  *
  * @example
  * ```ts
- * // Inside a useCase registered as a class
+ * // Inside a useCase — extends the UseCase base, owns its Zod schemas
+ * import { z } from "zod";
+ * import { UseCase } from "@lpdjs/firestore-repo-service/servers/hono";
  * import type { Services } from "../../services.js";
  *
- * export class CreatePostUseCase {
- *   constructor(private readonly services: Services) {}
+ * const input = z.object({ title: z.string() });
+ * const output = z.object({ id: z.string() });
  *
- *   async execute(input: { title: string }) {
+ * export class CreatePostUseCase extends UseCase<typeof input, typeof output, Services> {
+ *   static readonly input = input;
+ *   static readonly output = output;
+ *
+ *   async execute(payload: z.infer<typeof input>): Promise<z.infer<typeof output>> {
  *     const user = this.services.ctx.c.get("user");
- *     return this.services.postRepo.create({ ...input, authorId: user.id });
+ *     return this.services.postRepo.create({ ...payload, authorId: user.id });
  *   }
  * }
  * ```
@@ -226,14 +232,14 @@ export type ServicesContainer<TMap> = TMap;
  *
  * @example Class form (zero-boilerplate auto-injection)
  * ```ts
- * class CreatePostUseCase {
+ * class RepositoryService {
  *   constructor(private readonly services: Services) {}
- *   async execute() { return this.services.postRepo.list(); }
+ *   get posts() { return this.services.db.posts; }
  * }
  *
  * createServices({
- *   postRepo: PostRepo,                   // ← bare class
- *   createPostUseCase: CreatePostUseCase, // ← bare class
+ *   db: () => getFirestore(),    // ← factory
+ *   repository: RepositoryService, // ← bare class (deps auto-injected)
  * });
  * ```
  */

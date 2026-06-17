@@ -26,6 +26,7 @@
  *
  * // Use in routes — `api` is now typed "v1" | "webhooks".
  * export const defineRoute = apis.defineRoute;
+ * export const useCaseRoute = apis.useCaseRoute;
  *
  * // index.ts (Cloud Functions entrypoint)
  * import { onRequest } from "firebase-functions/v2/https";
@@ -53,6 +54,11 @@ import type {
 } from "./types";
 import { HonoServer } from "./server";
 import type { AnyServicesContainer } from "./services";
+import {
+  useCaseRoute as buildUseCaseRoute,
+  type UseCaseClass,
+  type UseCaseRouteMeta,
+} from "./usecase";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type OnRequestFn = (...args: any[]) => any;
@@ -115,6 +121,22 @@ export interface ApiRegistry<
   ): RouteDef<TIn, TOut> & { api: keyof TMap & string };
 
   /**
+   * Typed `useCaseRoute` — wires a {@link UseCase} class into a route in one
+   * line. The route's `input` / `output` schemas are read from the useCase's
+   * `static` members and the handler instantiates it with the request
+   * `services`. The `api` field is constrained to `keyof TMap`.
+   *
+   * @example
+   * export default defineRoutes([
+   *   useCaseRoute(CreatePostUseCase, { api: "v1", method: "post", tags: ["posts"] }),
+   * ]);
+   */
+  useCaseRoute<TIn extends z.ZodTypeAny, TOut extends z.ZodTypeAny>(
+    useCaseClass: UseCaseClass<TIn, TOut, TServices>,
+    meta: UseCaseRouteMeta<keyof TMap & string>,
+  ): RouteDef<TIn, TOut> & { api: keyof TMap & string };
+
+  /**
    * Build one Cloud Function per registered API and return them as a map
    * keyed by API tag — spread it directly into your `index.ts` exports.
    *
@@ -163,6 +185,10 @@ export function createApiRegistry<
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     defineRoute(def: any) {
       return def;
+    },
+
+    useCaseRoute(useCaseClass, meta) {
+      return buildUseCaseRoute(useCaseClass, meta);
     },
 
     serverFor(api, routes) {

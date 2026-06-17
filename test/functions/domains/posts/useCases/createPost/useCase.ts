@@ -1,26 +1,36 @@
 /**
  * CreatePostUseCase — pure business logic, no HTTP awareness.
- * Instantiated by route handlers (or cron / triggers) with the shared
- * services they want to inject. The container in `services.ts` holds the
- * SPI singletons; useCases stay outside of it.
+ *
+ * Owns its Zod `input` / `output` schemas (declared as `static` members, the
+ * single source of truth shared with `routes.ts`) and runs the logic in
+ * `execute`. The shared `services` container is injected by the `UseCase` base
+ * class via the constructor.
  */
 
-import { Services } from "../../../../services.js";
+import { UseCase } from "@lpdjs/firestore-repo-service/servers/hono";
+import { z } from "zod";
+import type { Services } from "../../../../services.js";
 
-export interface CreatePostUseCaseInput {
-  example: string;
-}
+const input = z.object({
+  id: z.string(),
+  example: z.string(),
+});
 
-export interface CreatePostUseCaseOutput {
-  id: string;
-}
+const output = z.object({
+  id: z.string(),
+});
 
-export class CreatePostUseCase {
-  constructor(private readonly services: Services) {}
+export class CreatePostUseCase extends UseCase<
+  typeof input,
+  typeof output,
+  Services
+> {
+  static readonly input = input;
+  static readonly output = output;
 
   async execute(
-    input: CreatePostUseCaseInput,
-  ): Promise<CreatePostUseCaseOutput> {
+    payload: z.infer<typeof input>,
+  ): Promise<z.infer<typeof output>> {
     const user = this.services.ctx.c.get("user");
     user.role === "admin"
       ? console.log("admin access")
@@ -28,6 +38,6 @@ export class CreatePostUseCase {
 
     console.log(this.services.repository.db.comments.get.byDocId("1234"));
     console.log(this.services.hubspot.hello());
-    return { id: input.example };
+    return { id: payload.example };
   }
 }

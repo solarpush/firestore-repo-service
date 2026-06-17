@@ -112,9 +112,71 @@ export type AnyRouteDef = RouteDef<any, any>;
  * What `routes.ts` can default-export:
  *  - a single {@link RouteDef} (most common case),
  *  - or an array of {@link RouteDef} (e.g. expose the same useCase on
- *    multiple `api` tags or under multiple paths).
+ *    multiple `api` tags or under multiple paths). `readonly` arrays are
+ *    accepted so that tuple-preserving helpers like {@link defineRoutes} (or a
+ *    plain `as const` array) can be default-exported directly.
  */
-export type RouteModuleDefault = AnyRouteDef | AnyRouteDef[];
+export type RouteModuleDefault = AnyRouteDef | readonly AnyRouteDef[];
+
+// ── useCase ⇆ routes type bridge ──────────────────────────────────────────
+// A useCase should never re-declare its input/output by hand. Instead it
+// derives them from the Zod schemas of the route(s) that drive it, so the two
+// can never drift apart. Pass `typeof import("./routes.js").default` to the
+// helpers below.
+
+/**
+ * Identity helper that **preserves the tuple type** of a `routes.ts` default
+ * export. A plain array literal (`export default [a, b]`) collapses every
+ * element to a single common type, which would lose each route's individual
+ * schema. Wrapping the array with `defineRoutes([...])` keeps the per-route
+ * types intact so {@link RouteInput} / {@link RouteOutput} can aggregate them
+ * into a union.
+ *
+ * @example
+ * export default defineRoutes([
+ *   defineRoute({ ... }),
+ *   defineRoute({ ... }),
+ * ]);
+ */
+export function defineRoutes<const T extends readonly AnyRouteDef[]>(
+  routes: T,
+): T {
+  return routes;
+}
+
+/**
+ * Normalizes a `routes.ts` default export — a single {@link RouteDef} or an
+ * array of them — to a *union* of its individual route members.
+ */
+export type RoutesUnion<T> = T extends readonly (infer R)[] ? R : T;
+
+type InferRouteInput<R> = R extends { input?: infer I }
+  ? I extends z.ZodTypeAny
+    ? z.infer<I>
+    : void
+  : void;
+
+type InferRouteOutput<R> = R extends { output?: infer O }
+  ? O extends z.ZodTypeAny
+    ? z.infer<O>
+    : unknown
+  : unknown;
+
+/**
+ * Union of validated request payloads across every route in a `routes.ts`
+ * module. Use it to type a useCase input without duplicating the Zod schema:
+ *
+ * @example
+ * type Routes = typeof import("./routes.js").default;
+ * export type CreatePostUseCaseInput = RouteInput<Routes>;
+ */
+export type RouteInput<T> = InferRouteInput<RoutesUnion<T>>;
+
+/**
+ * Union of success-response payloads across every route in a `routes.ts`
+ * module. Mirror of {@link RouteInput} for the useCase output type.
+ */
+export type RouteOutput<T> = InferRouteOutput<RoutesUnion<T>>;
 
 /**
  * Thrown by the server when the incoming request fails Zod validation.

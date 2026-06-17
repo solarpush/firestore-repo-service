@@ -12,7 +12,7 @@ juste à côté de la logique métier — sans plomberie.
 | --- | --- |
 | **Routing par fichier** | Pose un `routes.ts` à côté d'un useCase. La CLI scanne l'arbre au build et émet un manifest statique — zéro accès filesystem au runtime. |
 | **Registre multi-API** | `createApiRegistry({ v1, v2, webhooks, ... })` est la source unique de vérité. Chaque tag devient une Cloud Function. |
-| **`defineRoute` typé** | Le champ `api` est restreint à tes tags enregistrés. Inférence par-route de `input` / `output` / `handler.input`. |
+| **`defineRoute` / `useCaseRoute` typés** | Le champ `api` est restreint à tes tags enregistrés. `useCaseRoute(UseCaseClass, meta)` dérive `input` / `output` des schémas Zod statiques du useCase ; `defineRoute({...})` reste disponible pour les handlers inline. |
 | **Validation Zod** | Les schémas `input` sont validés automatiquement (body / query / params). Validation optionnelle de la réponse via `validateOutput`. |
 | **OpenAPI 3.1** | Auto-généré depuis les schémas Zod. `/openapi.json` + UI Scalar interactive sur `/docs`. |
 | **Interceptor + onError** | Hook around-style unique par API pour les enveloppes, le mapping d'erreurs, le tracing. Plus un `onError` style Hono. |
@@ -49,7 +49,7 @@ Après `init` :
 
 ```
 src/
-├── apis.ts                      ← createApiRegistry(...) + export defineRoute
+├── apis.ts                      ← createApiRegistry(...) + export defineRoute / useCaseRoute
 └── domains/
     └── __generated__/routes.ts  ← stub vide (rafraîchi par `frs gen`)
 ```
@@ -112,8 +112,9 @@ export const apis = createApiRegistry({
   },
 });
 
-// Re-export du helper defineRoute typé, utilisé dans chaque routes.ts.
+// Re-export des helpers typés, utilisés dans chaque routes.ts.
 export const defineRoute = apis.defineRoute;
+export const useCaseRoute = apis.useCaseRoute;
 ```
 
 ## Écrire une route
@@ -126,49 +127,75 @@ Génère :
 
 ```
 src/domains/posts/useCases/createPost/
-├── routes.ts        ← schémas Zod + handler
-├── useCase.ts       ← logique métier pure
+├── routes.ts        ← mappe le useCase vers un endpoint HTTP
+├── useCase.ts       ← logique métier + schémas Zod input/output
 └── useCase.test.ts  ← squelette Vitest
 ```
 
+Le useCase possède ses schémas Zod `input` / `output` (en membres `static`,
+source de vérité unique) et la logique métier. Le container `services` partagé
+est injecté par la classe de base `UseCase` via le constructeur :
+
+```ts
+// src/domains/posts/useCases/createPost/useCase.ts
+import { z } from "zod";
+import { UseCase } from "@lpdjs/firestore-repo-service/servers/hono";
+import type { Services } from "../../../../services.js";
+
+const input = z.object({ title: z.string() });
+const output = z.object({ id: z.string() });
+
+export class CreatePostUseCase extends UseCase<typeof input, typeof output, Services> {
+  static readonly input = input;
+  static readonly output = output;
+
+  async execute(payload: z.infer<typeof input>): Promise<z.infer<typeof output>> {
+    const user = this.services.ctx.c.get("user");
+    return { id: `${user.id}:${payload.title}` };
+  }
+}
+```
+
+`routes.ts` câble ensuite le useCase vers un endpoint avec `useCaseRoute` —
+sans duplication de schéma ni boilerplate de handler :
+
 ```ts
 // src/domains/posts/useCases/createPost/routes.ts
-import { z } from "zod";
-import { defineRoute } from "../../../../apis.js";
+import { defineRoutes } from "@lpdjs/firestore-repo-service/servers/hono";
+import { useCaseRoute } from "../../../../apis.js";
 import { CreatePostUseCase } from "./useCase.js";
 
-export default defineRoute({
-  api: "v1",                    // ← typé : "v1" | "webhooks"
-  method: "post",
-
-  input: z.object({ title: z.string() }),
-  output: z.object({ id: z.string() }),
-
-  summary: "Créer un post",
-  tags: ["posts"],
-
-  handler: async ({ input, c }) => {
-    const useCase = new CreatePostUseCase();
-    return await useCase.execute(input);
-  },
-});
+export default defineRoutes([
+  useCaseRoute(CreatePostUseCase, {
+    api: "v1",            // ← typé : "v1" | "webhooks"
+    method: "post",
+    summary: "Créer un post",
+    tags: ["posts"],
+  }),
+]);
 ```
 
 L'URL est dérivée du chemin du fichier : `posts/useCases/createPost` →
 `/posts/createPost`. Combinée au `basePath` `v1` ci-dessus et au nom de la
 fonction, l'URL finale est `…/v1/v1/posts/createPost` (ou `…/v1/posts/createPost`
-si tu mets seulement `basePath: "/"`). Tu peux aussi définir `path` explicitement.
+si tu mets seulement `basePath: "/"`). Tu peux aussi définir `path` explicitement
+dans le meta de `useCaseRoute`.
 
 `frs new` propose des prompts interactifs quand les flags manquent (nom
 de route, domain, méthode, api, with-usecase, with-test). Passe `--yes` pour
 accepter les défauts.
 
-### Même endpoint, plusieurs APIs (schémas différents)
+### Besoin de contrôle total ? Utilise `defineRoute`
 
-Exporte un tableau de `defineRoute(...)` — TS infère chacun indépendamment :
+Quand une route n'a pas de useCase (ou que tu veux le handler inline),
+`defineRoute` prend directement les schémas + le handler :
 
 ```ts
-export default [
+import { z } from "zod";
+import { defineRoutes } from "@lpdjs/firestore-repo-service/servers/hono";
+import { defineRoute } from "../../../../apis.js";
+
+export default defineRoutes([
   defineRoute({
     api: "v1",
     method: "post",
@@ -176,14 +203,19 @@ export default [
     output: z.object({ id: z.string() }),
     handler: async ({ input }) => ({ id: input.title }),
   }),
-  defineRoute({
-    api: "v2",
-    method: "post",
-    input: z.object({ title: z.string(), slug: z.string() }),
-    output: z.object({ id: z.string(), slug: z.string() }),
-    handler: async ({ input }) => ({ id: input.title, slug: input.slug }),
-  }),
-];
+]);
+```
+
+### Même endpoint, plusieurs APIs
+
+Ajoute d'autres entrées au tableau `defineRoutes([...])` — chaque
+`useCaseRoute` (ou `defineRoute`) est typé indépendamment :
+
+```ts
+export default defineRoutes([
+  useCaseRoute(CreatePostUseCase, { api: "v1", method: "post", tags: ["posts"] }),
+  useCaseRoute(CreatePostUseCase, { api: "v2", method: "post", tags: ["posts"] }),
+]);
 ```
 
 ## Rafraîchir le manifest
@@ -226,9 +258,8 @@ entièrement typé — sans génériques à propager.
 ## Services & injection de dépendances
 
 Déclare tous les singletons de ton projet — repositories, clients SDK,
-loggers, useCases — **une seule fois** dans un container global, et
-laisse le serveur les injecter dans chaque handler, interceptor, cron,
-trigger ou test.
+loggers — **une seule fois** dans un container global, et laisse le serveur
+les injecter dans chaque handler, interceptor, cron, trigger ou test.
 
 ### Pourquoi
 
@@ -244,16 +275,16 @@ Avec le container intégré :
   l'argument du factory — zéro câblage manuel.
 - Un service `ctx` built-in expose le `Context` Hono de la requête
   courante via `AsyncLocalStorage`, donc tes useCases peuvent lire
-  `this.ctx.c.get("user")` sans jamais recevoir `c` en paramètre.
+  `this.services.ctx.c.get("user")` sans jamais recevoir `c` en paramètre.
 
 ### Déclarer le container (`src/services.ts`)
 
 Le container ne contient que de l'**infrastructure partagée** — SPIs,
 repositories, clients SDK, loggers. Les useCases vivent *en dehors* du
-container : ils sont instanciés par les routes qui en ont besoin et
-reçoivent leurs deps via le constructeur. Cette frontière garde
-`Services` libre de toute référence à lui-même (pas d'alias circulaire)
-et rend les useCases triviaux à unit-tester avec des fakes.
+container : ils `extend` la classe de base `UseCase` et reçoivent tout le
+container `services` via le constructeur (injecté pour toi par `useCaseRoute`).
+Cette frontière garde `Services` libre de toute référence à lui-même (pas
+d'alias circulaire) et rend les useCases triviaux à unit-tester avec des fakes.
 
 ```ts
 import { createServices } from "@lpdjs/firestore-repo-service/servers/hono";
@@ -289,48 +320,60 @@ export const apis = createApiRegistry(
 );
 
 export const defineRoute = apis.defineRoute;
+export const useCaseRoute = apis.useCaseRoute;
 ```
 
-### Utiliser les services dans une route — instancier le useCase à la volée
+### Utiliser les services dans une route
 
-Le handler reçoit le proxy `services` partagé. Construis le useCase
-inline avec les deps dont il a besoin (ou via un petit helper local si
-tu l'appelles depuis plusieurs routes).
+`useCaseRoute` câble le useCase vers l'endpoint et injecte automatiquement
+le container `services` partagé — le handler est généré pour toi :
 
 ```ts
+import { defineRoutes } from "@lpdjs/firestore-repo-service/servers/hono";
+import { useCaseRoute } from "../../../../apis.js";
 import { CreatePostUseCase } from "./useCase.js";
 
+export default defineRoutes([
+  useCaseRoute(CreatePostUseCase, { api: "v1", method: "post", tags: ["posts"] }),
+]);
+```
+
+Dans `defineRoute` (handlers inline), le même proxy `services` est dispo sur
+le contexte du handler si tu en as besoin directement :
+
+```ts
 defineRoute({
   api: "v1",
   method: "post",
   input: z.object({ title: z.string() }),
   output: z.object({ id: z.string() }),
-  handler: async ({ input, services }) => {
-    const uc = new CreatePostUseCase(services.ctx, services.postRepo);
-    return uc.execute(input);
-  },
+  handler: async ({ input, services }) =>
+    new CreatePostUseCase(services).execute(input),
 });
 ```
 
-### Écrire un useCase
+### Lire `this.services` dans un useCase
 
-Le useCase déclare ses deps une par une via des paramètres de
-constructeur **typés individuellement** — jamais `Services` en champ, ce
-qui créerait un alias circulaire.
+Un useCase `extends UseCase<typeof input, typeof output, Services>` : la classe
+de base injecte le **container `services` partagé** via le constructeur, et les
+schémas statiques pilotent le typage de `execute`. Accède aux deps via
+`this.services` — ne stocke jamais `Services` dans un champ typé à la main.
 
 ```ts
-import type { RequestContext } from "@lpdjs/firestore-repo-service/servers/hono";
-import type { PostRepo } from "./PostRepo.js";
+import { z } from "zod";
+import { UseCase } from "@lpdjs/firestore-repo-service/servers/hono";
+import type { Services } from "../../../../services.js";
 
-export class CreatePostUseCase {
-  constructor(
-    private readonly ctx: RequestContext,
-    private readonly posts: PostRepo,
-  ) {}
+const input = z.object({ title: z.string() });
+const output = z.object({ id: z.string() });
 
-  async execute(input: { title: string }) {
-    const user = this.ctx.c.get("user");
-    return this.posts.create({ ...input, authorId: user.id });
+export class CreatePostUseCase extends UseCase<typeof input, typeof output, Services> {
+  static readonly input = input;
+  static readonly output = output;
+
+  async execute(payload: z.infer<typeof input>): Promise<z.infer<typeof output>> {
+    const user = this.services.ctx.c.get("user");
+    return this.services.postRepo.create({ ...payload, authorId: user.id });
   }
 }
 ```
@@ -339,7 +382,8 @@ export class CreatePostUseCase {
 
 `services.ctx.c` throw quand on l'accède hors d'une requête. Pour les
 flux non-HTTP, enrobe ton appel dans `withRequestContext` avec un
-contexte synthétique, puis instancie le useCase comme dans une route :
+contexte synthétique, puis instancie le useCase avec le container
+`services` partagé :
 
 ```ts
 import { withRequestContext } from "@lpdjs/firestore-repo-service/servers/hono";
@@ -348,22 +392,25 @@ import { CreatePostUseCase } from "./domains/posts/useCases/createPost/useCase.j
 
 export const dailyTask = onSchedule("every 24 hours", async () => {
   await withRequestContext({ c: fakeContext() }, async () => {
-    const uc = new CreatePostUseCase(services.ctx, services.postRepo);
-    await uc.execute({ title: "résumé du jour" });
+    await new CreatePostUseCase(services).execute({ title: "résumé du jour" });
   });
 });
 ```
 
 En Vitest, le useCase est juste une classe — pas besoin de
-`withRequestContext`, injecte un contexte à la main et des fakes :
+`withRequestContext`, injecte un fake `services` à la main :
 
 ```ts
 import { CreatePostUseCase } from "./useCase.js";
+import type { Services } from "../../../../services.js";
 
 it("crée un post", async () => {
-  const ctx = { c: { get: () => ({ id: "u1" }) } } as any;
-  const repo = { create: async (p: any) => ({ id: "p1", ...p }) } as any;
-  const uc = new CreatePostUseCase(ctx, repo);
+  const services = {
+    ctx: { c: { get: () => ({ id: "u1" }) } },
+    postRepo: { create: async (p: any) => ({ id: "p1", ...p }) },
+  } as unknown as Services;
+
+  const uc = new CreatePostUseCase(services);
   expect((await uc.execute({ title: "hello" })).id).toBe("p1");
 });
 ```

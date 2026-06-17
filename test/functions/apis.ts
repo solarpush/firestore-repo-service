@@ -84,3 +84,4 @@ export const apis = createApiRegistry(
   { services },
 );
 export const defineRoute = apis.defineRoute;
+export const useCaseRoute = apis.useCaseRoute;

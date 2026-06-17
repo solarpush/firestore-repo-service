@@ -32,7 +32,13 @@ export {
   type ApiRegistryOptions,
 } from "./api-registry";
 export { buildOpenApiDocument, renderDocsHtml } from "./openapi";
-export { ValidationError } from "./types";
+export { ValidationError, defineRoutes } from "./types";
+export {
+  UseCase,
+  useCaseRoute,
+  type UseCaseClass,
+  type UseCaseRouteMeta,
+} from "./usecase";
 export {
   createServices,
   createRequestContextMiddleware,
@@ -75,6 +81,9 @@ export type {
   PayloadSource,
   RouteDef,
   RouteHandler,
+  RouteInput,
   RouteInterceptor,
   RouteModuleDefault,
+  RouteOutput,
+  RoutesUnion,
 } from "./types";
