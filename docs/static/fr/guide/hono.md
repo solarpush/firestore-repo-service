@@ -464,6 +464,36 @@ schémas Zod natifs sont reconnus sans cérémonie.
 
 Lance `frs help` pour la liste complète des flags.
 
+### `.frsrc.json` — config partagée
+
+`frs init` écrit un `.frsrc.json` à la racine du projet pour que les commandes
+sœurs réutilisent le layout résolu sans répéter les flags :
+
+```json
+{
+  "root": "src/domains",
+  "apisFile": "src/apis.ts",
+  "servicesFile": "src/services.ts",
+  "apis": ["v1"]
+}
+```
+
+Chaque commande lit ce fichier et résout chaque valeur avec la précédence
+**flag → `.frsrc.json` → défaut intégré** — un flag n'est appliqué que s'il est
+explicitement passé, sinon la valeur de la config (si présente) l'emporte, puis
+le défaut.
+
+| Clé | Type | Utilisée par |
+| --- | --- | --- |
+| `root` | string | `gen` (`--root` devient optionnel), `new` |
+| `out` | string | `gen` (fichier de sortie) |
+| `apis` | string[] | `new` (le premier élément est le `--api` par défaut) |
+| `useCaseFolder` | string | `new` |
+| `apisFile` / `servicesFile` / `servicesDir` | string | `add service` |
+
+Le fichier est optionnel : s'il est absent ou contient un JSON invalide, il est
+ignoré silencieusement. Tu peux aussi l'éditer à la main.
+
 ## API programmatique (échappatoires)
 
 Le barrel `@lpdjs/firestore-repo-service/servers/hono` expose aussi :

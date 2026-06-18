@@ -461,6 +461,35 @@ Zod schemas are picked up without ceremony.
 
 Run `frs help` for the full flag list.
 
+### `.frsrc.json` — shared config
+
+`frs init` writes a `.frsrc.json` at the project root so sibling commands can
+reuse the resolved layout instead of repeating flags:
+
+```json
+{
+  "root": "src/domains",
+  "apisFile": "src/apis.ts",
+  "servicesFile": "src/services.ts",
+  "apis": ["v1"]
+}
+```
+
+Every command reads this file and resolves each value with the precedence
+**flag → `.frsrc.json` → built-in default** — a flag is only applied when it is
+explicitly passed, otherwise the config value (if any) wins, then the default.
+
+| Key | Type | Used by |
+| --- | --- | --- |
+| `root` | string | `gen` (`--root` becomes optional), `new` |
+| `out` | string | `gen` (output file) |
+| `apis` | string[] | `new` (first entry is the default `--api`) |
+| `useCaseFolder` | string | `new` |
+| `apisFile` / `servicesFile` / `servicesDir` | string | `add service` |
+
+The file is optional: if it is missing or contains invalid JSON it is ignored
+silently. You can also edit it by hand.
+
 ## Programmatic API (escape hatches)
 
 The barrel `@lpdjs/firestore-repo-service/servers/hono` also exports:

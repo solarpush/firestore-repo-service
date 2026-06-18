@@ -36,6 +36,9 @@ interface FrsConfig {
   apisFile?: string;
   servicesFile?: string;
   servicesDir?: string;
+  apis?: string[];
+  out?: string;
+  useCaseFolder?: string;
 }
 
 function readConfig(cwd: string = process.cwd()): FrsConfig {
@@ -97,9 +100,10 @@ Flags (init):
   --yes                 Skip prompts, use defaults / flag values
 
 Flags (gen):
-  --root <dir>          Domain root to scan (required, e.g. src/domains)
+  --root <dir>          Domain root to scan (e.g. src/domains)
+                        — falls back to "root" in .frsrc.json
   --out <file>          Output file relative to --root
-                        (default: __generated__/routes.ts)
+                        (default: .frsrc.json "out" or __generated__/routes.ts)
   --routes-file <name>  Filename to look for (default: routes.ts)
   --skip <list>         Comma-separated path segments to drop from URLs
                         (default: useCases,useCase,use-cases,use-case)
@@ -112,12 +116,14 @@ Flags (gen):
   --silent              Do not print the generated route table
 
 Flags (new <name>):
-  --root <dir>          Domain root (default: src/domains)
+  --root <dir>          Domain root (default: .frsrc.json "root" or src/domains)
   --domain <name>       Domain name (e.g. posts) — prompted if missing
   --method <verb>       HTTP method (default: post) — prompted if missing
-  --api <tag>           API tag (default: v1) — prompted if missing
+  --api <tag>           API tag (default: .frsrc.json first "apis" or v1)
+                        — prompted if missing
   --usecase-folder <name>
-                        Parent folder under <domain>. Default: useCases
+                        Parent folder under <domain>.
+                        Default: .frsrc.json "useCaseFolder" or useCases
   --with-usecase        Also scaffold a sibling useCase.ts file (default: true)
   --with-test           Also scaffold a sibling useCase.test.ts (Vitest, default: true)
   --apis-import <path>  Import path for the registry (default: auto-detect
@@ -209,10 +215,13 @@ function makePrompter(skip: boolean): Prompter {
 }
 
 async function runGen(flags: ParsedArgs["flags"]): Promise<void> {
-  const root = asString(flags.root);
+  const cfg = readConfig();
+  const root = asString(flags.root) ?? cfg.root;
   if (!root) {
     // eslint-disable-next-line no-console
-    console.error("[frs] --root is required");
+    console.error(
+      "[frs] --root is required (or run `frs init` to write it to .frsrc.json)",
+    );
     process.exit(2);
   }
   const rootAbs = resolve(process.cwd(), root);
@@ -222,7 +231,7 @@ async function runGen(flags: ParsedArgs["flags"]): Promise<void> {
     process.exit(2);
   }
 
-  const out = asString(flags.out) ?? "__generated__/routes.ts";
+  const out = asString(flags.out) ?? cfg.out ?? "__generated__/routes.ts";
 
   const skip = asList(flags.skip) ?? DEFAULT_DERIVE.skipSegments;
   const casing =
@@ -268,6 +277,7 @@ async function runNew(
 ): Promise<void> {
   const skipPrompts = flags.yes === true;
   const prompter = makePrompter(skipPrompts);
+  const cfg = readConfig();
   try {
     let routeName = name && !name.startsWith("--") ? name : undefined;
     if (!routeName) {
@@ -291,7 +301,7 @@ async function runNew(
       }
     }
 
-    const root = asString(flags.root) ?? "src/domains";
+    const root = asString(flags.root) ?? cfg.root ?? "src/domains";
     let method = asString(flags.method)?.toLowerCase();
     if (!method) {
       method = await prompter.askChoice(
@@ -308,10 +318,12 @@ async function runNew(
 
     let api = asString(flags.api);
     if (!api) {
-      api = (await prompter.ask("API tag", "v1")).trim() || "v1";
+      const defaultApi = cfg.apis?.[0] ?? "v1";
+      api = (await prompter.ask("API tag", defaultApi)).trim() || defaultApi;
     }
 
-    const useCaseFolder = asString(flags["usecase-folder"]) ?? "useCases";
+    const useCaseFolder =
+      asString(flags["usecase-folder"]) ?? cfg.useCaseFolder ?? "useCases";
     const withUseCase =
       flags["with-usecase"] === undefined
         ? skipPrompts
@@ -635,6 +647,7 @@ export const routes: AnyRouteDef[] = [];
       root,
       apisFile,
       servicesFile,
+      apis,
     });
     written.push(cfgFile);
 

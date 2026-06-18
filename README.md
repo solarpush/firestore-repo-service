@@ -317,10 +317,14 @@ npm i -D @asteasolutions/zod-to-openapi
 ### Bootstrap
 
 ```bash
-npx frs init          # interactive — creates apis.ts + manifest stub
+npx frs init          # interactive — creates apis.ts + manifest stub + .frsrc.json
 npx frs new createPost --domain posts --method post --api v1
 npx frs gen --root src/domains   # refresh manifest (run before each build)
 ```
+
+`frs init` also writes a `.frsrc.json` (project root, e.g. `root`, `apisFile`,
+`apis`). Later commands read it so flags become optional — precedence is
+**flag → `.frsrc.json` → default**. See the Hono guide for the full key list.
 
 ### Configure your APIs (`apis.ts`)
 
