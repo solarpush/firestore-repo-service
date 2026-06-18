@@ -7,7 +7,6 @@
       "dependencies": {
         "@asteasolutions/zod-to-openapi": "^8.5.0",
         "@hono/node-server": "^1.19.14",
-        "@hono/zod-openapi": "^1.4.0",
         "hono": "^4.12.17",
       },
       "devDependencies": {
@@ -28,6 +27,7 @@
         "@google-cloud/bigquery": "^7.0.0 || ^8.0.0",
         "@google-cloud/bigquery-storage": "^4.0.0 || ^5.0.0",
         "@google-cloud/pubsub": "^4.0.0 || ^5.0.0",
+        "@types/express": "^4.17.0 || ^5.0.0",
         "firebase-admin": "^11.0.0 || ^12.0.0 || ^13.0.0",
         "firebase-functions": "^5.0.0 || ^6.0.0 || ^7.0.0",
         "typescript": "^5.0.0",
@@ -37,6 +37,7 @@
         "@google-cloud/bigquery",
         "@google-cloud/bigquery-storage",
         "@google-cloud/pubsub",
+        "@types/express",
         "firebase-functions",
       ],
     },
@@ -47,7 +48,7 @@
         "@google-cloud/bigquery": "8.1.1",
         "@google-cloud/bigquery-storage": "^5.1.0",
         "@google-cloud/pubsub": "^5.3.0",
-        "@lpdjs/firestore-repo-service": "2.4.3",
+        "@lpdjs/firestore-repo-service": "2.6.4",
         "firebase-admin": "^13.7.0",
         "firebase-functions": "^7.2.2",
         "zod": "^4.3.6",
@@ -193,7 +194,7 @@
 
     "@js-sdsl/ordered-map": ["@js-sdsl/ordered-map@4.4.2", "", {}, "sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw=="],
 
-    "@lpdjs/firestore-repo-service": ["@lpdjs/firestore-repo-service@2.4.3", "", { "dependencies": { "@asteasolutions/zod-to-openapi": "^8.5.0", "@hono/node-server": "^1.19.14", "@hono/zod-openapi": "^1.4.0", "hono": "^4.12.17" }, "peerDependencies": { "@google-cloud/bigquery": "^7.0.0 || ^8.0.0", "@google-cloud/bigquery-storage": "^4.0.0 || ^5.0.0", "@google-cloud/pubsub": "^4.0.0 || ^5.0.0", "firebase-admin": "^11.0.0 || ^12.0.0 || ^13.0.0", "firebase-functions": "^5.0.0 || ^6.0.0 || ^7.0.0", "typescript": "^5.0.0", "zod": "^4" }, "optionalPeers": ["@google-cloud/bigquery", "@google-cloud/bigquery-storage", "@google-cloud/pubsub", "firebase-functions"], "bin": { "frs-hono": "dist/servers/hono/cli.js" } }, "sha512-kKg0s9X9RXoudbiYivSqzOCcFeEKBJ51Yk8sUiJyuuqKsKVWcJCSEmPvXg/Tmq/1VTLiP4/lnSlOJNcJQKznIQ=="],
+    "@lpdjs/firestore-repo-service": ["@lpdjs/firestore-repo-service@2.6.4", "", { "dependencies": { "@asteasolutions/zod-to-openapi": "^8.5.0", "@hono/node-server": "^1.19.14", "@hono/zod-openapi": "^1.4.0", "hono": "^4.12.17" }, "peerDependencies": { "@google-cloud/bigquery": "^7.0.0 || ^8.0.0", "@google-cloud/bigquery-storage": "^4.0.0 || ^5.0.0", "@google-cloud/pubsub": "^4.0.0 || ^5.0.0", "firebase-admin": "^11.0.0 || ^12.0.0 || ^13.0.0", "firebase-functions": "^5.0.0 || ^6.0.0 || ^7.0.0", "typescript": "^5.0.0", "zod": "^4" }, "optionalPeers": ["@google-cloud/bigquery", "@google-cloud/bigquery-storage", "@google-cloud/pubsub", "firebase-functions"], "bin": { "frs": "dist/servers/hono/cli.js" } }, "sha512-2ryVdvsJbWu13dr74tBXUam0N55vCH72dZlSDcIPUlm55TbqAplJHs/lCQv/bU0GsCmTwfVSU4Pv2RbCKzi6lg=="],
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.4", "", { "dependencies": { "@tybys/wasm-util": "^0.10.1" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" } }, "sha512-3NQNNgA1YSlJb/kMH1ildASP9HW7/7kYnRI2szWJaofaS1hWmbGI4H+d3+22aGzXXN9IJ+n+GiFVcGipJP18ow=="],
 

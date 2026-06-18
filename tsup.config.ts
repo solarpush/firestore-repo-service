@@ -25,7 +25,6 @@ export default defineConfig({
     "zod",
     "hono",
     "@hono/node-server",
-    "@hono/zod-openapi",
     "@asteasolutions/zod-to-openapi",
     "@google-cloud/bigquery",
     "@google-cloud/bigquery-storage",
