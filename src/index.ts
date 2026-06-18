@@ -119,7 +119,7 @@ import type { RelationConfig, RepositoryConfig } from "./shared/types";
  *   }),
  * };
  *
- * const repos = createRepositoryMapping(db, mapping);
+ * const repos = createRepositoryMapping(() => db, mapping);
  * ```
  */
 export function createRepositoryConfig<TSchema extends z.ZodObject<any>>(
@@ -211,7 +211,7 @@ type ResolveRelation<TMapping, TRelationConfig> = TRelationConfig extends {
  *   }
  * });
  *
- * const repos = createRepositoryMapping(db, mappingWithRelations);
+ * const repos = createRepositoryMapping(() => db, mappingWithRelations);
  * ```
  */
 export function buildRepositoryRelations<
@@ -317,21 +317,43 @@ export function buildRepositoryRelations<
  * @template T - Record of repository configurations
  */
 export class RepositoryMapping<T extends Record<string, any>> {
-  private db: Firestore;
-  private repositoryCache = new Map<string, any>();
+  private dbFactory: () => Firestore;
+  private _db: Firestore | undefined;
   private mapping: T;
   private allRepositories: Record<string, any> = {};
+  private initialized = false;
 
   /**
    * Creates a new RepositoryMapping instance
-   * @param db - Firestore instance from firebase-admin
+   * @param dbFactory - Factory returning a Firestore instance from
+   *   firebase-admin. Invoked lazily on first repository access so
+   *   `getFirestore()` runs after `initializeApp()`.
    * @param mapping - Repository configuration mapping
    */
-  constructor(db: Firestore, mapping: T) {
-    this.db = db;
+  constructor(dbFactory: () => Firestore, mapping: T) {
+    this.dbFactory = dbFactory;
     this.mapping = mapping;
-    // Pre-initialize all repositories to allow cross-references
+  }
+
+  /**
+   * Resolve and memoize the Firestore instance. Deferred so the factory
+   * (typically `() => getFirestore()`) is only called at runtime, never
+   * during module import.
+   * @private
+   */
+  private get db(): Firestore {
+    return (this._db ??= this.dbFactory());
+  }
+
+  /**
+   * Build every repository once, on first access, so cross-references and
+   * circular relations are wired in a single two-pass init.
+   * @private
+   */
+  private ensureInitialized() {
+    if (this.initialized) return;
     this.initializeRepositories();
+    this.initialized = true;
   }
 
   /**
@@ -339,19 +361,16 @@ export class RepositoryMapping<T extends Record<string, any>> {
    * @private
    */
   private initializeRepositories() {
+    const db = this.db;
     // Pass 1: Create all repositories without populate methods
     for (const key of Object.keys(this.mapping)) {
-      this.allRepositories[key] = createRepository(
-        this.db,
-        this.mapping[key],
-        {},
-      );
+      this.allRepositories[key] = createRepository(db, this.mapping[key], {});
     }
 
     // Pass 2: Update all repositories with complete allRepositories map
     for (const key of Object.keys(this.mapping)) {
       this.allRepositories[key] = createRepository(
-        this.db,
+        db,
         this.mapping[key],
         this.allRepositories,
       );
@@ -359,12 +378,13 @@ export class RepositoryMapping<T extends Record<string, any>> {
   }
 
   /**
-   * Gets a repository (already initialized)
+   * Gets a repository (lazily initialized on first access)
    * @template K - Repository key
    * @param key - Repository identifier
    * @returns Configured repository instance
    */
   getRepository<K extends keyof T>(key: K): ConfiguredRepository<T[K]> {
+    this.ensureInitialized();
     return this.allRepositories[key as string];
   }
 }
@@ -376,17 +396,19 @@ export class RepositoryMapping<T extends Record<string, any>> {
 /**
  * Helper function to create a RepositoryMapping instance with full typing
  * @template T - Record of repository configurations
- * @param db - Firestore instance from firebase-admin
+ * @param dbFactory - Factory returning a Firestore instance from
+ *   firebase-admin. Invoked lazily on first repository access, so
+ *   `getFirestore()` runs after `initializeApp()` — never at import time.
  * @param mapping - Repository configurations
  * @returns RepositoryMapping instance with repository access via getters
  * @example
  * ```typescript
  * import * as admin from 'firebase-admin';
+ * import { getFirestore } from 'firebase-admin/firestore';
  *
  * admin.initializeApp();
- * const db = admin.firestore();
  *
- * const repos = createRepositoryMapping(db, {
+ * const repos = createRepositoryMapping(() => getFirestore(), {
  *   users: createRepositoryConfig<UserModel>()({
  *     path: "users",
  *     isGroup: false,
@@ -401,10 +423,10 @@ export class RepositoryMapping<T extends Record<string, any>> {
  * ```
  */
 export function createRepositoryMapping<T extends Record<string, any>>(
-  db: Firestore,
+  dbFactory: () => Firestore,
   mapping: T,
 ): { [K in keyof T]: ConfiguredRepository<T[K]> } {
-  const instance = new RepositoryMapping(db, mapping);
+  const instance = new RepositoryMapping(dbFactory, mapping);
 
   const mappingKeys = Object.keys(mapping);
 

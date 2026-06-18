@@ -160,7 +160,7 @@ const repositoryMappingWithRelations = buildRepositoryRelations(
 
 // Step 3: Create the repository mapping
 export const repos = createRepositoryMapping(
-  db,
+  () => db,
   repositoryMappingWithRelations,
 );
 

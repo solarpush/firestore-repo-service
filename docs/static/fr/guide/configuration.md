@@ -70,8 +70,8 @@ const mappingWithRelations = buildRepositoryRelations(repositoryMapping, {
 ## `createRepositoryMapping()`
 
 ```typescript
-const db = getFirestore();
-export const repos = createRepositoryMapping(db, mappingWithRelations);
+// db résolu paresseusement au premier accès — jamais à l'import.
+export const repos = createRepositoryMapping(() => getFirestore(), mappingWithRelations);
 ```
 
 ## Méthodes générées

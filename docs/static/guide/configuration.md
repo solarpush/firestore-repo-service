@@ -78,8 +78,8 @@ TypeScript validates that repository names, foreign keys, and relation keys all 
 ```typescript
 import { getFirestore } from "firebase-admin/firestore";
 
-const db = getFirestore();
-export const repos = createRepositoryMapping(db, mappingWithRelations);
+// db is resolved lazily on first access — never at import time.
+export const repos = createRepositoryMapping(() => getFirestore(), mappingWithRelations);
 ```
 
 ## Generated methods overview

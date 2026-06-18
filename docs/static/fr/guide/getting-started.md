@@ -59,7 +59,6 @@ import { initializeApp }           from "firebase-admin/app";
 import { getFirestore, Firestore } from "firebase-admin/firestore";
 
 initializeApp();
-const db = getFirestore();
 
 const repositoryMapping = {
   users: createRepositoryConfig(userSchema)({
@@ -92,7 +91,7 @@ const mappingWithRelations = buildRepositoryRelations(repositoryMapping, {
   posts: { userId: { repo: "users", key: "docId",  type: "one"  as const } },
 });
 
-export const repos = createRepositoryMapping(db, mappingWithRelations);
+export const repos = createRepositoryMapping(() => getFirestore(), mappingWithRelations);
 ```
 
 ### 3. Utiliser les repositories

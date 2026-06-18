@@ -74,7 +74,7 @@ const mappingWithRelations = buildRepositoryRelations(repositoryMapping, {
   },
 });
 
-export const repos = createRepositoryMapping(db, mappingWithRelations);
+export const repos = createRepositoryMapping(() => db, mappingWithRelations);
 ```
 
 ### Use the repositories
@@ -600,7 +600,7 @@ const mappingWithRelations = buildRepositoryRelations(repositoryMapping, {
   },
 });
 
-export const repos = createRepositoryMapping(db, mappingWithRelations);
+export const repos = createRepositoryMapping(() => db, mappingWithRelations);
 ```
 
 ### Use the repositories

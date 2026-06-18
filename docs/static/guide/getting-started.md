@@ -59,7 +59,6 @@ import { initializeApp }           from "firebase-admin/app";
 import { getFirestore, Firestore } from "firebase-admin/firestore";
 
 initializeApp();
-const db = getFirestore();
 
 // Step 1 — base config
 const repositoryMapping = {
@@ -94,8 +93,8 @@ const mappingWithRelations = buildRepositoryRelations(repositoryMapping, {
   posts: { userId: { repo: "users",  key: "docId",  type: "one"  as const } },
 });
 
-// Step 3 — create the service
-export const repos = createRepositoryMapping(db, mappingWithRelations);
+// Step 3 — create the service (db resolved lazily, after initializeApp)
+export const repos = createRepositoryMapping(() => getFirestore(), mappingWithRelations);
 ```
 
 ### 3. Use the repositories
