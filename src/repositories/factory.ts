@@ -11,6 +11,7 @@ import { createCrudMethods } from "../methods/crud";
 import { createGetMethods } from "../methods/get";
 import { createQueryMethods } from "../methods/query";
 import { createPopulateMethods } from "../methods/relations";
+import { createSystemMethods } from "../methods/system";
 import { createTransactionMethods } from "../methods/transaction";
 import type { RepositoryConfig } from "../shared/types";
 import type { ConfiguredRepository } from "./types";
@@ -95,6 +96,14 @@ export function createRepository<
     config.createdKey as string | undefined,
     config.updatedKey as string | undefined,
   );
+  const systemMethods = createSystemMethods(
+    db,
+    collectionRef,
+    config.documentKey as string,
+    config.pathKey as string | undefined,
+    config.createdKey as string | undefined,
+    config.updatedKey as string | undefined,
+  );
   const populateMethods = createPopulateMethods(config, allRepositories);
 
   // History namespace (opt-in via config.history.enabled)
@@ -126,6 +135,7 @@ export function createRepository<
     batch: batchMethods,
     transaction: transactionMethods,
     bulk: bulkMethods,
+    system: systemMethods,
     ...populateMethods,
     ...(history ? { history } : {}),
     // Expose the configured history subcollection name (when history is enabled)

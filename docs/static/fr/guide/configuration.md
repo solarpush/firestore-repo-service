@@ -92,6 +92,69 @@ export const repos = createRepositoryMapping(() => getFirestore(), mappingWithRe
 | `query`       | `onSnapshot(options, cb, errCb?)`     | Listener temps réel                        |
 | `batch`       | `create()`                            | Batch atomique (max 500 opérations)        |
 | `bulk`        | `set / update / delete`               | Opérations bulk (auto-découpées)           |
+| `system`      | `backfillKeys(options?)`              | Backfill des champs système auto-gérés     |
 | `populate`    | `(doc, key \| options)`               | Peupler les documents liés                 |
 | `aggregate`   | `count / sum / average`               | Agrégations côté serveur                   |
 | `transaction` | `run(callback)`                       | Transaction Firestore                      |
+
+## Champs système & `system.backfillKeys()`
+
+Les clés de config optionnelles `documentKey`, `pathKey`, `createdKey` et
+`updatedKey` sont **auto-gérées** : le package les écrit à chaque opération
+`create` / `set` / `update` / `batch` / `bulk`. Les documents écrits **hors**
+package (données legacy, imports manuels) peuvent en manquer — avec des
+conséquences :
+
+- **`pathKey` manquant** — le serveur CRUD / admin reconstruit le chemin d'un
+  document depuis ce champ pour le `update` / `delete`. Sans lui, **les
+  documents en sous-collection / collectionGroup ne peuvent plus être mis à jour
+  ou supprimés via le serveur** (les collections racines fonctionnent toujours).
+- **`createdKey` / `updatedKey` manquant** — tout `query.getAll({ orderBy: [[...]] })`
+  sur ce champ **exclut silencieusement** les documents qui ne l'ont pas
+  (Firestore omet les documents sans le champ d'`orderBy`).
+- **`documentKey` manquant** — les lectures directes (`get.by{DocumentKey}`)
+  fonctionnent toujours (elles utilisent la référence du document), mais la clé
+  primaire de la sync BigQuery peut être nulle.
+
+`system.backfillKeys()` répare les documents legacy. Il parcourt toute la
+collection (paginé) et ne remplit que les documents qui en ont besoin :
+
+- `pathKey` ← le `ref.path` réel du document (le chemin **complet** imbriqué,
+  pour que les docs sous-collection / collectionGroup redeviennent modifiables
+  via le serveur),
+- `documentKey` ← `doc.id` si absent,
+- `createdKey` ← `now()` **uniquement si absent** (horodatages existants
+  préservés),
+- `updatedKey` ← `now()` **uniquement si absent**.
+
+La méthode est idempotente et minimise les écritures (les documents déjà
+complets sont ignorés), donc relançable sans risque.
+
+```typescript
+// Migrer les documents legacy en place.
+const { scanned, written, skipped, failures } =
+  await repos.residences.system.backfillKeys();
+
+// Prévisualiser sans écrire.
+const preview = await repos.residences.system.backfillKeys({ dryRun: true });
+
+// Observer les échecs partiels au lieu de lever une erreur.
+await repos.residences.system.backfillKeys({
+  pageSize: 500,
+  onError: ({ path, error }) => console.error(path, error.message),
+  onSuccess: (path) => metrics.inc("backfilled"),
+});
+```
+
+| Option             | Défaut  | Description                                              |
+|--------------------|---------|----------------------------------------------------------|
+| `overwriteCreated` | `false` | Réécrit `createdKey` même s'il est déjà présent          |
+| `touchUpdated`     | `true`  | Remplit `updatedKey` avec now s'il est absent            |
+| `overwritePath`    | `false` | Réécrit toujours `pathKey` depuis le ref path réel       |
+| `pageSize`         | `300`   | Documents récupérés par page                             |
+| `dryRun`           | `false` | Compte ce qui changerait sans écrire                     |
+| `maxAttempts`      | `5`     | Tentatives par document pour les erreurs retryables      |
+| `onError`          | —       | Appelé une fois par document définitivement en échec     |
+| `onSuccess`        | —       | Appelé une fois par document patché avec succès          |
+
+Retourne `{ scanned, written, skipped, failures }`.

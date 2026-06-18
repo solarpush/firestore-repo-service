@@ -38,6 +38,13 @@ export type {
 // Populate options
 export type { PopulateOptions } from "./methods/relations";
 
+// System maintenance (backfill of auto-managed keys)
+export type {
+  SystemBackfillFailure,
+  SystemBackfillOptions,
+  SystemBackfillResult,
+} from "./methods/system";
+
 // Query builder
 export { buildAndExecuteQuery } from "./query-builder";
 

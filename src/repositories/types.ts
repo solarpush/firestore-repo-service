@@ -6,6 +6,10 @@ import type {
   Transaction,
   WriteBatch,
 } from "firebase-admin/firestore";
+import type {
+  SystemBackfillOptions,
+  SystemBackfillResult,
+} from "../methods/system";
 import type { createPaginationIterator, PaginationResult } from "../pagination";
 import type {
   GetOptions,
@@ -362,6 +366,17 @@ export type ConfiguredRepository<
       items: Array<{ docRef: DocumentReference; data: UpdatableData<T> }>,
     ) => Promise<void>;
     delete: (docRefs: DocumentReference[]) => Promise<void>;
+  };
+
+  /**
+   * Collection-wide maintenance helpers. `backfillKeys` fills the auto-managed
+   * system fields (documentKey, pathKey, createdKey, updatedKey) on legacy
+   * documents written outside this package — idempotent and write-minimal.
+   */
+  system: {
+    backfillKeys: (
+      options?: SystemBackfillOptions,
+    ) => Promise<SystemBackfillResult>;
   };
 
   populate: <
