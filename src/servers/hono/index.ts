@@ -82,10 +82,17 @@ export {
 
 export type {
   AnyRouteDef,
+  ApiKeySecurityScheme,
   HonoServerOptions,
   HttpMethod,
+  HttpSecurityScheme,
+  MutualTlsSecurityScheme,
+  OAuth2SecurityScheme,
+  OAuthFlowObject,
+  OAuthFlowsObject,
   OpenAPIConfig,
   OpenAPIInfo,
+  OpenIdConnectSecurityScheme,
   PayloadSource,
   RouteDef,
   RouteHandler,
@@ -94,4 +101,7 @@ export type {
   RouteModuleDefault,
   RouteOutput,
   RoutesUnion,
+  SecurityRequirement,
+  SecurityScheme,
+  SecuritySchemeBase,
 } from "./types";

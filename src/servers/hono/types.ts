@@ -94,7 +94,7 @@ export interface RouteDef<
   /** Mark the operation as deprecated in the generated spec. */
   deprecated?: boolean;
   /** Security requirements (operationId-level override). */
-  security?: Array<Record<string, string[]>>;
+  security?: SecurityRequirement[];
 
   /** The request handler. */
   handler: RouteHandler<
@@ -246,6 +246,85 @@ export interface OpenAPIInfo {
   description?: string;
 }
 
+// ── OpenAPI 3.1 Security Scheme Object ──────────────────────────────────────
+
+/** Fields shared by every security scheme. */
+export interface SecuritySchemeBase {
+  /** Human-readable description (CommonMark). */
+  description?: string;
+}
+
+/** API key carried in a header, query param or cookie. */
+export interface ApiKeySecurityScheme extends SecuritySchemeBase {
+  type: "apiKey";
+  /** Name of the header, query parameter or cookie. */
+  name: string;
+  /** Location of the API key. */
+  in: "query" | "header" | "cookie";
+}
+
+/**
+ * HTTP authentication (RFC 7235), e.g. `bearer` (Firebase ID tokens) or
+ * `basic`.
+ */
+export interface HttpSecurityScheme extends SecuritySchemeBase {
+  type: "http";
+  /** Auth scheme name — `"bearer"`, `"basic"`, `"digest"`, … */
+  // eslint-disable-next-line @typescript-eslint/ban-types
+  scheme: "bearer" | "basic" | "digest" | (string & {});
+  /** Hint for the bearer token format, e.g. `"JWT"` / `"Firebase JWT"`. */
+  bearerFormat?: string;
+}
+
+/** Mutual TLS authentication. */
+export interface MutualTlsSecurityScheme extends SecuritySchemeBase {
+  type: "mutualTLS";
+}
+
+/** A single OAuth2 flow. */
+export interface OAuthFlowObject {
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  refreshUrl?: string;
+  /** Available scopes → description. */
+  scopes: Record<string, string>;
+}
+
+/** The OAuth2 flows supported by an {@link OAuth2SecurityScheme}. */
+export interface OAuthFlowsObject {
+  implicit?: OAuthFlowObject;
+  password?: OAuthFlowObject;
+  clientCredentials?: OAuthFlowObject;
+  authorizationCode?: OAuthFlowObject;
+}
+
+/** OAuth2 authentication. */
+export interface OAuth2SecurityScheme extends SecuritySchemeBase {
+  type: "oauth2";
+  flows: OAuthFlowsObject;
+}
+
+/** OpenID Connect Discovery. */
+export interface OpenIdConnectSecurityScheme extends SecuritySchemeBase {
+  type: "openIdConnect";
+  openIdConnectUrl: string;
+}
+
+/** OpenAPI 3.1 Security Scheme Object (discriminated on `type`). */
+export type SecurityScheme =
+  | ApiKeySecurityScheme
+  | HttpSecurityScheme
+  | MutualTlsSecurityScheme
+  | OAuth2SecurityScheme
+  | OpenIdConnectSecurityScheme;
+
+/**
+ * A single Security Requirement Object: maps a scheme name (a key of
+ * {@link OpenAPIConfig.securitySchemes}) to the list of required scopes
+ * (empty `[]` for `http` / `apiKey`).
+ */
+export type SecurityRequirement = Record<string, string[]>;
+
 /** OpenAPI configuration on the server. */
 export interface OpenAPIConfig {
   /** Path served by the JSON spec (e.g. `/openapi.json`). Default: `/openapi.json`. */
@@ -256,10 +335,25 @@ export interface OpenAPIConfig {
   info: OpenAPIInfo;
   /** Optional servers list for the spec. */
   servers?: { url: string; description?: string }[];
-  /** Optional security schemes (e.g. bearer auth). */
-  securitySchemes?: Record<string, unknown>;
-  /** Default security requirement applied to every operation. */
-  security?: Array<Record<string, string[]>>;
+  /**
+   * Reusable security schemes, keyed by name. The keys are referenced from
+   * {@link OpenAPIConfig.security} / per-route `security`.
+   *
+   * @example
+   * ```ts
+   * securitySchemes: {
+   *   bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "Firebase JWT" },
+   * }
+   * ```
+   */
+  securitySchemes?: Record<string, SecurityScheme>;
+  /**
+   * Default security requirement applied to every operation. Each entry maps a
+   * scheme name (a key of {@link OpenAPIConfig.securitySchemes}) to its scopes.
+   *
+   * @example `security: [{ bearerAuth: [] }]`
+   */
+  security?: SecurityRequirement[];
   /**
    * Hono middleware(s) guarding **only** the docs UI and JSON spec endpoints
    * (not the API routes). Use a raw middleware for a custom flow, or the

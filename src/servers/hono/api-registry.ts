@@ -78,6 +78,26 @@ export type ApiConfig<TEnv extends Env = Env> = Omit<
 export type ApiConfigMap = Record<string, ApiConfig>;
 
 /**
+ * Per-key excess-property guard.
+ *
+ * `createApiRegistry` infers its config map generically (`<const TMap …>`),
+ * which normally **defeats** TypeScript's excess-property checking — a typo
+ * like `openApi` or `middleware` (instead of `openapi` / `middlewares`) would
+ * pass silently and the option would be ignored at runtime.
+ *
+ * This intersects the concrete {@link ApiConfig} shape (so every known key
+ * keeps its real type **and JSDoc**, including nested objects such as
+ * `openapi`) with a `never` mapping for any key absent from `ApiConfig` — which
+ * makes typos a compile error, matching the strictness already enforced on the
+ * CRUD server's `openapi`.
+ *
+ * @internal
+ */
+export type StrictApiConfig<T, TEnv extends Env = Env> = ApiConfig<TEnv> & {
+  [K in keyof T as K extends keyof ApiConfig<TEnv> ? never : K]: never;
+};
+
+/**
  * Options accepted by {@link createApiRegistry} alongside the per-API
  * configs.
  */
@@ -167,20 +187,24 @@ export interface ApiRegistry<
  * Factory — declare every API tag once and get back a typed `defineRoute`
  * + `toFunctions`. See the file-level example.
  *
- * @param configs  API-tag → per-API config.
+ * Each per-API config is strictly checked against {@link ApiConfig}: unknown
+ * keys (typos like `openApi` / `middleware`) are rejected at compile time,
+ * including nested objects such as `openapi` — mirroring the CRUD server.
+ *
+ * @param configs  API-tag → per-API config (see {@link ApiConfig}).
  * @param options  Cross-API options (shared services container, etc).
  */
 export function createApiRegistry<
   const TMap extends ApiConfigMap,
   TServices extends AnyServicesContainer = AnyServicesContainer,
 >(
-  configs: TMap,
+  configs: { [K in keyof TMap]: StrictApiConfig<TMap[K]> },
   options?: ApiRegistryOptions<TServices>,
 ): ApiRegistry<TMap, TServices> {
   const sharedServices = options?.services;
 
   return {
-    configs,
+    configs: configs as unknown as TMap,
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     defineRoute(def: any) {
