@@ -181,15 +181,33 @@ export class HonoServer<TEnv extends Env = Env> {
     const fullDocsPath =
       docsPath === false ? null : joinPath(this.options.basePath ?? "", docsPath);
 
-    this.app.get(fullSpecPath, (c) => c.json(this.buildOpenApiSpec()));
+    // Auth guards applied ONLY to the spec + docs endpoints (not API routes).
+    const guards = cfg.docsAuth
+      ? Array.isArray(cfg.docsAuth)
+        ? cfg.docsAuth
+        : [cfg.docsAuth]
+      : [];
+
+    this.app.on(
+      "GET",
+      [fullSpecPath],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...([...guards, (c: any) => c.json(this.buildOpenApiSpec())] as any[]),
+    );
 
     if (fullDocsPath) {
       // Resolve the spec URL relative to the docs page so it works whether the
       // server is mounted at `/`, behind a Firebase Functions prefix
       // (`/<project>/<region>/<funcName>/...`), or behind any reverse proxy.
       const relativeSpecUrl = relativeUrlFromTo(fullDocsPath, fullSpecPath);
-      this.app.get(fullDocsPath, (c) =>
-        c.html(renderDocsHtml(relativeSpecUrl, cfg.info.title)),
+      this.app.on(
+        "GET",
+        [fullDocsPath],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ...([
+          ...guards,
+          (c: any) => c.html(renderDocsHtml(relativeSpecUrl, cfg.info.title)),
+        ] as any[]),
       );
     }
   }

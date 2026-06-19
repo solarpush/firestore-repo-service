@@ -124,8 +124,10 @@ Flags (new <name>):
   --usecase-folder <name>
                         Parent folder under <domain>.
                         Default: .frsrc.json "useCaseFolder" or useCases
-  --with-usecase        Also scaffold a sibling useCase.ts file (default: true)
-  --with-test           Also scaffold a sibling useCase.test.ts (Vitest, default: true)
+  --with-usecase        Also scaffold a sibling <domain>.<name>.useCase.ts file
+                        (default: true)
+  --with-test           Also scaffold a sibling <domain>.<name>.useCase.test.ts
+                        (Vitest, default: true)
   --apis-import <path>  Import path for the registry (default: auto-detect
                         ../../../../apis.js — adjust if your layout differs)
   --force               Overwrite if files already exist
@@ -341,12 +343,17 @@ async function runNew(
     const rootAbs = resolve(process.cwd(), root);
     const dirAbs = resolve(rootAbs, domain, useCaseFolder, routeName);
     const routesFile = resolve(dirAbs, "routes.ts");
-    const useCaseFile = resolve(dirAbs, "useCase.ts");
-    const testFile = resolve(dirAbs, "useCase.test.ts");
+    // useCase / test files are prefixed with `<domain>.<routeName>` so they are
+    // unique across the project (Ctrl+P friendly), unlike a bare `useCase.ts`.
+    const useCaseBase = `${domain}.${routeName}.useCase`;
+    const useCaseFile = resolve(dirAbs, `${useCaseBase}.ts`);
+    const testFile = resolve(dirAbs, `${useCaseBase}.test.ts`);
 
     mkdirSync(dirAbs, { recursive: true });
 
-    const className = `${routeName.charAt(0).toUpperCase()}${routeName.slice(1)}UseCase`;
+    const capitalize = (s: string) =>
+      s.charAt(0).toUpperCase() + s.slice(1);
+    const className = `${capitalize(domain)}${capitalize(routeName)}UseCase`;
 
     const pkgHono = "@lpdjs/firestore-repo-service/servers/hono";
     const servicesImport = inferServicesImportPath(rootAbs, dirAbs);
@@ -395,7 +402,7 @@ export class ${className} extends UseCase<typeof input, typeof output, Services>
       method === "get" ? `\n    source: "query",` : "";
 
     const useCaseImport = withUseCase
-      ? `import { ${className} } from "./useCase.js";\n`
+      ? `import { ${className} } from "./${useCaseBase}.js";\n`
       : "";
 
     const apisImport =
@@ -461,7 +468,7 @@ export default defineRoutes([
     if (withUseCase && withTest) {
       const testSrc = `import { describe, it, expect } from "vitest";
 import type { Services } from "${servicesImport}";
-import { ${className} } from "./useCase.js";
+import { ${className} } from "./${useCaseBase}.js";
 
 describe("${className}", () => {
   it("returns a response shaped like the output schema", async () => {

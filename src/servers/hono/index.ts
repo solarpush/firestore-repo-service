@@ -32,6 +32,14 @@ export {
   type ApiRegistryOptions,
 } from "./api-registry";
 export { buildOpenApiDocument, renderDocsHtml } from "./openapi";
+export {
+  firebaseBearerAuth,
+  basicAuth,
+  type FirebaseBearerAuthOptions,
+  type FirebaseBearerAuthLike,
+  type DecodedBearerToken,
+  type BasicAuthOptions,
+} from "./docs-auth";
 export { ValidationError, defineRoutes } from "./types";
 export {
   UseCase,

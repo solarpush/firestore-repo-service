@@ -260,6 +260,18 @@ export interface OpenAPIConfig {
   securitySchemes?: Record<string, unknown>;
   /** Default security requirement applied to every operation. */
   security?: Array<Record<string, string[]>>;
+  /**
+   * Hono middleware(s) guarding **only** the docs UI and JSON spec endpoints
+   * (not the API routes). Use a raw middleware for a custom flow, or the
+   * built-in {@link firebaseBearerAuth} / {@link basicAuth} helpers.
+   *
+   * @example
+   * ```ts
+   * import { firebaseBearerAuth } from "@lpdjs/firestore-repo-service/servers/hono";
+   * openapi: { info, docsAuth: firebaseBearerAuth({ getAuth }) }
+   * ```
+   */
+  docsAuth?: MiddlewareHandler | MiddlewareHandler[];
 }
 
 /** Options consumed by the {@link HonoServer} constructor. */

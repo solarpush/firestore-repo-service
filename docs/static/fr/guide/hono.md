@@ -127,17 +127,22 @@ Génère :
 
 ```
 src/domains/posts/useCases/createPost/
-├── routes.ts        ← mappe le useCase vers un endpoint HTTP
-├── useCase.ts       ← logique métier + schémas Zod input/output
-└── useCase.test.ts  ← squelette Vitest
+├── routes.ts                      ← mappe le useCase vers un endpoint HTTP
+├── posts.createPost.useCase.ts    ← logique métier + schémas Zod input/output
+└── posts.createPost.useCase.test.ts  ← squelette Vitest
 ```
+
+Les fichiers useCase / test sont préfixés par `<domain>.<name>` afin que chaque
+fichier soit unique dans le projet (pratique pour Ctrl+P / la recherche floue)
+au lieu d'une multitude de `useCase.ts` identiques. `routes.ts` garde son nom —
+c'est le point d'ancrage scanné par `frs gen`.
 
 Le useCase possède ses schémas Zod `input` / `output` (en membres `static`,
 source de vérité unique) et la logique métier. Le container `services` partagé
 est injecté par la classe de base `UseCase` via le constructeur :
 
 ```ts
-// src/domains/posts/useCases/createPost/useCase.ts
+// src/domains/posts/useCases/createPost/posts.createPost.useCase.ts
 import { z } from "zod";
 import { UseCase } from "@lpdjs/firestore-repo-service/servers/hono";
 import type { Services } from "../../../../services.js";
@@ -145,7 +150,7 @@ import type { Services } from "../../../../services.js";
 const input = z.object({ title: z.string() });
 const output = z.object({ id: z.string() });
 
-export class CreatePostUseCase extends UseCase<typeof input, typeof output, Services> {
+export class PostsCreatePostUseCase extends UseCase<typeof input, typeof output, Services> {
   static readonly input = input;
   static readonly output = output;
 
@@ -163,10 +168,10 @@ sans duplication de schéma ni boilerplate de handler :
 // src/domains/posts/useCases/createPost/routes.ts
 import { defineRoutes } from "@lpdjs/firestore-repo-service/servers/hono";
 import { useCaseRoute } from "../../../../apis.js";
-import { CreatePostUseCase } from "./useCase.js";
+import { PostsCreatePostUseCase } from "./posts.createPost.useCase.js";
 
 export default defineRoutes([
-  useCaseRoute(CreatePostUseCase, {
+  useCaseRoute(PostsCreatePostUseCase, {
     api: "v1",            // ← typé : "v1" | "webhooks"
     method: "post",
     summary: "Créer un post",
@@ -452,6 +457,52 @@ le rewrite de l'émulateur Firebase et les reverse proxies.
 Comme `@asteasolutions/zod-to-openapi` exige que Zod soit patché en amont, le
 serveur appelle `extendZodWithOpenApi(z)` automatiquement (idempotent) — tes
 schémas Zod natifs sont reconnus sans cérémonie.
+
+### Protéger les endpoints de docs (`docsAuth`)
+
+`openapi.docsAuth` protège **uniquement** l'UI `/docs` et le spec `/openapi.json`
+— il ne touche jamais à tes routes API (celles-ci se protègent par-API via
+`middlewares` ou par des interceptors par route). Il accepte un `MiddlewareHandler`
+Hono ou un tableau, donc tu peux brancher un flow totalement custom ou les
+helpers intégrés.
+
+Deux helpers sont fournis par le package :
+
+```ts
+import { getAuth } from "firebase-admin/auth";
+import {
+  firebaseBearerAuth,
+  basicAuth,
+} from "@lpdjs/firestore-repo-service/servers/hono";
+
+// apis.ts — ID token Firebase (Bearer), avec une politique allow() optionnelle.
+v1: {
+  openapi: {
+    info: { title: "API", version: "1.0.0" },
+    docsAuth: firebaseBearerAuth({
+      getAuth: () => getAuth(),          // lazy — exécuté après initializeApp()
+      allow: (token) => token.admin === true,  // optionnel, défaut : tout user vérifié
+    }),
+  },
+},
+
+// …ou HTTP Basic Auth :
+docsAuth: basicAuth({ username: "admin", password: process.env.DOCS_PASSWORD! }),
+
+// …ou un flow totalement custom (n'importe quel middleware Hono) :
+docsAuth: async (c, next) => {
+  if (c.req.header("x-docs-key") !== process.env.DOCS_KEY) {
+    return c.text("Unauthorized", 401);
+  }
+  return next();
+},
+```
+
+`firebaseBearerAuth` rejette un token absent/invalide avec `401` et un `allow()`
+en échec avec `403` ; le token décodé est stocké sur le contexte
+(`c.get("docsUser")` par défaut) pour un usage en aval. `getAuth` est appelé
+paresseusement à chaque requête, donc déclarable avant l'exécution de
+`initializeApp()`.
 
 ## Référence CLI
 

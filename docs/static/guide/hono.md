@@ -127,17 +127,22 @@ Generates:
 
 ```
 src/domains/posts/useCases/createPost/
-├── routes.ts        ← maps the useCase to an HTTP endpoint
-├── useCase.ts       ← business logic + Zod input/output schemas
-└── useCase.test.ts  ← Vitest skeleton
+├── routes.ts                      ← maps the useCase to an HTTP endpoint
+├── posts.createPost.useCase.ts    ← business logic + Zod input/output schemas
+└── posts.createPost.useCase.test.ts  ← Vitest skeleton
 ```
+
+The useCase / test files are prefixed with `<domain>.<name>` so every file is
+unique across the project (Ctrl+P / fuzzy-finder friendly) instead of a sea of
+identical `useCase.ts`. `routes.ts` keeps its name — it is the scan anchor for
+`frs gen`.
 
 The useCase owns its Zod `input` / `output` schemas (as `static` members, the
 single source of truth) and the business logic. The shared `services` container
 is injected by the `UseCase` base class via the constructor:
 
 ```ts
-// src/domains/posts/useCases/createPost/useCase.ts
+// src/domains/posts/useCases/createPost/posts.createPost.useCase.ts
 import { z } from "zod";
 import { UseCase } from "@lpdjs/firestore-repo-service/servers/hono";
 import type { Services } from "../../../../services.js";
@@ -145,7 +150,7 @@ import type { Services } from "../../../../services.js";
 const input = z.object({ title: z.string() });
 const output = z.object({ id: z.string() });
 
-export class CreatePostUseCase extends UseCase<typeof input, typeof output, Services> {
+export class PostsCreatePostUseCase extends UseCase<typeof input, typeof output, Services> {
   static readonly input = input;
   static readonly output = output;
 
@@ -163,10 +168,10 @@ schema duplication, no handler boilerplate:
 // src/domains/posts/useCases/createPost/routes.ts
 import { defineRoutes } from "@lpdjs/firestore-repo-service/servers/hono";
 import { useCaseRoute } from "../../../../apis.js";
-import { CreatePostUseCase } from "./useCase.js";
+import { PostsCreatePostUseCase } from "./posts.createPost.useCase.js";
 
 export default defineRoutes([
-  useCaseRoute(CreatePostUseCase, {
+  useCaseRoute(PostsCreatePostUseCase, {
     api: "v1",            // ← typed: "v1" | "webhooks"
     method: "post",
     summary: "Create a post",
@@ -449,6 +454,50 @@ Firebase emulator's prefix rewriting and reverse proxies.
 Because `@asteasolutions/zod-to-openapi` requires Zod to be patched first, the
 server calls `extendZodWithOpenApi(z)` automatically (idempotent) — your raw
 Zod schemas are picked up without ceremony.
+
+### Protect the docs endpoints (`docsAuth`)
+
+`openapi.docsAuth` guards **only** the `/docs` UI and `/openapi.json` spec — it
+never touches your API routes (those are protected per-API via `middlewares` or
+per-route interceptors). It accepts one Hono `MiddlewareHandler` or an array of
+them, so you can plug a fully custom flow or the built-in helpers.
+
+Two helpers ship with the package:
+
+```ts
+import { getAuth } from "firebase-admin/auth";
+import {
+  firebaseBearerAuth,
+  basicAuth,
+} from "@lpdjs/firestore-repo-service/servers/hono";
+
+// apis.ts — Firebase ID token (Bearer), with an optional allow() policy.
+v1: {
+  openapi: {
+    info: { title: "API", version: "1.0.0" },
+    docsAuth: firebaseBearerAuth({
+      getAuth: () => getAuth(),          // lazy — runs after initializeApp()
+      allow: (token) => token.admin === true,  // optional, default: any verified user
+    }),
+  },
+},
+
+// …or HTTP Basic Auth:
+docsAuth: basicAuth({ username: "admin", password: process.env.DOCS_PASSWORD! }),
+
+// …or a fully custom flow (any Hono middleware):
+docsAuth: async (c, next) => {
+  if (c.req.header("x-docs-key") !== process.env.DOCS_KEY) {
+    return c.text("Unauthorized", 401);
+  }
+  return next();
+},
+```
+
+`firebaseBearerAuth` rejects a missing/invalid token with `401` and a failed
+`allow()` with `403`; the decoded token is stored on the context
+(`c.get("docsUser")` by default) for downstream use. `getAuth` is called lazily
+per request, so it is safe to declare before `initializeApp()` has run.
 
 ## CLI reference
 
