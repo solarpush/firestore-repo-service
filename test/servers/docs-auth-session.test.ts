@@ -102,6 +102,32 @@ describe("firebaseDocsAuth — login page (unguarded)", () => {
     expect(html).toContain("Docs sign-in");
     expect(html).toContain("firebasejs"); // bundled JS SDK
   });
+
+  test("wires the Auth emulator when authEmulatorHost is set", async () => {
+    const server = makeServer(
+      firebaseDocsAuth({
+        getAuth: () => mockAuth(),
+        ...baseOpts,
+        authEmulatorHost: "127.0.0.1:9099",
+      }),
+    );
+    const html = await (await get(server, "/__login")).text();
+    expect(html).toContain(
+      'connectAuthEmulator(auth, "http://127.0.0.1:9099"',
+    );
+  });
+
+  test("omits the emulator wiring by default", async () => {
+    const server = makeServer(
+      firebaseDocsAuth({
+        getAuth: () => mockAuth(),
+        ...baseOpts,
+        authEmulatorHost: "",
+      }),
+    );
+    const html = await (await get(server, "/__login")).text();
+    expect(html).not.toContain("connectAuthEmulator(auth");
+  });
 });
 
 describe("firebaseDocsAuth — guard", () => {

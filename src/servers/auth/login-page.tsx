@@ -17,6 +17,20 @@ interface LoginPageOptions {
   sessionPath: string;
   next: string;
   error: string | null;
+  /**
+   * Firebase Auth emulator host (e.g. `127.0.0.1:9099`). When set, the client
+   * SDK is pointed at the emulator via `connectAuthEmulator` so local sign-ins
+   * match the server side (which the Admin SDK already routes to the emulator
+   * through `FIREBASE_AUTH_EMULATOR_HOST`). A bare `host:port` is upgraded to
+   * an `http://` URL.
+   */
+  authEmulatorHost?: string;
+}
+
+/** Normalise an emulator host (`host:port`) into a full `http://` URL. */
+function emulatorUrl(host: string | undefined): string {
+  if (!host) return "";
+  return /^https?:\/\//.test(host) ? host : `http://${host}`;
 }
 
 function htmlEscape(value: string): string {
@@ -177,6 +191,7 @@ export function renderLoginPage(opts: LoginPageOptions): string {
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
     import {
       getAuth,
+      connectAuthEmulator,
       signInWithEmailAndPassword,
       signInWithPopup,
       GoogleAuthProvider,
@@ -189,6 +204,13 @@ export function renderLoginPage(opts: LoginPageOptions): string {
       authDomain: "${jsonEscape(opts.authDomain)}",
     });
     const auth = getAuth(app);
+    ${
+      opts.authEmulatorHost
+        ? `connectAuthEmulator(auth, ${JSON.stringify(
+            emulatorUrl(opts.authEmulatorHost),
+          )}, { disableWarnings: true });`
+        : ""
+    }
     // Don't persist client-side — the server-side session cookie is the source of truth.
     await setPersistence(auth, browserSessionPersistence).catch(() => {});
 

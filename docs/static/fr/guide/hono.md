@@ -714,6 +714,11 @@ v1: {
   (défaut `__docs_session`), `sessionTtlDays` (défaut `5`), `secureCookie`
   (défaut `true`), `sameSite` (défaut `"Lax"`), `contextKey`
   (défaut `"docsUser"`), `onUnauthenticated` (`"redirect"` | `"401"`).
+- **Émulateur Auth** : le SDK client de la page de login cible l'émulateur Auth
+  quand `authEmulatorHost` est défini (par défaut `FIREBASE_AUTH_EMULATOR_HOST`),
+  en cohérence avec l'Admin SDK — les connexions locales `firebase
+  emulators:start` marchent de bout en bout. Passe `authEmulatorHost: ""` pour
+  forcer la prod.
 
 ## Référence CLI
 

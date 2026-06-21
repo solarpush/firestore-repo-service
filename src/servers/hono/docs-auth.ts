@@ -236,6 +236,14 @@ export interface FirebaseDocsAuthOptions {
    * `GET`s to the login page; `"401"` always returns a JSON 401.
    */
   onUnauthenticated?: "redirect" | "401";
+  /**
+   * Firebase Auth emulator host (e.g. `127.0.0.1:9099`). When set, the login
+   * page's client SDK targets the emulator via `connectAuthEmulator`, matching
+   * the Admin SDK (which already routes to the emulator when
+   * `FIREBASE_AUTH_EMULATOR_HOST` is set). Defaults to that env var; pass `""`
+   * to force it off.
+   */
+  authEmulatorHost?: string;
 }
 
 const LOGIN_NAME = "__login";
@@ -322,6 +330,7 @@ export function firebaseDocsAuth(
     sameSite = "Lax",
     contextKey = "docsUser",
     onUnauthenticated = "redirect",
+    authEmulatorHost = process.env["FIREBASE_AUTH_EMULATOR_HOST"],
   } = options;
 
   if (!apiKey || !authDomain) {
@@ -355,6 +364,7 @@ export function firebaseDocsAuth(
       sessionPath: SESSION_NAME,
       next,
       error,
+      authEmulatorHost,
     });
     return c.html(html, 200, { "Cache-Control": "no-store" });
   };

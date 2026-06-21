@@ -228,6 +228,10 @@ Modes :
 
 Le callback `allow()` mappe un utilisateur Firebase vérifié vers votre contexte métier (retourner `null` rejette). Sa valeur de retour devient `req.user.context` dans les handlers et les règles.
 
+::: tip Émulateur Auth
+L'Admin SDK cible déjà l'émulateur Auth quand `FIREBASE_AUTH_EMULATOR_HOST` est défini. La page de login fait désormais de même : passe `authEmulatorHost` (par défaut cette même variable d'env) et son SDK client est câblé via `connectAuthEmulator`, pour que les connexions locales `firebase emulators:start` marchent de bout en bout. Passe `authEmulatorHost: ""` pour forcer la prod même sous l'émulateur. Vaut pour `servers.admin()`, `servers.crud()` et l'admin de sync.
+:::
+
 ## Règles d'autorisation par repo (CRUD)
 
 Quand `auth` est défini sur `servers.crud()`, chaque repo suit une politique de **default-deny** : toute opération sans `rules.<op>` explicite renvoie `403`. Utilisez `allowAll` ou `() => true` pour ouvrir explicitement une opération.

@@ -262,6 +262,10 @@ Modes:
 
 The `allow()` callback maps a verified Firebase user to your business context (returning `null` rejects). Whatever it returns becomes `req.user.context` inside handlers and rules.
 
+::: tip Auth emulator
+The Admin SDK already targets the Auth emulator when `FIREBASE_AUTH_EMULATOR_HOST` is set. The bundled login page now follows suit: pass `authEmulatorHost` (defaults to that same env var) and its client SDK is wired with `connectAuthEmulator`, so local `firebase emulators:start` sign-ins work end-to-end. Pass `authEmulatorHost: ""` to force production even under the emulator. This applies to `servers.admin()`, `servers.crud()` and the sync admin alike.
+:::
+
 ## Per-repo authorization rules (CRUD)
 
 When `auth` is set on `servers.crud()`, each repo follows a **default-deny** policy: any operation without an explicit `rules.<op>` returns `403`. Use `allowAll` or `() => true` to explicitly open one.

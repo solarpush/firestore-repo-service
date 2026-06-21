@@ -705,6 +705,10 @@ v1: {
   (default `__docs_session`), `sessionTtlDays` (default `5`), `secureCookie`
   (default `true`), `sameSite` (default `"Lax"`), `contextKey`
   (default `"docsUser"`), `onUnauthenticated` (`"redirect"` | `"401"`).
+- **Auth emulator**: the login page's client SDK targets the Auth emulator when
+  `authEmulatorHost` is set (defaults to `FIREBASE_AUTH_EMULATOR_HOST`), matching
+  the Admin SDK — so local `firebase emulators:start` sign-ins work end-to-end.
+  Pass `authEmulatorHost: ""` to force production.
 
 ## CLI reference
 

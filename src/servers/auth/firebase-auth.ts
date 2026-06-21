@@ -201,6 +201,16 @@ export interface FirebaseAuthConfig<TContext = unknown> {
   sameSite?: "Strict" | "Lax" | "None";
 
   /**
+   * Firebase Auth emulator host (e.g. `127.0.0.1:9099`). When set, the login
+   * page's client SDK is pointed at the emulator via `connectAuthEmulator`,
+   * matching the Admin SDK (which already targets the emulator when
+   * `FIREBASE_AUTH_EMULATOR_HOST` is set). Defaults to that env var, so local
+   * `firebase emulators:start` runs work out of the box; pass `""` to force it
+   * off.
+   */
+  authEmulatorHost?: string;
+
+  /**
    * Enable the built-in CSRF defense: state-changing requests
    * (`POST`/`PUT`/`PATCH`/`DELETE`) authenticated by **session cookie** must
    * carry an `Origin`/`Referer` header matching the request host. Bearer
@@ -468,6 +478,8 @@ export function firebaseAuth<TContext = unknown>(
       sessionPath: sessionAction,
       next: fullPath,
       error,
+      authEmulatorHost:
+        config.authEmulatorHost ?? process.env["FIREBASE_AUTH_EMULATOR_HOST"],
     });
     res
       .status(status)
