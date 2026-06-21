@@ -7,8 +7,8 @@
  * class via the constructor.
  */
 
-import { UseCase } from "@lpdjs/firestore-repo-service/servers/hono";
 import { z } from "zod";
+import { AppUseCase } from "../../../../base-usecase.js";
 import type { Services } from "../../../../services.js";
 
 const input = z.object({
@@ -20,10 +20,9 @@ const output = z.object({
   id: z.string(),
 });
 
-export class CreatePostUseCase extends UseCase<
+export class CreatePostUseCase extends AppUseCase<
   typeof input,
-  typeof output,
-  Services
+  typeof output
 > {
   static readonly input = input;
   static readonly output = output;
@@ -32,12 +31,8 @@ export class CreatePostUseCase extends UseCase<
     payload: z.infer<typeof input>,
   ): Promise<z.infer<typeof output>> {
     const user = this.services.ctx.c.get("user");
-    user.role === "admin"
-      ? console.log("admin access")
-      : console.log("user access");
+    this.logger.info(`post access by role=${user.role}`, { postId: payload.id });
 
-    console.log(this.services.repository.db.comments.get.byDocId("1234"));
-    console.log(this.services.hubspot.hello());
     return { id: payload.example };
   }
 }

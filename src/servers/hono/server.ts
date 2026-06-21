@@ -13,19 +13,28 @@
 
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
-import { z, ZodError } from "zod";
+import { z } from "zod";
 import type { Env } from "hono";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { HttpsOptions } from "firebase-functions/v2/https";
 
 import type {
   AnyRouteDef,
+  ErrorHandler,
   HonoServerOptions,
   HttpMethod,
+  InterceptorConfig,
+  InterceptorOption,
+  Logger,
   PayloadSource,
   RouteInterceptor,
 } from "./types";
 import { ValidationError } from "./types";
+import {
+  BadRequestError,
+  defaultErrorResponse,
+  OutputValidationError,
+} from "./errors";
 import { buildOpenApiDocument, renderDocsHtml } from "./openapi";
 import {
   createRequestContextMiddleware,
@@ -116,6 +125,7 @@ export class HonoServer<TEnv extends Env = Env> {
       this.mountedRoutes,
       this.options.basePath ?? "",
       this.options.openapi,
+      interceptorConfig(this.options.interceptor as InterceptorOption | undefined),
     );
     return this.cachedSpec;
   }
@@ -144,8 +154,10 @@ export class HonoServer<TEnv extends Env = Env> {
         route,
         source,
         validateOutput,
-        this.options.interceptor as RouteInterceptor | undefined,
+        interceptorFn(this.options.interceptor as InterceptorOption | undefined),
         this.options.services,
+        this.options.errorHandler as ErrorHandler | undefined,
+        this.options.logger as Logger | undefined,
       );
       const httpMethod = route.method.toUpperCase() as
         | "GET"
@@ -217,6 +229,28 @@ export class HonoServer<TEnv extends Env = Env> {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Type guard distinguishing a structured interceptor from a bare function. */
+function isInterceptorConfig(
+  i: InterceptorOption | undefined,
+): i is InterceptorConfig {
+  return typeof i === "object" && i !== null && typeof i.handler === "function";
+}
+
+/** Extract the runtime interceptor function from either form. */
+function interceptorFn(
+  i: InterceptorOption | undefined,
+): RouteInterceptor | undefined {
+  if (!i) return undefined;
+  return isInterceptorConfig(i) ? i.handler : i;
+}
+
+/** Extract the OpenAPI metadata (output/errors) from the structured form. */
+function interceptorConfig(
+  i: InterceptorOption | undefined,
+): InterceptorConfig | undefined {
+  return isInterceptorConfig(i) ? i : undefined;
+}
+
 function filterRoutes(
   routes: AnyRouteDef[],
   api: string | undefined,
@@ -271,6 +305,8 @@ function makeRouteHandler(
   validateOutput: boolean,
   interceptor: RouteInterceptor | undefined,
   services: AnyServicesContainer | undefined,
+  errorHandler: ErrorHandler | undefined,
+  logger: Logger | undefined,
 ) {
   const inputSchema = route.input as z.ZodTypeAny | undefined;
   const outputSchema = route.output as z.ZodTypeAny | undefined;
@@ -283,6 +319,22 @@ function makeRouteHandler(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     c: any,
   ): Promise<Response> => {
+    // Apply the injected ErrorHandler, falling back to the built-in envelope.
+    // Returns a Response when handled, or null to let the error propagate.
+    const applyErrorHandler = async (err: unknown): Promise<Response | null> => {
+      if (errorHandler) {
+        const handled = await errorHandler.handle({
+          error: err,
+          c,
+          route,
+          services: servicesArg,
+          logger,
+        });
+        if (handled) return handled;
+      }
+      return defaultErrorResponse(c, err);
+    };
+
     // `next()` runs validation + handler. Any Zod failure throws
     // `ValidationError` so the interceptor (or default catcher) can shape it.
     const callNext = async (): Promise<unknown> => {
@@ -312,7 +364,15 @@ function makeRouteHandler(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         c: any;
         services: AnyServicesContainer;
-      }) => unknown)({ input: payload, c, services: servicesArg });
+        errorHandler: ErrorHandler | undefined;
+        logger: Logger | undefined;
+      }) => unknown)({
+        input: payload,
+        c,
+        services: servicesArg,
+        errorHandler,
+        logger,
+      });
 
       if (validateOutput && outputSchema && !(result instanceof Response)) {
         const checked = outputSchema.safeParse(result);
@@ -327,14 +387,28 @@ function makeRouteHandler(
     let result: unknown;
     if (interceptor) {
       // Interceptor owns the response shape — including validation errors.
-      result = await interceptor({ next: callNext, route, c, services: servicesArg });
+      // If it rethrows, the injected ErrorHandler / default catcher applies.
+      try {
+        result = await interceptor({
+          next: callNext,
+          route,
+          c,
+          services: servicesArg,
+          errorHandler,
+          logger,
+        });
+      } catch (err) {
+        const handled = await applyErrorHandler(err);
+        if (handled) return handled;
+        throw err;
+      }
     } else {
-      // Default behaviour — handles ValidationError / BadRequestError with
-      // a JSON envelope, lets unknown errors bubble to onError / Hono.
+      // Default behaviour — ErrorHandler first, then the built-in
+      // ValidationError envelope, else bubble to onError / Hono.
       try {
         result = await callNext();
       } catch (err) {
-        const handled = defaultErrorResponse(c, err);
+        const handled = await applyErrorHandler(err);
         if (handled) return handled;
         throw err;
       }
@@ -343,53 +417,6 @@ function makeRouteHandler(
     if (result instanceof Response) return result;
     return c.json(result, status);
   };
-}
-
-class BadRequestError extends Error {
-  readonly statusCode = 400 as const;
-  constructor(message: string) {
-    super(message);
-    this.name = "BadRequestError";
-  }
-}
-
-class OutputValidationError extends Error {
-  readonly statusCode = 500 as const;
-  constructor(readonly zodError: ZodError) {
-    super("Output validation failed");
-    this.name = "OutputValidationError";
-  }
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function defaultErrorResponse(c: any, err: unknown): Response | null {
-  if (err instanceof ValidationError) {
-    return c.json(
-      {
-        success: false,
-        error: "Validation failed",
-        issues: formatZodIssues(err.zodError),
-      },
-      400,
-    );
-  }
-  if (err instanceof BadRequestError) {
-    return c.json(
-      { success: false, error: "Bad Request", message: err.message },
-      400,
-    );
-  }
-  if (err instanceof OutputValidationError) {
-    return c.json(
-      {
-        success: false,
-        error: "Output validation failed",
-        issues: formatZodIssues(err.zodError),
-      },
-      500,
-    );
-  }
-  return null;
 }
 
 async function readPayload(
@@ -422,12 +449,4 @@ async function readPayload(
     default:
       return {};
   }
-}
-
-function formatZodIssues(error: ZodError): unknown {
-  return error.issues.map((i) => ({
-    path: i.path.join("."),
-    code: i.code,
-    message: i.message,
-  }));
 }

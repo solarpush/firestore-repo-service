@@ -17,6 +17,63 @@ export type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 /** Where the validated payload comes from. */
 export type PayloadSource = "json" | "query" | "form" | "param";
 
+/**
+ * Structured logger injected into every handler / interceptor / error-handler
+ * context. Implement it, or extend the package's `BaseLogger` and override its
+ * `write` hook to route to your sink (Firebase logger, pino, …).
+ *
+ * `error()` returns a correlation id so the same value can be both logged and
+ * returned to the client.
+ */
+export interface Logger {
+  info(message: string, meta?: unknown): void;
+  warn(message: string, meta?: unknown): void;
+  /** @returns a correlation id (e.g. to include in the HTTP error response). */
+  error(error: unknown, meta?: unknown): string;
+  debug(message: string, meta?: unknown): void;
+}
+
+/** Context passed to {@link ErrorHandler.handle}. */
+export interface ErrorHandlerContext<
+  TEnv extends Env = Env,
+  TServices extends AnyServicesContainer = AnyServicesContainer,
+> {
+  /** The thrown value (an `AppError`, a Zod {@link ValidationError}, …). */
+  error: unknown;
+  /** Hono request context — set status, read headers, build the response. */
+  c: Context<TEnv>;
+  /** Route metadata (read-only). */
+  route: AnyRouteDef;
+  /** Global DI services container. */
+  services: TServices;
+  /** Injected {@link Logger} when one was passed to the API, else `undefined`. */
+  logger?: Logger;
+}
+
+/**
+ * Cross-cutting error strategy — a class (or object) you pass to the API and
+ * that the server injects everywhere **and** applies automatically.
+ *
+ * Implement {@link ErrorHandler.handle} to map any thrown value to an HTTP
+ * `Response` (e.g. your `AppError` → status + localized body, plus structured
+ * logging with a correlation id). Return `null` to decline the error and let
+ * the built-in fallback (`ValidationError` envelope) / `onError` take over.
+ *
+ * Prefer extending the package's {@link BaseErrorHandler} (it already maps the
+ * built-in errors) and overriding its `mapError` / `logError` hooks. Pass it
+ * **per API** via `ApiConfig.errorHandler`, or once via the registry
+ * (`{ services, errorHandler }`); it is then available in every handler /
+ * interceptor context as `errorHandler` and auto-applied on any uncaught error.
+ */
+export interface ErrorHandler<
+  TEnv extends Env = Env,
+  TServices extends AnyServicesContainer = AnyServicesContainer,
+> {
+  handle(
+    ctx: ErrorHandlerContext<TEnv, TServices>,
+  ): Response | null | Promise<Response | null>;
+}
+
 /** Handler signature — receives a single typed context object. */
 export type RouteHandler<
   TIn,
@@ -34,6 +91,13 @@ export type RouteHandler<
    * `services` option.
    */
   services: TServices;
+  /**
+   * Injected {@link ErrorHandler} when one was passed to the API, else
+   * `undefined`. Usually you just `throw` and let it apply automatically.
+   */
+  errorHandler?: ErrorHandler<TEnv, TServices>;
+  /** Injected {@link Logger} when one was passed to the API, else `undefined`. */
+  logger?: Logger;
 }) => Promise<TOut | Response> | TOut | Response;
 
 /**
@@ -237,7 +301,81 @@ export type RouteInterceptor<
   c: Context<TEnv>;
   /** Global DI services container. See {@link RouteHandler}. */
   services: TServices;
+  /**
+   * Injected {@link ErrorHandler} when one was passed to the API. Call
+   * `errorHandler?.handle({ error, c, route, services })` in your `catch` to
+   * reuse the shared mapping, or simply rethrow to let it apply automatically.
+   */
+  errorHandler?: ErrorHandler<TEnv, TServices>;
+  /** Injected {@link Logger} when one was passed to the API, else `undefined`. */
+  logger?: Logger;
 }) => Promise<Response | unknown> | Response | unknown;
+
+/**
+ * Success-envelope schema declared alongside an interceptor so the generated
+ * OpenAPI spec documents what the **wrapper actually returns** (not the raw
+ * handler output).
+ *
+ * - a **static** Zod schema → same envelope for every route (e.g.
+ *   `z.object({ data: z.any(), intercepted: z.boolean() })`);
+ * - a **factory** `(routeOutput) => schema` → wraps each route's own `output`,
+ *   so `data` is typed per endpoint in the docs.
+ */
+export type InterceptorOutput =
+  | z.ZodTypeAny
+  | ((routeOutput: z.ZodTypeAny | undefined) => z.ZodTypeAny);
+
+/** A single declared error response for the OpenAPI spec. */
+export type InterceptorErrorResponse =
+  | z.ZodTypeAny
+  | { description?: string; schema?: z.ZodTypeAny };
+
+/**
+ * Structured interceptor — pairs the cross-cutting {@link RouteInterceptor}
+ * `handler` with the OpenAPI metadata describing what it returns, so the docs
+ * reflect the real wrapped responses (success envelope + error shapes).
+ *
+ * @example
+ * ```ts
+ * interceptor: {
+ *   // factory: `data` reflects each route's own output schema
+ *   output: (routeOutput) =>
+ *     z.object({ data: routeOutput ?? z.unknown(), intercepted: z.boolean() }),
+ *   errors: {
+ *     400: ValidationErrorSchema,
+ *     500: { description: "Internal", schema: ErrorSchema },
+ *   },
+ *   handler: async ({ c, next }) => {
+ *     const data = await next();
+ *     return c.json({ data, intercepted: true });
+ *   },
+ * }
+ * ```
+ */
+export interface InterceptorConfig<
+  TEnv extends Env = Env,
+  TServices extends AnyServicesContainer = AnyServicesContainer,
+> {
+  /** Success-envelope schema (static) or per-route factory. */
+  output?: InterceptorOutput;
+  /**
+   * Error responses applied to **every** operation, keyed by HTTP status. Pass
+   * a bare Zod schema or `{ description, schema }`.
+   */
+  errors?: Record<number, InterceptorErrorResponse>;
+  /** The interceptor function. See {@link RouteInterceptor}. */
+  handler: RouteInterceptor<TEnv, TServices>;
+}
+
+/**
+ * Interceptor option accepted by the server / registry — either a bare
+ * {@link RouteInterceptor} function (legacy) or a structured
+ * {@link InterceptorConfig} carrying OpenAPI metadata.
+ */
+export type InterceptorOption<
+  TEnv extends Env = Env,
+  TServices extends AnyServicesContainer = AnyServicesContainer,
+> = RouteInterceptor<TEnv, TServices> | InterceptorConfig<TEnv, TServices>;
 
 /** OpenAPI document info (subset of the spec used by the helper). */
 export interface OpenAPIInfo {
@@ -413,9 +551,29 @@ export interface HonoServerOptions<TEnv extends Env = Env> {
   /**
    * Cross-cutting interceptor wrapping every handler call.
    * Ideal for response envelopes, business-error mapping, tracing.
-   * See {@link RouteInterceptor}.
+   *
+   * Pass a bare {@link RouteInterceptor} function, or an
+   * {@link InterceptorConfig} (`{ output?, errors?, handler }`) so the
+   * generated OpenAPI spec documents the wrapped responses.
    */
-  interceptor?: RouteInterceptor<TEnv>;
+  interceptor?: InterceptorOption<TEnv>;
+
+  /**
+   * Cross-cutting error strategy applied to every uncaught error and injected
+   * into every handler / interceptor context. See {@link ErrorHandler}.
+   *
+   * Typically shared across APIs — pass it once to `createApiRegistry` via
+   * `{ services, errorHandler }`; this per-API field overrides it.
+   */
+  errorHandler?: ErrorHandler<TEnv>;
+
+  /**
+   * Structured {@link Logger} injected into every handler / interceptor /
+   * error-handler context. Extend the package's `BaseLogger` to route to your
+   * sink. Typically shared via `createApiRegistry({ services, logger })`; this
+   * per-API field overrides it.
+   */
+  logger?: Logger;
 
   /**
    * Global DI services container (see {@link createServices}).

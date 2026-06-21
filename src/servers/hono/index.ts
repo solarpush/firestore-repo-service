@@ -32,6 +32,13 @@ export {
   type ApiRegistryOptions,
 } from "./api-registry";
 export { buildOpenApiDocument, renderDocsHtml } from "./openapi";
+export { BaseErrorHandler } from "./error-handler";
+export { BaseLogger, type LogSeverity } from "./logger";
+export {
+  BadRequestError,
+  OutputValidationError,
+  defaultErrorResponse,
+} from "./errors";
 export {
   firebaseBearerAuth,
   basicAuth,
@@ -83,9 +90,16 @@ export {
 export type {
   AnyRouteDef,
   ApiKeySecurityScheme,
+  ErrorHandler,
+  ErrorHandlerContext,
   HonoServerOptions,
   HttpMethod,
   HttpSecurityScheme,
+  InterceptorConfig,
+  InterceptorErrorResponse,
+  InterceptorOption,
+  InterceptorOutput,
+  Logger,
   MutualTlsSecurityScheme,
   OAuth2SecurityScheme,
   OAuthFlowObject,

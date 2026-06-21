@@ -458,6 +458,140 @@ Comme `@asteasolutions/zod-to-openapi` exige que Zod soit patché en amont, le
 serveur appelle `extendZodWithOpenApi(z)` automatiquement (idempotent) — tes
 schémas Zod natifs sont reconnus sans cérémonie.
 
+### Documenter l'enveloppe & les erreurs de l'interceptor
+
+Par défaut, le spec documente le `output` brut de chaque route. Mais si un
+`interceptor` enveloppe les réponses (ex. `{ data, intercepted: true }`), le
+payload réel diffère de `output`. Déclare l'enveloppe via la forme
+**structurée** de l'interceptor `{ output, errors?, handler }` — le générateur
+documente alors ce que le wrapper renvoie réellement :
+
+```ts
+// apis.ts
+v1: {
+  openapi: { info: { title: "API", version: "1.0.0" } },
+  interceptor: {
+    // factory — `data` reflète le schéma output propre à chaque route dans la doc
+    output: (routeOutput) =>
+      z.object({ data: routeOutput ?? z.unknown(), intercepted: z.boolean() }),
+    // réponses d'erreur déclarées, ajoutées à chaque opération
+    errors: {
+      400: z.object({ success: z.literal(false), error: z.string() }),
+      500: { description: "Erreur interne", schema: z.object({ error: z.string() }) },
+    },
+    handler: async ({ c, next }) => c.json({ data: await next(), intercepted: true }),
+  },
+},
+```
+
+- `output` accepte un schéma **statique** (même enveloppe pour toutes les routes)
+  **ou** une **factory** `(routeOutput) => schema` (enveloppe le `output` propre
+  à chaque route, donc `data` reste typé précisément par endpoint).
+- les clés d'`errors` sont des codes HTTP ; les valeurs un schéma Zod brut ou
+  `{ description?, schema? }`. Elles sont ajoutées à chaque opération.
+- la forme fonction (`interceptor: async ({ next }) => …`) marche toujours —
+  elle ne produit simplement aucune métadonnée d'enveloppe dans le spec.
+
+> Note : l'interceptor est une fonction opaque au runtime, le package ne peut
+> pas inférer sa forme — `output` / `errors` sont le moyen de garder la doc
+> synchronisée avec ce que le wrapper renvoie.
+
+### Gestion centralisée des erreurs (`errorHandler`)
+
+Étends le **`BaseErrorHandler`** du package au lieu de répéter un `try/catch`
+partout. Il mappe déjà les erreurs internes (`ValidationError`, …) ; surcharge
+deux hooks pour brancher tes erreurs métier + ton logger :
+
+- `mapError(ctx)` → mappe ton `AppError` en `Response` (retourne `null` pour
+  déléguer) ;
+- `logError(ctx)` → log via ton `AppLogger` (exécuté seulement si `mapError` a
+  matché).
+
+Passe une instance **par API** pour que chaque API ait sa propre stratégie.
+
+```ts
+import {
+  BaseErrorHandler,
+  type ErrorHandlerContext,
+} from "@lpdjs/firestore-repo-service/servers/hono";
+
+class AppErrorHandler extends BaseErrorHandler {
+  protected override mapError({ error, c }: ErrorHandlerContext): Response | null {
+    if (error instanceof AppError) {
+      const locale = c.req.header("accept-language")?.startsWith("fr") ? "fr" : "en";
+      return c.json(
+        {
+          // n'expose le message que si l'erreur est destinée à l'utilisateur
+          error: error.userFacing ? error.localizedMessage[locale] : AppError.default(locale),
+          errorId: error.errorId,
+        },
+        error.statusCode,
+      );
+    }
+    return null; // → mapping intégré via super
+  }
+
+  protected override logError({ error }: ErrorHandlerContext): void {
+    AppLogger.err(error); // log structuré + id de corrélation
+  }
+}
+
+// apis.ts — par API :
+v1: { ..., errorHandler: new AppErrorHandler() },  // user-facing, localisé
+v2: { ..., errorHandler: new BaseErrorHandler() }, // défauts seuls, pas de contrainte userFacing
+```
+
+- **Auto-appliqué** : les erreurs lancées deviennent de vraies réponses HTTP
+  sans boilerplate d'interceptor. Si un interceptor custom relance, le handler
+  applique quand même l'`errorHandler`.
+- **Injecté** : disponible comme `errorHandler` dans le ctx handler/interceptor
+  pour un usage manuel (`errorHandler?.handle({ error, c, route, services })`).
+- **Composable** : `mapError` qui retourne `null` délègue au mapping intégré ;
+  les erreurs inconnues remontent vers ton `onError` / Hono.
+- **Flag `userFacing`** : n'expose `localizedMessage` que si l'erreur est
+  destinée au client ; sinon renvoie un message générique pour ne rien divulguer.
+- Un `errorHandler` partagé reste possible via `createApiRegistry(configs,
+  { services, errorHandler })` ; un `errorHandler` par-API l'emporte.
+
+### Logging structuré (`logger`)
+
+Symétrique à `errorHandler` : étends le **`BaseLogger`** du package (surcharge
+l'unique hook `write` pour router vers ton sink — `logger` Firebase, pino, …) et
+passe une instance **par API**. Il est injecté dans chaque contexte handler /
+interceptor / error-handler comme `logger`.
+
+```ts
+import { BaseLogger, type LogSeverity } from "@lpdjs/firestore-repo-service/servers/hono";
+import { logger as fnLogger } from "firebase-functions/v2";
+
+class AppLogger extends BaseLogger {
+  protected override write(severity: LogSeverity, payload: Record<string, unknown>) {
+    fnLogger.write({ severity, ...payload }); // un seul override couvre info/warn/debug/error
+  }
+}
+export const appLogger = new AppLogger();
+
+// apis.ts — par API (ou partagé via createApiRegistry({ services, logger })) :
+v1: { ..., logger: appLogger },
+```
+
+```ts
+// dans un handler / interceptor / errorHandler :
+handler: ({ input, logger }) => {
+  logger?.info("creating post", { id: input.id });
+  return { id: input.id };
+}
+```
+
+- `BaseLogger.error(err)` renvoie un **id de corrélation** (réutilise
+  `err.errorId` s'il existe, sinon en génère un) — logge-le et renvoie-le au
+  client.
+- Chaque niveau (`info` / `warn` / `debug` / `error`) passe par `write`, donc un
+  seul override suffit.
+- les useCases ne reçoivent que `services` (pas le `logger` injecté) ; expose la
+  même instance via une classe de base projet (`protected readonly logger =
+  appLogger`) pour que `this.logger` et le `logger` injecté soient identiques.
+
 ### Protéger les endpoints de docs (`docsAuth`)
 
 `openapi.docsAuth` protège **uniquement** l'UI `/docs` et le spec `/openapi.json`

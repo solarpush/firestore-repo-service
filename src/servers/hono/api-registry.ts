@@ -48,7 +48,9 @@ import type { HttpsOptions } from "firebase-functions/v2/https";
 
 import type {
   AnyRouteDef,
+  ErrorHandler,
   HonoServerOptions,
+  Logger,
   RouteDef,
   RouteHandler,
 } from "./types";
@@ -111,6 +113,20 @@ export interface ApiRegistryOptions<
    * `services` to every handler / interceptor.
    */
   services?: TServices;
+
+  /**
+   * Cross-cutting {@link ErrorHandler} shared across every API — injected into
+   * every handler / interceptor context and applied automatically on any
+   * uncaught error. A per-API `errorHandler` (on the config) overrides it.
+   */
+  errorHandler?: ErrorHandler;
+
+  /**
+   * Structured {@link Logger} shared across every API — injected into every
+   * handler / interceptor / error-handler context. A per-API `logger` (on the
+   * config) overrides it.
+   */
+  logger?: Logger;
 }
 
 export interface ApiRegistry<
@@ -202,6 +218,8 @@ export function createApiRegistry<
   options?: ApiRegistryOptions<TServices>,
 ): ApiRegistry<TMap, TServices> {
   const sharedServices = options?.services;
+  const sharedErrorHandler = options?.errorHandler;
+  const sharedLogger = options?.logger;
 
   return {
     configs: configs as unknown as TMap,
@@ -222,7 +240,15 @@ export function createApiRegistry<
           `[ApiRegistry] unknown api "${api}". Registered: ${Object.keys(configs).join(", ")}`,
         );
       }
-      return new HonoServer({ ...cfg, api, routes, services: sharedServices });
+      return new HonoServer({
+        ...cfg,
+        api,
+        routes,
+        services: sharedServices,
+        // Per-API errorHandler / logger (on the config) win over the shared ones.
+        errorHandler: (cfg as ApiConfig).errorHandler ?? sharedErrorHandler,
+        logger: (cfg as ApiConfig).logger ?? sharedLogger,
+      });
     },
 
     toFunctions(routes, onRequest, opts) {
@@ -237,6 +263,9 @@ export function createApiRegistry<
           api,
           routes,
           services: sharedServices,
+          errorHandler:
+            (configs[api] as ApiConfig).errorHandler ?? sharedErrorHandler,
+          logger: (configs[api] as ApiConfig).logger ?? sharedLogger,
         });
         out[api] = Object.keys(httpsOpts).length
           ? server.toFunction(onRequest, httpsOpts)

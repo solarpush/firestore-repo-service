@@ -455,6 +455,137 @@ Because `@asteasolutions/zod-to-openapi` requires Zod to be patched first, the
 server calls `extendZodWithOpenApi(z)` automatically (idempotent) — your raw
 Zod schemas are picked up without ceremony.
 
+### Document the interceptor envelope & errors
+
+By default the spec documents each route's raw `output`. But if an
+`interceptor` wraps responses (e.g. `{ data, intercepted: true }`), the real
+payload differs from `output`. Declare the envelope by using the **structured**
+interceptor form `{ output, errors?, handler }` — the generator then documents
+what the wrapper actually returns:
+
+```ts
+// apis.ts
+v1: {
+  openapi: { info: { title: "API", version: "1.0.0" } },
+  interceptor: {
+    // factory — `data` reflects each route's own output schema in the docs
+    output: (routeOutput) =>
+      z.object({ data: routeOutput ?? z.unknown(), intercepted: z.boolean() }),
+    // declared error responses, added to every operation
+    errors: {
+      400: z.object({ success: z.literal(false), error: z.string() }),
+      500: { description: "Internal error", schema: z.object({ error: z.string() }) },
+    },
+    handler: async ({ c, next }) => c.json({ data: await next(), intercepted: true }),
+  },
+},
+```
+
+- `output` accepts a **static** schema (same envelope for every route) **or** a
+  **factory** `(routeOutput) => schema` (wraps each route's own `output`, so
+  `data` stays precisely typed per endpoint).
+- `errors` keys are HTTP status codes; values are a bare Zod schema or
+  `{ description?, schema? }`. They are added to every operation.
+- The bare-function form (`interceptor: async ({ next }) => …`) still works — it
+  just produces no envelope metadata in the spec.
+
+> Note: the interceptor is an opaque function at runtime, so the package cannot
+> infer its shape — `output` / `errors` are how you keep the docs in sync with
+> what the wrapper returns.
+
+### Centralized error handling (`errorHandler`)
+
+Extend the package's **`BaseErrorHandler`** instead of repeating a `try/catch`
+everywhere. It already maps the built-in errors (`ValidationError`, …); override
+two hooks to plug your own domain errors + logger:
+
+- `mapError(ctx)` → map your `AppError` to a `Response` (return `null` to defer);
+- `logError(ctx)` → log via your `AppLogger` (runs only when `mapError` matched).
+
+Pass an instance **per API** so different APIs can use different strategies.
+
+```ts
+import {
+  BaseErrorHandler,
+  type ErrorHandlerContext,
+} from "@lpdjs/firestore-repo-service/servers/hono";
+
+class AppErrorHandler extends BaseErrorHandler {
+  protected override mapError({ error, c }: ErrorHandlerContext): Response | null {
+    if (error instanceof AppError) {
+      const locale = c.req.header("accept-language")?.startsWith("fr") ? "fr" : "en";
+      return c.json(
+        {
+          // only expose the message when the error is user-facing
+          error: error.userFacing ? error.localizedMessage[locale] : AppError.default(locale),
+          errorId: error.errorId,
+        },
+        error.statusCode,
+      );
+    }
+    return null; // → built-in mapping via super
+  }
+
+  protected override logError({ error }: ErrorHandlerContext): void {
+    AppLogger.err(error); // structured log + correlation id
+  }
+}
+
+// apis.ts — per API:
+v1: { ..., errorHandler: new AppErrorHandler() },  // user-facing, localized
+v2: { ..., errorHandler: new BaseErrorHandler() }, // defaults only, no user-facing constraints
+```
+
+- **Auto-applied**: thrown errors become proper HTTP responses with no
+  interceptor boilerplate. If a custom interceptor rethrows, the handler still
+  applies the `errorHandler`.
+- **Injected**: available as `errorHandler` in handler/interceptor ctx for
+  manual use (`errorHandler?.handle({ error, c, route, services })`).
+- **Composable**: `mapError` returning `null` defers to the built-in mapping;
+  unknown errors bubble to your `onError` / Hono.
+- **`userFacing` flag**: expose `localizedMessage` only when the error is meant
+  for the client; otherwise return a generic message to avoid leaking internals.
+- A shared `errorHandler` can still be passed to `createApiRegistry(configs,
+  { services, errorHandler })`; a per-API one overrides it.
+
+### Structured logging (`logger`)
+
+Symmetric to `errorHandler`: extend the package's **`BaseLogger`** (override the
+single `write` hook to route to your sink — Firebase `logger`, pino, …) and pass
+an instance **per API**. It is injected into every handler / interceptor /
+error-handler context as `logger`.
+
+```ts
+import { BaseLogger, type LogSeverity } from "@lpdjs/firestore-repo-service/servers/hono";
+import { logger as fnLogger } from "firebase-functions/v2";
+
+class AppLogger extends BaseLogger {
+  protected override write(severity: LogSeverity, payload: Record<string, unknown>) {
+    fnLogger.write({ severity, ...payload }); // one override covers info/warn/debug/error
+  }
+}
+export const appLogger = new AppLogger();
+
+// apis.ts — per API (or shared via createApiRegistry({ services, logger })):
+v1: { ..., logger: appLogger },
+```
+
+```ts
+// in a handler / interceptor / errorHandler:
+handler: ({ input, logger }) => {
+  logger?.info("creating post", { id: input.id });
+  return { id: input.id };
+}
+```
+
+- `BaseLogger.error(err)` returns a **correlation id** (reuses `err.errorId`
+  when present, else generates one) — log it and return it to the client.
+- Every level (`info` / `warn` / `debug` / `error`) funnels through `write`, so a
+  single override is enough.
+- useCases only receive `services` (not the injected `logger`); expose the same
+  instance via a project base class (`protected readonly logger = appLogger`) so
+  `this.logger` and the injected `logger` are one and the same.
+
 ### Protect the docs endpoints (`docsAuth`)
 
 `openapi.docsAuth` guards **only** the `/docs` UI and `/openapi.json` spec — it

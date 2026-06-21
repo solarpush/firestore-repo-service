@@ -571,21 +571,29 @@ async function runInit(flags: ParsedArgs["flags"]): Promise<void> {
       openapi: {
         info: { title: "${tag.toUpperCase()} API", version: "1.0.0", description: "" },
       },
+      // Built-in error mapping. Extend BaseErrorHandler to map your own
+      // domain errors, then swap it in here (per API).
+      errorHandler: new BaseErrorHandler(),
+      // Structured console logger. Extend BaseLogger (override \`write\`) to
+      // route to your sink, then swap it in here (per API).
+      logger: new BaseLogger(),
       verbose: process.env["NODE_ENV"] !== "production",
     },`;
       })
       .join("\n");
 
-    const apisSrc = `import { createApiRegistry } from "@lpdjs/firestore-repo-service/servers/hono";
+    const apisSrc = `import { BaseErrorHandler, BaseLogger, createApiRegistry } from "@lpdjs/firestore-repo-service/servers/hono";
 import { services } from "${relativeImport(dirname(apisAbs), servicesAbs)}";
 
 /**
  * Single source of truth for every API exposed by this project.
  * Add per-API middlewares, interceptors, OpenAPI metadata here.
  *
- * The shared \`services\` container is injected into every HonoServer the
- * registry builds — handlers / interceptors receive it via \`{ services }\`
- * and the built-in \`services.ctx.c\` resolves to the current request.
+ * Per-API resources injected into every handler / interceptor / error-handler
+ * context (override them per API above):
+ *   - \`services\`     — shared DI container (\`services.ctx.c\` = current request);
+ *   - \`errorHandler\` — maps thrown errors → HTTP (extend \`BaseErrorHandler\`);
+ *   - \`logger\`       — structured logging (extend \`BaseLogger\`).
  */
 export const apis = createApiRegistry(
   {

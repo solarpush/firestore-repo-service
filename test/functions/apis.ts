@@ -1,8 +1,11 @@
 import {
+  BaseErrorHandler,
   createApiRegistry,
   firebaseBearerAuth,
 } from "@lpdjs/firestore-repo-service/servers/hono";
 import { getAuth } from "firebase-admin/auth";
+import z from "zod";
+import { AppErrorHandler, appLogger } from "./app-error";
 import { enrichUser } from "./auth.middleware";
 import { services } from "./services";
 
@@ -30,15 +33,26 @@ export const apis = createApiRegistry(
         },
         security: [{ bearerAuth: [] }],
       },
-      interceptor: async ({ c, next, route }) => {
-        const data = await next();
+      interceptor: {
+        output: (routeOutput) =>
+          z.object({
+            data: routeOutput ?? z.unknown(),
+            intercepted: z.boolean(),
+          }),
+        handler: async ({ c, next, route }) => {
+          const data = await next();
 
-        return c.json({ data, intercepted: true });
+          return c.json({ data, intercepted: null });
+        },
       },
       onError: (err, c) => {
         console.error("Unhandled error in HonoServer:", err);
         return c.json({ error: "Internal Server Error" });
       },
+
+      // User-facing API: localized AppError mapping + AppLogger.
+      errorHandler: new AppErrorHandler(),
+      logger: appLogger,
 
       /** Valider aussi la réponse du handler contre le schéma `output` Zod. */
       validateOutput: false,
@@ -69,15 +83,26 @@ export const apis = createApiRegistry(
         },
         security: [{ bearerAuth: [] }],
       },
-      interceptor: async ({ c, next, route }) => {
-        const data = await next();
+      interceptor: {
+        output: (routeOutput) =>
+          z.object({
+            data: routeOutput ?? z.unknown(),
+            intercepted: z.boolean(),
+          }),
+        handler: async ({ c, next, route }) => {
+          const data = await next();
 
-        return c.json({ data, intercepted: true });
+          return c.json({ data, intercepted: true });
+        },
       },
       onError: (err, c) => {
         console.error("Unhandled error in HonoServer:", err);
         return c.json({ error: "Internal Server Error" });
       },
+
+      // API without user-facing constraints: built-in mapping only.
+      errorHandler: new BaseErrorHandler(),
+      logger: appLogger,
 
       /** Valider aussi la réponse du handler contre le schéma `output` Zod. */
       validateOutput: false,

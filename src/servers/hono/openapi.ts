@@ -14,6 +14,8 @@ import { z } from "zod";
 import type {
   AnyRouteDef,
   HttpMethod,
+  InterceptorConfig,
+  InterceptorErrorResponse,
   OpenAPIConfig,
   PayloadSource,
 } from "./types";
@@ -23,9 +25,35 @@ import type {
 extendZodWithOpenApi(z);
 
 const DEFAULT_RESPONSE_DESCRIPTION = "Successful response";
+const DEFAULT_ERROR_DESCRIPTION = "Error response";
 
 function defaultSource(method: HttpMethod): PayloadSource {
   return method === "get" ? "query" : "json";
+}
+
+/**
+ * Resolve the success-envelope schema for a route, honouring an interceptor's
+ * static schema or per-route factory. Falls back to the raw `route.output`.
+ */
+function resolveSuccessSchema(
+  routeOutput: z.ZodTypeAny | undefined,
+  interceptor: InterceptorConfig | undefined,
+): z.ZodTypeAny | undefined {
+  const out = interceptor?.output;
+  if (!out) return routeOutput;
+  return typeof out === "function" ? out(routeOutput) : out;
+}
+
+/** Normalise a declared error response to `{ description, schema? }`. */
+function normalizeErrorResponse(
+  entry: InterceptorErrorResponse,
+): { description: string; schema?: z.ZodTypeAny } {
+  // A Zod schema exposes `safeParse`; a plain config object does not.
+  if (typeof (entry as { safeParse?: unknown }).safeParse === "function") {
+    return { description: DEFAULT_ERROR_DESCRIPTION, schema: entry as z.ZodTypeAny };
+  }
+  const cfg = entry as { description?: string; schema?: z.ZodTypeAny };
+  return { description: cfg.description ?? DEFAULT_ERROR_DESCRIPTION, schema: cfg.schema };
 }
 
 /** Build the OpenAPI document from the mounted route registry. */
@@ -33,6 +61,7 @@ export function buildOpenApiDocument(
   routes: AnyRouteDef[],
   basePath: string,
   config: OpenAPIConfig,
+  interceptor?: InterceptorConfig,
 ): Record<string, unknown> {
   const registry = new OpenAPIRegistry();
 
@@ -61,6 +90,27 @@ export function buildOpenApiDocument(
     const requestParams = buildQueryOrParam(source, route.input, "param");
     const operationId = makeOperationId(method, fullPath);
 
+    // Success response — wrapped by the interceptor envelope when declared.
+    const successSchema = resolveSuccessSchema(route.output, interceptor);
+    const responses: Record<string, unknown> = {
+      [status]: successSchema
+        ? {
+            description: DEFAULT_RESPONSE_DESCRIPTION,
+            content: { "application/json": { schema: successSchema } },
+          }
+        : { description: DEFAULT_RESPONSE_DESCRIPTION },
+    };
+
+    // Declared error responses (interceptor.errors) applied to every operation.
+    if (interceptor?.errors) {
+      for (const [code, entry] of Object.entries(interceptor.errors)) {
+        const { description, schema } = normalizeErrorResponse(entry);
+        responses[code] = schema
+          ? { description, content: { "application/json": { schema } } }
+          : { description };
+      }
+    }
+
     registry.registerPath({
       method,
       path: convertExpressPathToOpenApi(fullPath),
@@ -78,18 +128,8 @@ export function buildOpenApiDocument(
         ...(requestParams ? { params: requestParams } : {}),
         ...(requestBody ? { body: requestBody } : {}),
       } as any,
-      responses: route.output
-        ? {
-            [status]: {
-              description: DEFAULT_RESPONSE_DESCRIPTION,
-              content: {
-                "application/json": { schema: route.output },
-              },
-            },
-          }
-        : {
-            [status]: { description: DEFAULT_RESPONSE_DESCRIPTION },
-          },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      responses: responses as any,
     });
   }
 
