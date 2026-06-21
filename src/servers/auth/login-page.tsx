@@ -197,9 +197,11 @@ export function renderLoginPage(opts: LoginPageOptions): string {
 
     // Defense-in-depth against open redirect (issue #07): only ever navigate
     // to a same-origin path, even though the server already sanitizes next.
+    // Resolve against the current page URL (not just the origin) so a relative
+    // "next" works behind any Cloud Functions / reverse-proxy path prefix.
     function safeNext(raw) {
       try {
-        const u = new URL(raw, window.location.origin);
+        const u = new URL(raw, window.location.href);
         if (u.origin !== window.location.origin) return "/";
         return u.pathname + u.search + u.hash;
       } catch {

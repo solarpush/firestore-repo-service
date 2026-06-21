@@ -14,7 +14,7 @@
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
 import { z } from "zod";
-import type { Env } from "hono";
+import type { Env, MiddlewareHandler } from "hono";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { HttpsOptions } from "firebase-functions/v2/https";
 
@@ -29,13 +29,14 @@ import type {
   PayloadSource,
   RouteInterceptor,
 } from "./types";
-import { ValidationError } from "./types";
 import {
   BadRequestError,
   defaultErrorResponse,
   OutputValidationError,
 } from "./errors";
+import { ValidationError } from "./types";
 import { buildOpenApiDocument, renderDocsHtml } from "./openapi";
+import { isDocsAuthExtension } from "./docs-auth";
 import {
   createRequestContextMiddleware,
   type AnyServicesContainer,
@@ -194,11 +195,30 @@ export class HonoServer<TEnv extends Env = Env> {
       docsPath === false ? null : joinPath(this.options.basePath ?? "", docsPath);
 
     // Auth guards applied ONLY to the spec + docs endpoints (not API routes).
-    const guards = cfg.docsAuth
-      ? Array.isArray(cfg.docsAuth)
-        ? cfg.docsAuth
-        : [cfg.docsAuth]
-      : [];
+    // A DocsAuthExtension (e.g. firebaseDocsAuth) also contributes auxiliary
+    // routes (login page / session / logout) mounted next to the docs.
+    let guards: MiddlewareHandler[];
+    if (isDocsAuthExtension(cfg.docsAuth)) {
+      const ext = cfg.docsAuth;
+      guards = [ext.middleware];
+      // Mount the aux routes (unguarded) as siblings of the docs/spec page so
+      // bare-name relative links/redirects stay correct behind any prefix.
+      const authDir = dirOf(fullDocsPath ?? fullSpecPath);
+      for (const route of ext.routes) {
+        this.app.on(
+          route.method,
+          [joinPath(authDir, route.name)],
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          route.handler as any,
+        );
+      }
+    } else {
+      guards = cfg.docsAuth
+        ? Array.isArray(cfg.docsAuth)
+          ? cfg.docsAuth
+          : [cfg.docsAuth]
+        : [];
+    }
 
     this.app.on(
       "GET",
@@ -266,6 +286,12 @@ function joinPath(base: string, path: string): string {
   const right = path.startsWith("/") ? path : `/${path}`;
   const merged = `${left}${right}`;
   return merged === "" ? "/" : merged;
+}
+
+/** Directory of an absolute pathname, e.g. `/v1/docs` → `/v1`, `/docs` → ``. */
+function dirOf(path: string): string {
+  const idx = path.lastIndexOf("/");
+  return idx <= 0 ? "" : path.slice(0, idx);
 }
 
 /**

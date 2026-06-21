@@ -11,6 +11,7 @@
 import type { z, ZodError } from "zod";
 import type { Context, Env, MiddlewareHandler } from "hono";
 import type { AnyServicesContainer } from "./services";
+import type { DocsAuthExtension } from "./docs-auth";
 
 export type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -502,8 +503,11 @@ export interface OpenAPIConfig {
    * import { firebaseBearerAuth } from "@lpdjs/firestore-repo-service/servers/hono";
    * openapi: { info, docsAuth: firebaseBearerAuth({ getAuth }) }
    * ```
+   *
+   * For a full login form + session cookie (like the admin server), pass the
+   * {@link DocsAuthExtension} returned by `firebaseDocsAuth({ ... })` instead.
    */
-  docsAuth?: MiddlewareHandler | MiddlewareHandler[];
+  docsAuth?: MiddlewareHandler | MiddlewareHandler[] | DocsAuthExtension;
 }
 
 /** Options consumed by the {@link HonoServer} constructor. */

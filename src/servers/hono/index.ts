@@ -47,10 +47,15 @@ export {
 export {
   firebaseBearerAuth,
   basicAuth,
+  firebaseDocsAuth,
+  isDocsAuthExtension,
   type FirebaseBearerAuthOptions,
   type FirebaseBearerAuthLike,
   type DecodedBearerToken,
   type BasicAuthOptions,
+  type FirebaseDocsAuthOptions,
+  type DocsAuthExtension,
+  type DocsAuthRoute,
 } from "./docs-auth";
 export { ValidationError, defineRoutes } from "./types";
 export {

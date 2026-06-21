@@ -220,16 +220,25 @@ export function renderListJsx(
       )}
 
       {/* Toolbar */}
-      <div class="flex flex-wrap justify-between items-center mb-4 gap-3" data-frs-toolbar>
+      <div
+        class="flex flex-wrap justify-between items-center mb-4 gap-3"
+        data-frs-toolbar
+      >
         <div class="flex items-center gap-3">
           <span class="text-sm text-base-content/60">
             {docs.length}
             {typeof totalCount === "number" && (
               <>
-                {" "}of <span class="font-semibold text-base-content/80">{totalCount}</span>
+                {" "}
+                of{" "}
+                <span class="font-semibold text-base-content/80">
+                  {totalCount}
+                </span>
               </>
-            )}
-            {" "}document{(typeof totalCount === "number" ? totalCount : docs.length) !== 1 && "s"}
+            )}{" "}
+            document
+            {(typeof totalCount === "number" ? totalCount : docs.length) !==
+              1 && "s"}
           </span>
           {/* Rows-per-page */}
           <div class="flex items-center gap-1.5 text-sm text-base-content/60">
@@ -258,7 +267,9 @@ export function renderListJsx(
           class="hidden mb-3 alert alert-info py-2 px-3"
           data-frs-bulk-bar
           data-frs-repo={repoName}
-          data-frs-total={typeof totalCount === "number" ? String(totalCount) : ""}
+          data-frs-total={
+            typeof totalCount === "number" ? String(totalCount) : ""
+          }
           data-frs-page-size={String(currentPageSize ?? docs.length)}
           data-frs-allow-delete={canBulkDelete ? "1" : "0"}
           data-frs-allow-update={canBulkUpdate ? "1" : "0"}
@@ -270,7 +281,7 @@ export function renderListJsx(
             {typeof totalCount === "number" && totalCount > docs.length && (
               <button
                 type="button"
-                class="ml-3 link link-primary text-sm hidden"
+                class="ml-3 link text-sm hidden"
                 data-frs-bulk-select-all
               >
                 Select all {totalCount} matching documents
@@ -278,11 +289,7 @@ export function renderListJsx(
             )}
             <span class="hidden ml-3 italic" data-frs-bulk-all-active>
               All {totalCount ?? "?"} matching documents are selected.{" "}
-              <button
-                type="button"
-                class="link"
-                data-frs-bulk-clear
-              >
+              <button type="button" class="link" data-frs-bulk-clear>
                 Clear selection
               </button>
             </span>
@@ -446,10 +453,7 @@ export function renderListJsx(
                     })}
                     <td class="align-middle text-right whitespace-nowrap py-2">
                       <div class="flex gap-1 justify-end">
-                        <a
-                          href={editUrl}
-                          class="btn btn-xs btn-outline"
-                        >
+                        <a href={editUrl} class="btn btn-xs btn-outline">
                           Edit
                         </a>
                         {historyEnabled && (
@@ -540,7 +544,10 @@ export function renderListJsx(
         <dialog id="frs-bulk-update-modal" class="modal">
           <div class="modal-box">
             <h3 class="font-bold text-lg mb-3">Bulk update field</h3>
-            <p class="text-sm text-base-content/60 mb-4" data-frs-bulk-update-summary>
+            <p
+              class="text-sm text-base-content/60 mb-4"
+              data-frs-bulk-update-summary
+            >
               Update one field on the selected documents.
             </p>
             <form method="dialog" data-frs-bulk-update-form>

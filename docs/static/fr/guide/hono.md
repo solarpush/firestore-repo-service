@@ -676,6 +676,45 @@ en échec avec `403` ; le token décodé est stocké sur le contexte
 paresseusement à chaque requête, donc déclarable avant l'exécution de
 `initializeApp()`.
 
+#### Formulaire de login + cookie de session (`firebaseDocsAuth`)
+
+Pour un flux orienté navigateur — une **page de login + cookie de session**,
+exactement comme le serveur admin — passe `firebaseDocsAuth(...)`. Il retourne
+une valeur enrichie (un `DocsAuthExtension`) que le serveur déploie en routes
+`__login` / `__session` / `__logout` montées à côté des docs, plus le guard. Les
+navigateurs non authentifiés sont redirigés vers le formulaire ; une fois
+connectés, un cookie de session HttpOnly les maintient authentifiés.
+
+```ts
+import { getAuth } from "firebase-admin/auth";
+import { firebaseDocsAuth } from "@lpdjs/firestore-repo-service/servers/hono";
+
+v1: {
+  openapi: {
+    info: { title: "API", version: "1.0.0" },
+    docsAuth: firebaseDocsAuth({
+      getAuth: () => getAuth(),                 // lazy — après initializeApp()
+      apiKey: process.env.FIREBASE_API_KEY!,    // config Web app (SDK de la page)
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN!,
+      allow: (token) => token.admin === true,   // policy optionnelle
+      // mode: "both",                          // accepte aussi un Bearer (iframe)
+      // providers: ["password", "google"],     // providers de la page de login
+    }),
+  },
+},
+```
+
+- **Modes** : `"cookie"` (défaut — formulaire de login) ou `"both"` (accepte
+  aussi un token `Bearer`, pratique pour embarquer les docs dans une iframe
+  authentifiée).
+- **Routes intégrées** (`__login` / `__session` / `__logout`) montées comme
+  voisines de la page de docs, donc les liens/redirections relatifs survivent à
+  n'importe quel préfixe Cloud Functions / reverse-proxy.
+- **Options** : `allow`, `providers`, `title`, `cookieName`
+  (défaut `__docs_session`), `sessionTtlDays` (défaut `5`), `secureCookie`
+  (défaut `true`), `sameSite` (défaut `"Lax"`), `contextKey`
+  (défaut `"docsUser"`), `onUnauthenticated` (`"redirect"` | `"401"`).
+
 ## Référence CLI
 
 | Commande | Rôle |

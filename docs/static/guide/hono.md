@@ -668,6 +668,44 @@ docsAuth: async (c, next) => {
 (`c.get("docsUser")` by default) for downstream use. `getAuth` is called lazily
 per request, so it is safe to declare before `initializeApp()` has run.
 
+#### Login form + session cookie (`firebaseDocsAuth`)
+
+For a browser-friendly flow — a **login page + session cookie**, exactly like
+the admin server — pass `firebaseDocsAuth(...)`. It returns a richer value (a
+`DocsAuthExtension`) that the server expands into the bundled
+`__login` / `__session` / `__logout` routes mounted next to the docs, plus the
+guard. Unauthenticated browsers are redirected to the login form; once signed
+in, an HttpOnly session cookie keeps them in.
+
+```ts
+import { getAuth } from "firebase-admin/auth";
+import { firebaseDocsAuth } from "@lpdjs/firestore-repo-service/servers/hono";
+
+v1: {
+  openapi: {
+    info: { title: "API", version: "1.0.0" },
+    docsAuth: firebaseDocsAuth({
+      getAuth: () => getAuth(),                 // lazy — runs after initializeApp()
+      apiKey: process.env.FIREBASE_API_KEY!,    // Web app config (login page SDK)
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN!,
+      allow: (token) => token.admin === true,   // optional policy
+      // mode: "both",                          // also accept a Bearer token (iframe)
+      // providers: ["password", "google"],     // login page providers
+    }),
+  },
+},
+```
+
+- **Modes**: `"cookie"` (default — login form) or `"both"` (also accept a
+  `Bearer` ID token, handy to embed the docs in an authenticated iframe).
+- **Bundled routes** (`__login` / `__session` / `__logout`) are mounted as
+  siblings of the docs page, so relative links/redirects survive any Cloud
+  Functions / reverse-proxy path prefix.
+- **Options**: `allow`, `providers`, `title`, `cookieName`
+  (default `__docs_session`), `sessionTtlDays` (default `5`), `secureCookie`
+  (default `true`), `sameSite` (default `"Lax"`), `contextKey`
+  (default `"docsUser"`), `onUnauthenticated` (`"redirect"` | `"401"`).
+
 ## CLI reference
 
 | Command | Purpose |

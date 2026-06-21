@@ -1,7 +1,7 @@
 import {
   BaseErrorHandler,
   createApiRegistry,
-  firebaseBearerAuth,
+  firebaseDocsAuth,
 } from "@lpdjs/firestore-repo-service/servers/hono";
 import { getAuth } from "firebase-admin/auth";
 import z from "zod";
@@ -19,7 +19,16 @@ export const apis = createApiRegistry(
           version: "1.0.0",
           description: "Exemple Hono file-based API sur Firebase Functions v2",
         },
-        docsAuth: firebaseBearerAuth({ getAuth }),
+        // Gate the docs behind a Firebase login form + session cookie (same
+        // flow as the admin server). `mode: "both"` also accepts a Bearer
+        // token, handy when embedding the docs in an authenticated iframe.
+        docsAuth: firebaseDocsAuth({
+          getAuth,
+          apiKey: process.env["FIREBASE_API_KEY"] ?? "demo-api-key",
+          authDomain:
+            process.env["FIREBASE_AUTH_DOMAIN"] ?? "my-project.firebaseapp.com",
+          mode: "both",
+        }),
         servers: [
           { url: "https://us-central1-my-project.cloudfunctions.net/apiv1" },
           { url: "http://127.0.0.1:5001/my-project/us-central1/apiv1" },
