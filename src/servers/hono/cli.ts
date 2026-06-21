@@ -357,6 +357,7 @@ async function runNew(
 
     const pkgHono = "@lpdjs/firestore-repo-service/servers/hono";
     const servicesImport = inferServicesImportPath(rootAbs, dirAbs);
+    const baseUseCaseImport = inferBaseUseCaseImportPath(rootAbs, dirAbs);
 
     const inputComment =
       method === "get"
@@ -368,13 +369,12 @@ async function runNew(
  *
  * Owns its Zod \`input\` / \`output\` schemas (declared as \`static\` members, the
  * single source of truth shared with \`routes.ts\`) and runs the logic in
- * \`execute\`. The shared \`services\` container is injected by the \`UseCase\` base
- * class via the constructor.
+ * \`execute\`. Extends \`AppUseCase\`, so \`this.services\`, \`this.logger\` and
+ * \`this.error\` are all available.
  */
 
 import { z } from "zod";
-import { UseCase } from "${pkgHono}";
-import type { Services } from "${servicesImport}";
+import { AppUseCase } from "${baseUseCaseImport}";
 
 const input = z.object({
   ${inputComment}
@@ -385,13 +385,17 @@ const output = z.object({
   id: z.string(),
 });
 
-export class ${className} extends UseCase<typeof input, typeof output, Services> {
+export class ${className} extends AppUseCase<typeof input, typeof output> {
   static readonly input = input;
   static readonly output = output;
 
   async execute(
     payload: z.infer<typeof input>,
   ): Promise<z.infer<typeof output>> {
+    this.logger.info("${className} called", { example: payload.example });
+    // Guard example — mapped to HTTP by the AppErrorHandler:
+    // if (!payload.example) throw this.error.badRequest("example is required");
+
     // TODO: implement using \`this.services\`
     return { id: payload.example };
   }
@@ -547,6 +551,8 @@ async function runInit(flags: ParsedArgs["flags"]): Promise<void> {
     const rootAbs = resolve(process.cwd(), root);
     const apisAbs = resolve(process.cwd(), apisFile);
     const servicesAbs = resolve(process.cwd(), servicesFile);
+    const appErrorAbs = resolve(dirname(apisAbs), "app-error.ts");
+    const baseUseCaseAbs = resolve(dirname(apisAbs), "base-usecase.ts");
     const generatedDir = resolve(rootAbs, "__generated__");
     const generatedFile = resolve(generatedDir, "routes.ts");
 
@@ -571,18 +577,20 @@ async function runInit(flags: ParsedArgs["flags"]): Promise<void> {
       openapi: {
         info: { title: "${tag.toUpperCase()} API", version: "1.0.0", description: "" },
       },
-      // Built-in error mapping. Extend BaseErrorHandler to map your own
-      // domain errors, then swap it in here (per API).
-      errorHandler: new BaseErrorHandler(),
-      // Structured console logger. Extend BaseLogger (override \`write\`) to
-      // route to your sink, then swap it in here (per API).
-      logger: new BaseLogger(),
+      // Maps your AppError → HTTP (extend it in app-error.ts). \`gcpLogs\` adds a
+      // dev-only deep link to the matching GCP log in the error response.
+      errorHandler: new AppErrorHandler({
+        gcpLogs: { enabled: process.env["NODE_ENV"] !== "production" },
+      }),
+      // Shared structured logger (same instance exposed as \`this.logger\`).
+      logger: appLogger,
       verbose: process.env["NODE_ENV"] !== "production",
     },`;
       })
       .join("\n");
 
-    const apisSrc = `import { BaseErrorHandler, BaseLogger, createApiRegistry } from "@lpdjs/firestore-repo-service/servers/hono";
+    const apisSrc = `import { createApiRegistry } from "@lpdjs/firestore-repo-service/servers/hono";
+import { AppErrorHandler, appLogger } from "${relativeImport(dirname(apisAbs), appErrorAbs)}";
 import { services } from "${relativeImport(dirname(apisAbs), servicesAbs)}";
 
 /**
@@ -592,8 +600,8 @@ import { services } from "${relativeImport(dirname(apisAbs), servicesAbs)}";
  * Per-API resources injected into every handler / interceptor / error-handler
  * context (override them per API above):
  *   - \`services\`     — shared DI container (\`services.ctx.c\` = current request);
- *   - \`errorHandler\` — maps thrown errors → HTTP (extend \`BaseErrorHandler\`);
- *   - \`logger\`       — structured logging (extend \`BaseLogger\`).
+ *   - \`errorHandler\` — maps thrown \`AppError\`s → HTTP (see app-error.ts);
+ *   - \`logger\`       — structured logging (also \`this.logger\` in useCases).
  */
 export const apis = createApiRegistry(
   {
@@ -646,6 +654,201 @@ export type Services = typeof services;
 `;
 
     writeIfPossible(servicesAbs, servicesSrc);
+
+    // 1.c app-error.ts — AppError + AppLogger + AppErrorHandler -----------
+    const appErrorSrc = `import {
+  BaseErrorHandler,
+  BaseLogger,
+  type ErrorHandlerContext,
+  type LogSeverity,
+} from "@lpdjs/firestore-repo-service/servers/hono";
+
+/** Supported locales — the single source of truth (runtime + type). */
+export const LOCALES = ["en", "fr"] as const;
+
+/** A supported locale, derived from {@link LOCALES}. */
+export type Locale = (typeof LOCALES)[number];
+
+/** Localized message — one string per supported locale. */
+export type LocalizedMessage = Record<Locale, string>;
+
+/**
+ * Domain error — pure business semantics, zero HTTP awareness. Thrown anywhere
+ * in useCases / handlers; the \`AppErrorHandler\` below maps it to an HTTP
+ * response. Carries a localized message; add your own factory methods as your
+ * domain grows.
+ */
+export class AppError extends Error {
+  readonly statusCode: number;
+  readonly userFacing: boolean;
+  readonly errorId: string;
+  readonly localizedMessage: LocalizedMessage;
+
+  private constructor(
+    localizedMessage: LocalizedMessage,
+    statusCode: number,
+    userFacing = false,
+  ) {
+    super(localizedMessage.en);
+    this.name = "AppError";
+    this.statusCode = statusCode;
+    this.userFacing = userFacing;
+    this.localizedMessage = localizedMessage;
+    this.errorId = Math.random().toString(36).slice(2, 12);
+  }
+
+  /** Business message shown directly to the user — HTTP 412. */
+  static userMessage(message: LocalizedMessage): AppError {
+    return new AppError(message, 412, true);
+  }
+
+  /** Resource not found — HTTP 404. */
+  static notFound(resource?: string): AppError {
+    return new AppError(
+      {
+        en: \`\${resource ?? "Resource"} not found\`,
+        fr: \`\${resource ?? "Ressource"} introuvable\`,
+      },
+      404,
+    );
+  }
+
+  /** Malformed request / invalid data — HTTP 400. */
+  static badRequest(detail?: string): AppError {
+    return new AppError(
+      {
+        en: \`Bad request: \${detail ?? "invalid parameters"}\`,
+        fr: \`Requête invalide : \${detail ?? "paramètres incorrects"}\`,
+      },
+      400,
+    );
+  }
+
+  /** Generic fallback message for non-user-facing errors. */
+  static default(locale: Locale): string {
+    return locale === "fr" ? "Une erreur est survenue" : "An error occurred";
+  }
+}
+
+/**
+ * Pick the response locale from the \`Accept-Language\` header.
+ *
+ * Parses the comma-separated, q-weighted list (e.g.
+ * \`fr-FR,fr;q=0.9,en;q=0.8\`), keeps the supported locales, and returns the one
+ * with the highest quality. Falls back to \`"en"\`.
+ */
+function pickLocale(c: {
+  req: { header(name: string): string | undefined };
+}): Locale {
+  const header = c.req.header("accept-language");
+  if (!header) return "en";
+
+  const ranked = header
+    .split(",")
+    .map((part) => {
+      const [tag = "", ...params] = part.trim().split(";");
+      const qParam = params.find((p) => p.trim().startsWith("q="));
+      const q = qParam ? Number.parseFloat(qParam.split("=")[1] ?? "") : 1;
+      return {
+        lang: tag.trim().toLowerCase().split("-")[0] ?? "",
+        quality: Number.isFinite(q) ? q : 1,
+      };
+    })
+    .filter((x): x is { lang: Locale; quality: number } =>
+      (LOCALES as readonly string[]).includes(x.lang),
+    )
+    .sort((a, b) => b.quality - a.quality);
+
+  return ranked[0]?.lang ?? "en";
+}
+
+/**
+ * Project logger — extends \`BaseLogger\` and overrides the single \`write\` hook.
+ * Swap \`console\` for \`firebase-functions/v2\` \`logger\` in real code.
+ */
+export class AppLogger extends BaseLogger {
+  protected override write(
+    severity: LogSeverity,
+    payload: Record<string, unknown>,
+  ): void {
+    // eslint-disable-next-line no-console
+    console.log(JSON.stringify({ severity, ...payload }));
+  }
+}
+
+/** Shared logger instance (per-API \`logger\` + \`this.logger\` in useCases). */
+export const appLogger = new AppLogger();
+
+/**
+ * Project error strategy — extends \`BaseErrorHandler\`: \`mapError\` localizes our
+ * \`AppError\` (user-facing aware, with an optional GCP logs deep link),
+ * \`logError\` routes through the logger, and unmatched errors fall back to the
+ * built-in mapping via \`super\`. Wired per API in apis.ts.
+ */
+export class AppErrorHandler extends BaseErrorHandler {
+  protected override mapError({
+    error,
+    c,
+  }: ErrorHandlerContext): Response | null {
+    if (!(error instanceof AppError)) return null; // → built-in mapping
+
+    const locale = pickLocale(c);
+    const logsUrl = this.gcpLogsUrl(error.errorId); // undefined when disabled
+    return c.json(
+      {
+        // expose the localized message only when it is meant for the user
+        error: error.userFacing
+          ? error.localizedMessage[locale]
+          : AppError.default(locale),
+        errorId: error.errorId,
+        ...(logsUrl ? { logsUrl } : {}),
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      error.statusCode as any,
+    );
+  }
+
+  protected override logError({ error, logger }: ErrorHandlerContext): void {
+    const log = logger ?? appLogger;
+    if (error instanceof AppError && error.statusCode < 500) {
+      log.warn(error.message);
+    } else {
+      log.error(error);
+    }
+  }
+}
+`;
+    writeIfPossible(appErrorAbs, appErrorSrc);
+
+    // 1.d base-usecase.ts — AppUseCase (this.services + this.logger + this.error)
+    const baseUseCaseSrc = `import { UseCase } from "@lpdjs/firestore-repo-service/servers/hono";
+import type { z } from "zod";
+import { AppError, appLogger } from "${relativeImport(dirname(baseUseCaseAbs), appErrorAbs)}";
+import type { Services } from "${relativeImport(dirname(baseUseCaseAbs), servicesAbs)}";
+
+/**
+ * Project base class for every useCase — extends the package's {@link UseCase}
+ * (which injects \`this.services\` via the constructor) and adds two shared
+ * ergonomics: \`this.logger\` (structured logger) and \`this.error\` (the
+ * {@link AppError} factory, mapped to HTTP by the \`AppErrorHandler\`).
+ * Subclasses still declare \`static input\` / \`static output\`.
+ */
+export abstract class AppUseCase<
+  TInput extends z.ZodTypeAny = z.ZodTypeAny,
+  TOutput extends z.ZodTypeAny = z.ZodTypeAny,
+> extends UseCase<TInput, TOutput, Services> {
+  /** Shared structured logger instance (same one injected per-API). */
+  protected readonly logger = appLogger;
+
+  /**
+   * Domain error factory — \`throw this.error.notFound(...)\` /
+   * \`this.error.badRequest(...)\` / \`this.error.userMessage(...)\`. The thrown
+   * {@link AppError} is mapped to an HTTP response by the \`AppErrorHandler\`.
+   */
+  protected readonly error = AppError;
+}
+`;
+    writeIfPossible(baseUseCaseAbs, baseUseCaseSrc);
 
     // 2) Empty generated manifest stub -----------------------------------
     const stubSrc = `// AUTO-GENERATED by frs — do not edit.
@@ -908,6 +1111,27 @@ function inferServicesImportPath(rootAbs: string, routeDirAbs: string): string {
     }
   }
   return "../../../../services.js";
+}
+
+function inferBaseUseCaseImportPath(
+  rootAbs: string,
+  routeDirAbs: string,
+): string {
+  const candidates = ["base-usecase.ts", "base-usecase.js"];
+  // base-usecase.ts is scaffolded as a sibling of apis.ts (see `frs init`).
+  const searchRoots = [rootAbs, dirname(rootAbs), dirname(dirname(rootAbs))];
+  for (const dir of searchRoots) {
+    for (const c of candidates) {
+      const full = resolve(dir, c);
+      if (existsSync(full)) {
+        let rel = relative(routeDirAbs, full).replace(/\\/g, "/");
+        rel = rel.replace(/\.ts$/, ".js");
+        if (!rel.startsWith(".")) rel = `./${rel}`;
+        return rel;
+      }
+    }
+  }
+  return "../../../../base-usecase.js";
 }
 
 async function main(): Promise<void> {

@@ -83,11 +83,22 @@ describe("firebaseDocsAuth — shape", () => {
     ]);
   });
 
-  test("throws when apiKey / authDomain are missing", () => {
+  test("does not throw at construction when apiKey / authDomain are missing", () => {
+    // Lazy validation: the module must load during Firebase CLI analysis even
+    // without env vars. The error surfaces only when the login page is hit.
     expect(() =>
       // @ts-expect-error intentionally missing required fields
       firebaseDocsAuth({ getAuth: () => mockAuth() }),
-    ).toThrow(/apiKey.*authDomain/);
+    ).not.toThrow();
+  });
+
+  test("the login route errors when apiKey / authDomain are missing", async () => {
+    const server = makeServer(
+      // @ts-expect-error intentionally missing required fields
+      firebaseDocsAuth({ getAuth: () => mockAuth() }),
+    );
+    const res = await get(server, "/__login");
+    expect(res.status).toBe(500);
   });
 });
 

@@ -333,14 +333,6 @@ export function firebaseDocsAuth(
     authEmulatorHost = process.env["FIREBASE_AUTH_EMULATOR_HOST"],
   } = options;
 
-  if (!apiKey || !authDomain) {
-    throw new Error(
-      "[firebaseDocsAuth] `apiKey` and `authDomain` are required for the login " +
-        "page. Find both in the Firebase Console → Project Settings → General → " +
-        "Web app config.",
-    );
-  }
-
   async function passesAllow(token: DecodedIdTokenLike): Promise<boolean> {
     if (!allow) return true;
     try {
@@ -352,6 +344,16 @@ export function firebaseDocsAuth(
 
   // ── Login page (GET __login) ──────────────────────────────────────────────
   const loginHandler: MiddlewareHandler = async (c) => {
+    // Validate lazily (at request time) so importing this module during the
+    // Firebase CLI analysis / emulator load doesn't throw before env vars are
+    // injected — same approach as the admin `firebaseAuth`.
+    if (!apiKey || !authDomain) {
+      throw new Error(
+        "[firebaseDocsAuth] `apiKey` and `authDomain` are required for the login " +
+          "page. Find both in the Firebase Console → Project Settings → General → " +
+          "Web app config.",
+      );
+    }
     const next = sanitizeNext(c.req.query("next"), "docs");
     const error = c.req.query("error") ?? null;
     const html = renderLoginPage({
