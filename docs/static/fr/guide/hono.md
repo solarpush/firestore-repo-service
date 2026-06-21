@@ -553,6 +553,44 @@ v2: { ..., errorHandler: new BaseErrorHandler() }, // défauts seuls, pas de con
 - Un `errorHandler` partagé reste possible via `createApiRegistry(configs,
   { services, errorHandler })` ; un `errorHandler` par-API l'emporte.
 
+#### Liens vers les logs GCP en dev (`gcpLogs`)
+
+Passe `{ gcpLogs }` à `BaseErrorHandler` pour transformer un id de corrélation en
+lien direct vers le **Cloud Logging « Logs Explorer »** : un dev saute ainsi
+d'une réponse d'erreur au log structuré correspondant. C'est **opt-in** — à
+garder désactivé en production (le lien est pour les ingénieurs, pas le client).
+
+```ts
+class AppErrorHandler extends BaseErrorHandler {
+  protected override mapError({ error, c }: ErrorHandlerContext): Response | null {
+    if (error instanceof AppError) {
+      const logsUrl = this.gcpLogsUrl(error.errorId); // undefined si désactivé
+      return c.json(
+        { error: error.message, errorId: error.errorId, ...(logsUrl ? { logsUrl } : {}) },
+        error.statusCode,
+      );
+    }
+    return null;
+  }
+}
+
+// apis.ts — activé hors production ; projectId vient de l'env GOOGLE_CLOUD_PROJECT
+v1: {
+  ...,
+  errorHandler: new AppErrorHandler({
+    gcpLogs: { enabled: process.env.NODE_ENV !== "production" },
+  }),
+},
+```
+
+- Le lien filtre sur `jsonPayload.errorId="<id>"` — le champ que `BaseLogger`
+  écrit déjà — pour tomber sur la ligne de log exacte.
+- Options : `enabled` (interrupteur principal), `projectId` (défaut :
+  `GOOGLE_CLOUD_PROJECT` / `GCLOUD_PROJECT` / `GCP_PROJECT`), `field` (défaut
+  `errorId`), `duration` (fenêtre optionnelle, ex. `"PT1H"`).
+- Les helpers `gcpLogsUrl(errorId, options)` / `resolveGcpProjectId()` sont aussi
+  exportés, pour un usage hors error handler.
+
 ### Logging structuré (`logger`)
 
 Symétrique à `errorHandler` : étends le **`BaseLogger`** du package (surcharge

@@ -1,6 +1,6 @@
 {
   "name": "@lpdjs/firestore-repo-service",
-  "version": "2.6.8",
+  "version": "2.6.10",
   "workspaces": [
     "test/functions"
   ],

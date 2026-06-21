@@ -8,10 +8,8 @@
  */
 
 import { z } from "zod";
-import { UseCase } from "@lpdjs/firestore-repo-service/servers/hono";
 import { postSchema } from "../../../..";
-import { AppError } from "../../../../app-error.js";
-import type { Services } from "../../../../services.js";
+import { AppUseCase } from "../../../../base-usecase.js";
 
 const input = z.object({
   id: z.string().min(1),
@@ -19,16 +17,21 @@ const input = z.object({
 
 const output = postSchema;
 
-export class GetPostUseCase extends UseCase<typeof input, typeof output, Services> {
+export class GetPostUseCase extends AppUseCase<
+  typeof input,
+  typeof output
+> {
   static readonly input = input;
   static readonly output = output;
 
   async execute(
     payload: z.infer<typeof input>,
   ): Promise<z.infer<typeof output>> {
-    const post = await this.services.repository.db.posts.get.byDocId(payload.id);
+    const post = await this.services.repository.db.posts.get.byDocId(
+      payload.id,
+    );
     // Thrown freely — the shared AppErrorHandler maps it to HTTP 404 + logs it.
-    if (!post) throw AppError.notFound("Post");
+    if (!post) throw this.error.notFound("Post");
     return post;
   }
 }

@@ -35,14 +35,44 @@
 
 import type { Env } from "hono";
 import { defaultErrorResponse } from "./errors";
+import {
+  gcpLogsUrl,
+  type GcpLogsLinkOptions,
+} from "./gcp-logs";
 import type { AnyServicesContainer } from "./services";
 import type { ErrorHandler, ErrorHandlerContext } from "./types";
+
+/** Construction options shared by every {@link BaseErrorHandler}. */
+export interface BaseErrorHandlerOptions {
+  /**
+   * Enable building a GCP Logs Explorer deep link from an error's correlation
+   * id (see {@link BaseErrorHandler.gcpLogsUrl}). Disabled by default — turn it
+   * on in dev/staging to let engineers jump from a response to its log.
+   */
+  gcpLogs?: GcpLogsLinkOptions;
+}
 
 export class BaseErrorHandler<
   TEnv extends Env = Env,
   TServices extends AnyServicesContainer = AnyServicesContainer,
 > implements ErrorHandler<TEnv, TServices>
 {
+  constructor(protected readonly options: BaseErrorHandlerOptions = {}) {}
+
+  /**
+   * Build a GCP Logs Explorer link for `errorId`, or `undefined` when the
+   * `gcpLogs` option is disabled / unresolved. Spread it into a mapped
+   * response to give developers a one-click jump to the matching log:
+   *
+   * ```ts
+   * const logsUrl = this.gcpLogsUrl(error.errorId);
+   * return c.json({ error, errorId, ...(logsUrl ? { logsUrl } : {}) }, status);
+   * ```
+   */
+  protected gcpLogsUrl(errorId?: string): string | undefined {
+    return gcpLogsUrl(errorId, this.options.gcpLogs);
+  }
+
   /**
    * Orchestration — not meant to be overridden. Tries the user mapping first,
    * logs it when matched, then falls back to the built-in mapping.

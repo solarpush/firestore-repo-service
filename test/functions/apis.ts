@@ -51,7 +51,10 @@ export const apis = createApiRegistry(
       },
 
       // User-facing API: localized AppError mapping + AppLogger.
-      errorHandler: new AppErrorHandler(),
+      // gcpLogs link enabled outside production so devs can jump to the log.
+      errorHandler: new AppErrorHandler({
+        gcpLogs: { enabled: process.env["NODE_ENV"] !== "production" },
+      }),
       logger: appLogger,
 
       /** Valider aussi la réponse du handler contre le schéma `output` Zod. */

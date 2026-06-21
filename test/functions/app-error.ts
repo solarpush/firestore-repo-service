@@ -136,6 +136,7 @@ export class AppErrorHandler extends BaseErrorHandler {
     if (!(error instanceof AppError)) return null; // → built-in mapping
 
     const locale = pickLocale(c);
+    const logsUrl = this.gcpLogsUrl(error.errorId);
     return c.json(
       {
         // expose the localized message only when it is meant for the user
@@ -143,6 +144,8 @@ export class AppErrorHandler extends BaseErrorHandler {
           ? error.localizedMessage[locale]
           : AppError.default(locale),
         errorId: error.errorId,
+        // dev-only deep link to the matching GCP log (omitted when disabled)
+        ...(logsUrl ? { logsUrl } : {}),
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       error.statusCode as any,

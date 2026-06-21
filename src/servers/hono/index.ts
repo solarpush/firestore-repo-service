@@ -32,8 +32,13 @@ export {
   type ApiRegistryOptions,
 } from "./api-registry";
 export { buildOpenApiDocument, renderDocsHtml } from "./openapi";
-export { BaseErrorHandler } from "./error-handler";
+export { BaseErrorHandler, type BaseErrorHandlerOptions } from "./error-handler";
 export { BaseLogger, type LogSeverity } from "./logger";
+export {
+  gcpLogsUrl,
+  resolveGcpProjectId,
+  type GcpLogsLinkOptions,
+} from "./gcp-logs";
 export {
   BadRequestError,
   OutputValidationError,
