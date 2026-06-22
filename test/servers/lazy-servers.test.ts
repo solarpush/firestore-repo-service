@@ -146,3 +146,26 @@ describe("makeLazyRepo", () => {
     expect(resolved).toBe(1); // resolved once, then reused
   });
 });
+
+describe("crud .spec() survives onRequest wrapping (for frs sdk:spec)", () => {
+  test("the wrapped Cloud Function still exposes .spec()", () => {
+    // Fake onRequest returns a *fresh* function (like a real Cloud Function),
+    // so `.spec` only survives if maybeWrap copies it over.
+    const onRequest = ((optsOrHandler: any, maybeHandler?: any) => {
+      const h = maybeHandler ?? optsOrHandler;
+      const fn = (req: any, res: any) => h(req, res);
+      return fn;
+    }) as any;
+
+    const servers = createServers(throwingMapping() as any, { onRequest });
+    const api = servers.crud({
+      basePath: "/api",
+      repos: { residences: { path: "residences" } } as any,
+    });
+
+    expect(typeof (api as any).spec).toBe("function");
+    // Building the spec only reads static schema → no db resolution.
+    const doc = (api as any).spec();
+    expect(doc.openapi).toBe("3.1.0");
+  });
+});

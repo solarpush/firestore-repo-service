@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
+import { pathToFileURL } from "node:url";
 
 import { generateRoutesManifest } from "./codegen/generator";
 import { DEFAULT_DERIVE, type PathDeriveOptions } from "./codegen/path-utils";
@@ -99,6 +100,7 @@ Usage:
   frs new  <name> [flags]
   frs add  service <name> [flags]
   frs add  server <admin|crud|sync> [flags]
+  frs sdk:spec [flags]
   frs help
 
 Flags (init):
@@ -160,6 +162,15 @@ Flags (add server <admin|crud|sync>):
   Scaffolds repos.ts + servers.ts (once) and <type>Server.ts, and records
   their paths in .frsrc.json under "servers".
 
+Flags (sdk:spec):
+  --entry <path>        Module exporting a CRUD server (.spec()) or an OpenAPI
+                        document. Must be Node-importable (built JS, or run via
+                        \`bunx frs sdk:spec ...\` for TS).
+  --export <name>       Named export to read (default: auto-detect first spec).
+  --out <file>          Output JSON path (default: openapi.json)
+  Statically writes the OpenAPI 3.1 spec to a file — no server boot. For Hono:
+  \`export const openapi = apis.spec("v1", routes)\` then --export openapi.
+
 Examples:
   frs init
   frs new createPost --domain posts --method post
@@ -168,6 +179,7 @@ Examples:
   frs add server admin
   frs add server crud
   frs add server sync
+  frs sdk:spec --entry lib/crudServer.js --export api --out openapi.json
 `);
 }
 
@@ -1300,6 +1312,107 @@ async function runAddServer(
   );
 }
 
+// ---------------------------------------------------------------------------
+// `sdk:spec` — statically export an OpenAPI 3.1 document to a JSON file
+// ---------------------------------------------------------------------------
+
+/** Resolve the OpenAPI document from a module export (CRUD handler or Hono doc). */
+function resolveSpecFromExport(value: unknown): Record<string, unknown> | null {
+  if (!value || (typeof value !== "object" && typeof value !== "function")) {
+    return null;
+  }
+  // CRUD server handler / wrapped Cloud Function → `.spec()`.
+  const spec = (value as { spec?: unknown }).spec;
+  if (typeof spec === "function") {
+    const doc = (spec as () => unknown).call(value);
+    return doc && typeof doc === "object" ? (doc as Record<string, unknown>) : null;
+  }
+  // Plain OpenAPI document (e.g. `apis.spec("v1", routes)` result).
+  if (typeof (value as { openapi?: unknown }).openapi === "string") {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+async function runSdkSpec(flags: ParsedArgs["flags"]): Promise<void> {
+  const entry = asString(flags.entry);
+  if (!entry) {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[frs] --entry <module> is required: frs sdk:spec --entry <path> [--export <name>] [--out openapi.json]\n" +
+        "      The module must be importable by Node (point at built JS, or run via a TS runtime such as `bun frs ...`).",
+    );
+    process.exit(2);
+  }
+  const entryAbs = resolve(process.cwd(), entry);
+  if (!existsSync(entryAbs)) {
+    // eslint-disable-next-line no-console
+    console.error(`[frs] entry not found: ${entryAbs}`);
+    process.exit(2);
+  }
+  if (/\.tsx?$/.test(entryAbs) && !process.versions.bun) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[frs] cannot import a TypeScript entry under Node: ${entry}\n` +
+        "      Build it to JS first (e.g. tsc → lib/…) and point --entry there, or run with a TS runtime: `bunx frs sdk:spec ...`.",
+    );
+    process.exit(2);
+  }
+
+  const outFile = asString(flags.out) ?? "openapi.json";
+  const exportName = asString(flags.export);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mod: Record<string, any>;
+  try {
+    mod = (await import(pathToFileURL(entryAbs).href)) as Record<string, unknown>;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[frs] failed to import ${entry}:\n`, err);
+    process.exit(1);
+  }
+
+  let doc: Record<string, unknown> | null = null;
+  let resolvedFrom = exportName ?? "";
+  if (exportName) {
+    doc = resolveSpecFromExport(mod[exportName]);
+    if (!doc) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[frs] export "${exportName}" is not a spec source. Expected a CRUD server (with .spec()) or an OpenAPI document.`,
+      );
+      process.exit(2);
+    }
+  } else {
+    // Auto-detect: first export that yields a spec.
+    for (const [name, value] of Object.entries(mod)) {
+      const candidate = resolveSpecFromExport(value);
+      if (candidate) {
+        doc = candidate;
+        resolvedFrom = name;
+        break;
+      }
+    }
+    if (!doc) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[frs] no OpenAPI spec found in ${entry}. Export a CRUD server (\`.spec()\`) ` +
+          "or an OpenAPI document (e.g. `export const openapi = apis.spec(\"v1\", routes)`), " +
+          "or pass --export <name>.",
+      );
+      process.exit(2);
+    }
+  }
+
+  const outAbs = resolve(process.cwd(), outFile);
+  mkdirSync(dirname(outAbs), { recursive: true });
+  writeFileSync(outAbs, `${JSON.stringify(doc, null, 2)}\n`, "utf8");
+  // eslint-disable-next-line no-console
+  console.log(
+    `[frs] wrote ${outAbs}  (OpenAPI ${String(doc.openapi ?? "?")} from export "${resolvedFrom}")`,
+  );
+}
+
 /**
  * Try to find the user's `apis.ts` (or similar) file and return a relative
  * import path from the new route file. Falls back to a sensible placeholder.
@@ -1386,6 +1499,9 @@ async function main(): Promise<void> {
     case "add":
       // `frs add service <name>` — argv[1] = target, argv[2] = name.
       await runAdd(argv[1], argv[2], flags);
+      return;
+    case "sdk:spec":
+      await runSdkSpec(flags);
       return;
     case "help":
     case "--help":

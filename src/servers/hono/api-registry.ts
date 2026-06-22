@@ -197,6 +197,23 @@ export interface ApiRegistry<
     api: K,
     routes: AnyRouteDef[],
   ): HonoServer;
+
+  /**
+   * Build the OpenAPI 3.1 document for a given API **statically** (no server
+   * boot / no network) — symmetric with the CRUD server's `.spec()`. Handy for
+   * a build-time export consumed by an SDK generator:
+   *
+   * ```ts
+   * // export-openapi.ts
+   * import { apis } from "./apis.js";
+   * import { routes } from "./domains/__generated__/routes.js";
+   * export const openapi = apis.spec("v1", routes);
+   * ```
+   */
+  spec<K extends keyof TMap & string>(
+    api: K,
+    routes: AnyRouteDef[],
+  ): Record<string, unknown>;
 }
 
 /**
@@ -249,6 +266,10 @@ export function createApiRegistry<
         errorHandler: (cfg as ApiConfig).errorHandler ?? sharedErrorHandler,
         logger: (cfg as ApiConfig).logger ?? sharedLogger,
       });
+    },
+
+    spec(api, routes) {
+      return this.serverFor(api, routes).buildOpenApiSpec();
     },
 
     toFunctions(routes, onRequest, opts) {

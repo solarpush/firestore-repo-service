@@ -718,8 +718,36 @@ v1: {
 | `frs gen --root <dir>` | Scan `<dir>` for `routes.ts` files and emit `__generated__/routes.ts`. |
 | `frs new <name> --domain <d>` | Scaffold a useCase + route + Vitest test. Prompts when flags are missing. |
 | `frs add service <name>` | Scaffold a service file and register it in `services.ts`. |
+| `frs add server <admin\|crud\|sync>` | Scaffold an ORM server (one file per server) + `repos.ts`/`servers.ts`. |
+| `frs sdk:spec --entry <module>` | Statically export the OpenAPI 3.1 spec to a JSON file (no server boot). |
 
 Run `frs help` for the full flag list.
+
+### Static OpenAPI export (`frs sdk:spec`)
+
+Export the OpenAPI 3.1 document to a file at build time — no server boot, no
+network — so a frontend can generate a typed SDK from it (openapi-typescript,
+orval, openapi-generator, …) and stay in sync with the API.
+
+The CLI imports a **Node-importable** module (built JS, or run it with
+`bunx frs sdk:spec …` for TS) and reads the spec from an export that is either a
+**CRUD server** (its `.spec()` accessor — preserved even when wrapped via
+`onRequest`) or a plain **OpenAPI document**. For Hono, expose the doc via the
+registry's static `apis.spec(api, routes)`:
+
+```ts
+// export-openapi.ts (Hono)
+import { apis } from "./apis.js";
+import { routes } from "./domains/__generated__/routes.js";
+export const openapi = apis.spec("v1", routes);
+```
+
+```bash
+# Hono — from the export above
+frs sdk:spec --entry lib/export-openapi.js --export openapi --out openapi.json
+# CRUD — auto-detects the `.spec()` server export
+frs sdk:spec --entry lib/crudServer.js --export api --out openapi.json
+```
 
 ### `.frsrc.json` — shared config
 

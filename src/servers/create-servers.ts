@@ -129,7 +129,14 @@ function maybeWrap<H extends RawHandler>(
 ): H | ReturnType<typeof OnRequestFn> {
   if (!deps.onRequest) return handler;
   const opts = handler.httpsOptions ?? deps.httpsOptions;
-  return opts ? deps.onRequest(opts, handler) : deps.onRequest(handler);
+  const wrapped = opts ? deps.onRequest(opts, handler) : deps.onRequest(handler);
+  // Preserve the programmatic OpenAPI accessor (CRUD's `.spec()`) on the
+  // wrapped Cloud Function so a static spec export still works after wrapping.
+  const spec = (handler as { spec?: unknown }).spec;
+  if (typeof spec === "function") {
+    (wrapped as { spec?: unknown }).spec = spec;
+  }
+  return wrapped;
 }
 
 function injectRepos<
