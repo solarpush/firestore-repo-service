@@ -71,3 +71,37 @@ describe("zodToFields — literal unions", () => {
     expect(f.hint).toBe("JSON");
   });
 });
+
+describe("zodToFields — transforms / effects", () => {
+  test("z.string().transform(...) renders as a text input, not JSON", () => {
+    const f = field(z.string().transform((v) => v.toUpperCase()));
+    expect(f.type).toBe("text");
+    expect(f.hint).not.toBe("JSON");
+  });
+
+  test("an optional transformed string is still a text input", () => {
+    const f = field(z.string().transform((v) => v).optional());
+    expect(f.type).toBe("text");
+    expect(f.required).toBe(false);
+  });
+
+  test("a transformed number renders as a number input", () => {
+    const f = field(z.number().transform((v) => v + 1));
+    expect(f.type).toBe("number");
+  });
+
+  test("a refined string still renders as a text input", () => {
+    const f = field(z.string().refine((v) => v.length > 0));
+    expect(f.type).toBe("text");
+  });
+
+  test("a transformed literal union still renders as a <select>", () => {
+    const f = field(
+      z
+        .union([z.literal("a"), z.literal("b")])
+        .transform((v) => v),
+    );
+    expect(f.type).toBe("select");
+    expect(f.options).toEqual(["a", "b"]);
+  });
+});

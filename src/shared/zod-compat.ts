@@ -111,6 +111,30 @@ export function getInnerType(schema: z.ZodType): z.ZodType | undefined {
 }
 
 /**
+ * Get the **source** schema of an effect / transform / pipe wrapper, i.e. the
+ * schema describing what the user actually provides:
+ *   - Zod 3 `ZodEffects` (`.transform()` / `.refine()` / `.preprocess()`) →
+ *     `_def.schema`;
+ *   - Zod 4 `ZodPipe` (the shape `.transform()` compiles to) → the `in` side.
+ *
+ * Lets form/field introspection see through `z.string().transform(...)` (which
+ * should still render as a text input) instead of falling back to a JSON
+ * textarea. Returns `undefined` when the schema is not an effect/pipe.
+ */
+export function getEffectInnerType(schema: z.ZodType): z.ZodType | undefined {
+  const s = schema as any;
+
+  // Zod 4: pipe — prefer the input side (what the user types).
+  const pipeIn = s._zod?.def?.in;
+  if (pipeIn) return pipeIn as z.ZodType;
+
+  // Zod 3: ZodEffects wraps the base schema under `_def.schema`.
+  if (s._def?.schema) return s._def.schema as z.ZodType;
+
+  return undefined;
+}
+
+/**
  * Get the **element schema** from a `ZodArray`.
  * Returns `undefined` for non-array schemas.
  */

@@ -53,6 +53,7 @@ import type { z } from "zod";
 import {
   getArrayElementType,
   getDefaultValue,
+  getEffectInnerType,
   getEnumValues,
   getInnerType,
   getLiteralValue,
@@ -136,6 +137,13 @@ function unwrap(schema: z.ZodType): {
       required = false;
       defaultValue = getDefaultValue(inner);
       inner = getInnerType(inner)!;
+    } else if (tn === "ZodEffects" || tn === "ZodPipe" || tn === "ZodTransform") {
+      // See through `.transform()` / `.refine()` / `.preprocess()` to the
+      // source schema so e.g. `z.string().transform(...)` still renders as a
+      // text input instead of a JSON textarea.
+      const effectInner = getEffectInnerType(inner);
+      if (!effectInner) break;
+      inner = effectInner;
     } else {
       break;
     }
