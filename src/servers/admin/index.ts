@@ -497,9 +497,11 @@ export function createAdminServer<
       mutableFields,
       createFields,
       allowDelete: cfg.allowDelete ?? false,
-      historyEnabled: !!(cfg.repo as any).history,
+      // Read history enablement from the static `_historyConfig` (no db
+      // resolution) rather than the dynamic `repo.history` methods namespace.
+      historyEnabled: !!(cfg.repo as any)._historyConfig?.enabled,
       historySubcollection:
-        ((cfg.repo as any).history &&
+        ((cfg.repo as any)._historyConfig?.enabled &&
           ((cfg.repo as any)._historySubcollection as string | undefined)) ??
         undefined,
       relationalMeta: (() => {

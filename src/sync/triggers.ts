@@ -36,10 +36,10 @@ const DEFAULT_TOPIC_PREFIX = "firestore-sync";
  * Derive the Firestore document path pattern for a trigger.
  * Returns `null` when the collection path cannot be determined.
  */
-function buildDocumentPath(repoName: string, repo: any): string | null {
-  const collectionPath: string | undefined =
-    (repo as any).ref?.path ?? undefined;
-
+function buildDocumentPath(
+  repoName: string,
+  collectionPath: string | null,
+): string | null {
   if (!collectionPath) {
     console.warn(
       `[SyncTriggers] Cannot determine collection path for "${repoName}". Skipping.`,
@@ -48,6 +48,36 @@ function buildDocumentPath(repoName: string, repo: any): string | null {
   }
 
   return `${collectionPath}/{docId}`;
+}
+
+/** Static, db-free metadata needed to register a sync trigger. */
+interface SyncRepoMeta {
+  isGroup: boolean;
+  documentKey: string;
+  /** Collection path of a non-group repo. */
+  collectionPath: string | null;
+}
+
+function syncMetaFromConfig(cfg: any): SyncRepoMeta {
+  const systemKeys = [
+    cfg?.documentKey,
+    cfg?.pathKey,
+    cfg?.createdKey,
+    cfg?.updatedKey,
+  ].filter((k): k is string => typeof k === "string");
+  return {
+    isGroup: !!cfg?.isGroup,
+    documentKey: systemKeys[0] ?? "docId",
+    collectionPath: typeof cfg?.path === "string" ? cfg.path : null,
+  };
+}
+
+function syncMetaFromRepo(repo: any): SyncRepoMeta {
+  return {
+    isGroup: !!repo?._isGroup,
+    documentKey: repo?._systemKeys?.[0] ?? "docId",
+    collectionPath: repo?.ref?.path ?? null,
+  };
 }
 
 /**
@@ -92,17 +122,29 @@ export function createSyncTriggers<M extends Record<string, any>>(
     await topic.publishMessage({ json: syncEvent });
   }
 
-  for (const [repoName, repo] of Object.entries(repoMapping) as [
-    string,
-    any,
-  ][]) {
+  // Prefer the raw mapping config (exposed by `createRepositoryMapping`) so
+  // triggers register WITHOUT resolving Firestore. Falls back to introspecting
+  // resolved repositories when a plain repo object is passed.
+  const rawMapping: Record<string, any> | undefined = (repoMapping as any)
+    ?.rawMapping;
+  const entries: [string, SyncRepoMeta][] = rawMapping
+    ? Object.entries(rawMapping).map(([name, cfg]) => [
+        name,
+        syncMetaFromConfig(cfg),
+      ])
+    : (Object.entries(repoMapping) as [string, any][]).map(([name, repo]) => [
+        name,
+        syncMetaFromRepo(repo),
+      ]);
+
+  for (const [repoName, meta] of entries) {
     const repoCfg = (
       config?.repos as Record<string, RepoSyncConfig<string>> | undefined
     )?.[repoName];
 
     let documentPath: string | null;
 
-    if ((repo as any)._isGroup) {
+    if (meta.isGroup) {
       if (!repoCfg?.triggerPath) {
         console.warn(
           `[SyncTriggers] Skipping collection-group repo "${repoName}". ` +
@@ -112,11 +154,13 @@ export function createSyncTriggers<M extends Record<string, any>>(
       }
       documentPath = repoCfg.triggerPath;
     } else {
-      documentPath = repoCfg?.triggerPath ?? buildDocumentPath(repoName, repo);
+      documentPath =
+        repoCfg?.triggerPath ??
+        buildDocumentPath(repoName, meta.collectionPath);
     }
     if (!documentPath) continue;
 
-    const documentKey: string = (repo as any)._systemKeys?.[0] ?? "docId";
+    const documentKey: string = meta.documentKey;
     const topicName = `${topicPrefix}-${repoName}`;
 
     triggers[`${repoName}_onCreate`] = onDocumentCreated(

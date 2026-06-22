@@ -353,6 +353,17 @@ export class RepositoryMapping<T extends Record<string, any>> {
   }
 
   /**
+   * Raw repository configs (the `mapping` passed to the factory), readable
+   * **without** triggering lazy Firestore resolution. Lets definition-time
+   * consumers (e.g. `createHistoryTriggers`) introspect static config such as
+   * the collection `path` / `history` settings before `initializeApp()` /
+   * `getFirestore()` would otherwise run.
+   */
+  get rawMapping(): T {
+    return this.mapping;
+  }
+
+  /**
    * Build every repository once, on first access, so cross-references and
    * circular relations are wired in a single two-pass init.
    * @private

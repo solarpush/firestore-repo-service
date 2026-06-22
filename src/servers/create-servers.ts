@@ -43,6 +43,7 @@ import type { HttpsOptions, onRequest as OnRequestFn } from "firebase-functions/
 import { createHistoryTriggers } from "../history/triggers";
 import type { HistoryTriggersConfig } from "../history/types";
 import type { ConfiguredRepository } from "../repositories/types";
+import { makeLazyRepo } from "../repositories/factory";
 import type { FirestoreSyncConfig } from "../sync/types";
 import { createFirestoreSync } from "../sync/create-sync";
 import {
@@ -140,14 +141,22 @@ function injectRepos<
   serverName: string,
 ): Record<string, TBoundCfg & { repo: ConfiguredRepository<any> }> {
   const out: Record<string, any> = {};
+  // Prefer the raw mapping (exposed by `createRepositoryMapping`) so we can
+  // validate repo existence and wrap each repo in a lazy proxy WITHOUT
+  // resolving Firestore — the db is only touched when a request handler uses a
+  // repository method. Falls back to eager access for a plain repo object.
+  const rawMapping: Record<string, any> | undefined = (repos as any)?.rawMapping;
   for (const [name, cfg] of Object.entries(bound)) {
     if (!cfg) continue;
-    const repo = repos[name as keyof TRepos];
-    if (!repo) {
+    const exists = rawMapping ? name in rawMapping : !!repos[name as keyof TRepos];
+    if (!exists) {
       throw new Error(
         `[createServers.${serverName}] Unknown repo "${name}" — not present in the registry passed to createServers().`,
       );
     }
+    const repo = rawMapping
+      ? makeLazyRepo(rawMapping[name], () => repos[name as keyof TRepos])
+      : repos[name as keyof TRepos];
     out[name] = { ...(cfg as object), repo } as any;
   }
   return out;

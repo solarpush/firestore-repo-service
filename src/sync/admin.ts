@@ -24,6 +24,7 @@ import { z } from "zod";
 import type { AnyReq, AnyRes, RouteParams } from "../servers/admin/router";
 import { MiniRouter } from "../servers/admin/router";
 import { isAuthExtension } from "../servers/auth";
+import { makeLazyRepo } from "../repositories/factory";
 import { getLinkBase } from "../servers/utils/link-base";
 import type { SyncQueue } from "./queue";
 import { zodSchemaToColumns } from "./schema-mapper";
@@ -135,10 +136,17 @@ export function createadminsyncServer(
   const basePath = (config.basePath ?? "/").replace(/\/$/, "") || "";
   const features = config.featuresFlag ?? {};
 
-  // Pre-compute repo info
+  // Pre-compute repo info. Wrap each repo in a lazy proxy so the static fields
+  // read here (schema / systemKeys / isGroup) come from the raw config WITHOUT
+  // resolving Firestore; `info.repo.ref` resolves lazily at request time.
+  const rawMapping: Record<string, any> | undefined = (repoMapping as any)
+    ?.rawMapping;
   const repoInfos: RepoInfo[] = [];
-  for (const [name, repo] of Object.entries(repoMapping)) {
+  for (const name of Object.keys(repoMapping)) {
     const repoCfg = repoConfigs[name];
+    const repo = rawMapping
+      ? makeLazyRepo(rawMapping[name], () => (repoMapping as Record<string, any>)[name])
+      : (repoMapping as Record<string, any>)[name];
     repoInfos.push({
       name,
       schema: (repo as any).schema ?? null,

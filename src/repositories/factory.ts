@@ -39,6 +39,70 @@ function extractParentKeys(refCb: unknown): string[] {
 }
 
 /**
+ * Build the **static** repository metadata that server/trigger builders read at
+ * definition time (schema, system keys, path/group flags, history settings,
+ * relational keys) directly from a raw repository **config** — i.e. without
+ * resolving Firestore. Mirrors the same fields exposed by the resolved
+ * repository, so it can back a {@link makeLazyRepo} overlay.
+ */
+export function buildRepoStaticMeta(config: any): Record<string, unknown> {
+  const systemKeys = [
+    config?.documentKey,
+    config?.pathKey,
+    config?.createdKey,
+    config?.updatedKey,
+  ].filter((k): k is string => typeof k === "string");
+  const historyConfig =
+    config?.history && typeof config.history === "object"
+      ? config.history
+      : undefined;
+  return {
+    schema: config?.schema,
+    _systemKeys: systemKeys,
+    _pathKey: (config?.pathKey as string | undefined) ?? null,
+    _isGroup: !!config?.isGroup,
+    _createdKey: (config?.createdKey as string | undefined) ?? null,
+    _parentKeys: config?.isGroup ? extractParentKeys(config?.refCb) : [],
+    relationalKeys: config?.relationalKeys,
+    _historyConfig: historyConfig,
+    _historySubcollection: historyConfig?.enabled
+      ? (historyConfig.subcollection ?? "history")
+      : undefined,
+    // Collection path of a non-group repo (== resolved `ref.path`). Lets
+    // trigger builders derive the document path without resolving the db.
+    _collectionPath: typeof config?.path === "string" ? config.path : null,
+  };
+}
+
+/**
+ * Wrap a repository behind a lazy Proxy: **static** metadata (see
+ * {@link buildRepoStaticMeta}) is served from `config` without resolving
+ * Firestore, while every dynamic access (`ref`, `get`, `query`, `history.*`, …)
+ * resolves the real repository on first use via `resolve()` and memoizes it.
+ *
+ * Lets server builders read static config at module-load time without forcing
+ * `getFirestore()` — the db is only touched when a request handler actually
+ * uses a repository method.
+ */
+export function makeLazyRepo<R>(config: any, resolve: () => R): R {
+  const overlay = buildRepoStaticMeta(config);
+  let resolved: R | undefined;
+  const ensure = (): R => (resolved ??= resolve());
+  return new Proxy(overlay as any, {
+    get(_t, prop) {
+      if (typeof prop === "string" && prop in overlay) {
+        return (overlay as any)[prop];
+      }
+      return (ensure() as any)[prop];
+    },
+    has(_t, prop) {
+      if (typeof prop === "string" && prop in overlay) return true;
+      return prop in (ensure() as any);
+    },
+  }) as R;
+}
+
+/**
  * Creates a configured repository instance with all methods
  */
 export function createRepository<

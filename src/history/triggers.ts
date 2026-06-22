@@ -34,10 +34,56 @@ import type {
 
 const DEFAULT_SUBCOLLECTION = "history";
 
+/** Static, db-free metadata needed to register a history trigger. */
+interface RepoHistoryMeta {
+  historyConfig: (HistoryConfigForModel<unknown> & { enabled: boolean }) | undefined;
+  systemKeys: string[];
+  isGroup: boolean;
+  /** Collection path of a non-group repo (used to derive the trigger path). */
+  collectionPath: string | null;
+}
+
+/** Read history metadata from a **raw repository config** (no db resolution). */
+function metaFromConfig(cfg: any): RepoHistoryMeta {
+  const historyConfig =
+    cfg && typeof cfg.history === "object" && cfg.history !== null
+      ? cfg.history
+      : undefined;
+  const systemKeys = [
+    cfg?.documentKey,
+    cfg?.pathKey,
+    cfg?.createdKey,
+    cfg?.updatedKey,
+  ].filter((k): k is string => typeof k === "string");
+  return {
+    historyConfig,
+    systemKeys,
+    isGroup: !!cfg?.isGroup,
+    collectionPath: typeof cfg?.path === "string" ? cfg.path : null,
+  };
+}
+
+/** Read history metadata from a **resolved repository** (forces db resolution). */
+function metaFromRepo(repo: any): RepoHistoryMeta {
+  const historyConfig =
+    repo._historyConfig ??
+    // Backward-compat: older repos exposed the config under `.history`
+    // (before that key became the methods namespace).
+    (typeof repo.history === "object" &&
+    repo.history !== null &&
+    "enabled" in repo.history
+      ? repo.history
+      : undefined);
+  return {
+    historyConfig,
+    systemKeys: (repo._systemKeys as string[]) ?? [],
+    isGroup: !!repo._isGroup,
+    collectionPath: repo.ref?.path ?? null,
+  };
+}
+
 /** Determine the trigger document path pattern for a non-group repo. */
-function buildDocumentPath(repoName: string, repo: any): string | null {
-  const collectionPath: string | undefined =
-    (repo as any).ref?.path ?? undefined;
+function buildDocumentPath(repoName: string, collectionPath: string | null): string | null {
   if (!collectionPath) {
     console.warn(
       `[HistoryTriggers] Cannot determine collection path for "${repoName}". Skipping.`,
@@ -54,20 +100,21 @@ export function createHistoryTriggers<M extends Record<string, any>>(
   const { onDocumentWritten } = config.deps;
   const triggers: Record<string, any> = {};
 
-  for (const [repoName, repo] of Object.entries(repoMapping) as [
-    string,
-    any,
-  ][]) {
-    const repoCfg = ((repo as any)._historyConfig ??
-      // Backward-compat: older repos exposed the config under `.history`
-      // (before that key became the methods namespace).
-      (typeof (repo as any).history === "object" &&
-      (repo as any).history !== null &&
-      "enabled" in (repo as any).history
-        ? (repo as any).history
-        : undefined)) as
-      | (HistoryConfigForModel<unknown> & { enabled: boolean })
-      | undefined;
+  // Prefer the raw mapping config (exposed by `createRepositoryMapping`) so we
+  // register triggers WITHOUT resolving Firestore — mirroring the lazy db
+  // initialization used by the repository methods. Falls back to introspecting
+  // the resolved repositories when a plain repo object is passed.
+  const rawMapping: Record<string, any> | undefined = (repoMapping as any)
+    ?.rawMapping;
+  const entries: [string, RepoHistoryMeta][] = rawMapping
+    ? Object.entries(rawMapping).map(([name, cfg]) => [name, metaFromConfig(cfg)])
+    : (Object.entries(repoMapping) as [string, any][]).map(([name, repo]) => [
+        name,
+        metaFromRepo(repo),
+      ]);
+
+  for (const [repoName, meta] of entries) {
+    const repoCfg = meta.historyConfig;
     if (!repoCfg?.enabled) continue;
 
     const subcollection = repoCfg.subcollection ?? DEFAULT_SUBCOLLECTION;
@@ -75,7 +122,7 @@ export function createHistoryTriggers<M extends Record<string, any>>(
 
     const override = config.repos?.[repoName as keyof M & string];
     let documentPath: string | null;
-    if ((repo as any)._isGroup) {
+    if (meta.isGroup) {
       if (!override?.triggerPath) {
         console.warn(
           `[HistoryTriggers] Skipping collection-group repo "${repoName}". ` +
@@ -85,11 +132,13 @@ export function createHistoryTriggers<M extends Record<string, any>>(
       }
       documentPath = override.triggerPath;
     } else {
-      documentPath = override?.triggerPath ?? buildDocumentPath(repoName, repo);
+      documentPath =
+        override?.triggerPath ??
+        buildDocumentPath(repoName, meta.collectionPath);
     }
     if (!documentPath) continue;
 
-    const systemKeys: string[] = (repo as any)._systemKeys ?? [];
+    const systemKeys: string[] = meta.systemKeys;
     const documentKey: string = systemKeys[0] ?? "docId";
     const metaFields = metaFieldsOf(repoCfg as HistoryConfigForModel<unknown>);
 
