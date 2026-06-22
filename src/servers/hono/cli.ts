@@ -39,6 +39,18 @@ interface FrsConfig {
   apis?: string[];
   out?: string;
   useCaseFolder?: string;
+  /**
+   * Paths to the scaffolded ORM server files (`frs add server <type>`).
+   * `rootPath` is the shared `servers.ts` (createServers); `reposPath` is the
+   * repository registry; `admin`/`crud`/`sync` are the per-server files.
+   */
+  servers?: {
+    rootPath?: string;
+    reposPath?: string;
+    admin?: string;
+    crud?: string;
+    sync?: string;
+  };
 }
 
 function readConfig(cwd: string = process.cwd()): FrsConfig {
@@ -86,6 +98,7 @@ Usage:
   frs gen  [flags]
   frs new  <name> [flags]
   frs add  service <name> [flags]
+  frs add  server <admin|crud|sync> [flags]
   frs help
 
 Flags (init):
@@ -140,11 +153,21 @@ Flags (add service <name>):
                         (default: <dir-of-services-file>/services)
   --force               Overwrite existing files
 
+Flags (add server <admin|crud|sync>):
+  --dir <dir>           Directory for the server files (default: .frsrc.json
+                        servers dir, or dir of apis.ts, or "src")
+  --force               Overwrite existing files
+  Scaffolds repos.ts + servers.ts (once) and <type>Server.ts, and records
+  their paths in .frsrc.json under "servers".
+
 Examples:
   frs init
   frs new createPost --domain posts --method post
   frs new listPosts  --domain posts --method get --api v1
   frs add service postRepo
+  frs add server admin
+  frs add server crud
+  frs add server sync
 `);
 }
 
@@ -925,10 +948,14 @@ async function runAdd(
   name: string | undefined,
   flags: ParsedArgs["flags"],
 ): Promise<void> {
+  if (what === "server") {
+    await runAddServer(name, flags);
+    return;
+  }
   if (what !== "service") {
     // eslint-disable-next-line no-console
     console.error(
-      `[frs] unknown "add" target: ${what ?? "(missing)"} — supported: service`,
+      `[frs] unknown "add" target: ${what ?? "(missing)"} — supported: service, server`,
     );
     process.exit(2);
   }
@@ -1063,6 +1090,214 @@ export class ${className} {
   writeFileSync(servicesAbs, updated, "utf8");
   // eslint-disable-next-line no-console
   console.log(`[frs] updated ${servicesAbs}  (+ ${name})`);
+}
+
+// ---------------------------------------------------------------------------
+// `add server <admin|crud|sync>` — scaffold an ORM server (one file per server)
+// ---------------------------------------------------------------------------
+
+const PKG = "@lpdjs/firestore-repo-service";
+
+/** Repository registry (`repos.ts`) — lazy Firestore, one example repo. */
+function reposTemplate(): string {
+  return `import { type Firestore, getFirestore } from "firebase-admin/firestore";
+import {
+  createRepositoryConfig,
+  createRepositoryMapping,
+} from "${PKG}";
+import { z } from "zod";
+
+/**
+ * Repository registry — the single source of truth shared by every ORM server
+ * (admin / crud / sync). The \`getFirestore\` factory is resolved lazily (on
+ * first repository use), so this file can be imported before \`initializeApp()\`.
+ */
+
+// Example model — replace with your own schema(s).
+const exampleSchema = z.object({
+  docId: z.string(),
+  name: z.string(),
+});
+
+export const repos = createRepositoryMapping(() => getFirestore(), {
+  example: createRepositoryConfig(exampleSchema)({
+    path: "examples",
+    isGroup: false,
+    foreignKeys: ["docId"] as const,
+    queryKeys: [] as const,
+    documentKey: "docId",
+    refCb: (db: Firestore, docId: string) =>
+      db.collection("examples").doc(docId),
+  }),
+  // TODO: add your repositories here.
+});
+`;
+}
+
+/** Shared `servers.ts` — wires the registry into `createServers`. */
+function serversRootTemplate(reposImport: string): string {
+  return `import { onRequest } from "firebase-functions/v2/https";
+import { createServers } from "${PKG}";
+import { repos } from "${reposImport}";
+
+/**
+ * Shared server factory, pre-bound to the repository registry. Each server is
+ * defined in its own file (e.g. \`adminServer.ts\`) via \`servers.admin(...)\`,
+ * \`servers.crud(...)\`, \`servers.sync(...)\` and re-exported from your Functions
+ * entrypoint. Passing \`onRequest\` makes the admin/crud builders return a
+ * ready-to-export Cloud Function.
+ */
+export const servers = createServers(repos, { onRequest });
+`;
+}
+
+/** Per-server templates, keyed by server type. */
+function serverTemplate(type: "admin" | "crud" | "sync", serversImport: string): string {
+  if (type === "admin") {
+    return `import { servers } from "${serversImport}";
+
+/**
+ * Admin UI server. Each key maps a repository (from the registry) to its admin
+ * display/permissions config. Export this from your Functions entrypoint.
+ */
+export const admin = servers.admin({
+  basePath: "/admin",
+  repos: {
+    example: { path: "examples", allowDelete: true },
+    // TODO: add the repositories you want to expose in the admin UI.
+  },
+});
+`;
+  }
+  if (type === "crud") {
+    return `import { servers } from "${serversImport}";
+
+/**
+ * CRUD REST API server. Each key maps a repository to its CRUD config (rules,
+ * field roles, …). Export this from your Functions entrypoint.
+ */
+export const api = servers.crud({
+  basePath: "/api",
+  repos: {
+    example: { path: "examples", allowDelete: true },
+    // TODO: add the repositories you want to expose over REST.
+  },
+});
+`;
+  }
+  // sync
+  return `import * as firestoreTriggers from "firebase-functions/v2/firestore";
+import { onMessagePublished } from "firebase-functions/v2/pubsub";
+import { onRequest } from "firebase-functions/v2/https";
+// TODO: \`npm i @google-cloud/pubsub\` and provide a SQL adapter (e.g. BigQuery).
+import { PubSub } from "@google-cloud/pubsub";
+import { servers } from "${serversImport}";
+
+/**
+ * Firestore → SQL sync pipeline (triggers + worker + optional admin). Spread
+ * the returned \`functions\` from your Functions entrypoint:
+ *   export const { functions: syncFunctions } = sync;
+ */
+export const sync = servers.sync({
+  deps: {
+    firestoreTriggers,
+    pubsubHandler: onMessagePublished,
+    pubsub: new PubSub(),
+  },
+  // TODO: provide your SQL adapter (e.g. a BigQuery adapter instance).
+  adapter: undefined as any,
+  repos: {
+    // example: { tableName: "examples" },
+    // TODO: map repositories to their SQL tables.
+  },
+  // Optional bundled admin endpoint:
+  // admin: { onRequest, basePath: "/__sync" },
+});
+`;
+}
+
+async function runAddServer(
+  type: string | undefined,
+  flags: ParsedArgs["flags"],
+): Promise<void> {
+  const valid = ["admin", "crud", "sync"] as const;
+  if (!type || !(valid as readonly string[]).includes(type)) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[frs] server type is required: frs add server <${valid.join("|")}>`,
+    );
+    process.exit(2);
+  }
+  const serverType = type as (typeof valid)[number];
+  const force = flags.force === true;
+  const cfg = readConfig();
+
+  // Base directory: reuse the directory of an existing servers root / repos /
+  // apis file, else `--dir`, else `src`.
+  const dirFlag = asString(flags.dir);
+  const baseDir =
+    dirFlag ??
+    (cfg.servers?.rootPath && dirname(cfg.servers.rootPath)) ??
+    (cfg.apisFile && dirname(cfg.apisFile)) ??
+    "src";
+
+  const reposPath = cfg.servers?.reposPath ?? `${baseDir}/repos.ts`;
+  const rootPath = cfg.servers?.rootPath ?? `${baseDir}/servers.ts`;
+  const serverFileName =
+    serverType === "crud" ? "crudServer.ts" : `${serverType}Server.ts`;
+  const serverPath = cfg.servers?.[serverType] ?? `${baseDir}/${serverFileName}`;
+
+  const reposAbs = resolve(process.cwd(), reposPath);
+  const rootAbs = resolve(process.cwd(), rootPath);
+  const serverAbs = resolve(process.cwd(), serverPath);
+
+  const written: string[] = [];
+  const skipped: string[] = [];
+  const writeIfPossible = (file: string, content: string) => {
+    mkdirSync(dirname(file), { recursive: true });
+    if (existsSync(file) && !force) {
+      skipped.push(file);
+      return;
+    }
+    writeFileSync(file, content, "utf8");
+    written.push(file);
+  };
+
+  // 1) repos.ts (registry) — scaffolded once.
+  writeIfPossible(reposAbs, reposTemplate());
+
+  // 2) servers.ts (shared factory) — scaffolded once, imports the registry.
+  writeIfPossible(
+    rootAbs,
+    serversRootTemplate(relativeImport(dirname(rootAbs), reposAbs)),
+  );
+
+  // 3) <type>Server.ts — the requested server.
+  writeIfPossible(
+    serverAbs,
+    serverTemplate(serverType, relativeImport(dirname(serverAbs), rootAbs)),
+  );
+
+  // 4) Persist resolved paths under `servers` in .frsrc.json.
+  const cfgFile = writeConfig({
+    servers: {
+      ...cfg.servers,
+      rootPath,
+      reposPath,
+      [serverType]: serverPath,
+    },
+  });
+  written.push(cfgFile);
+
+  // eslint-disable-next-line no-console
+  for (const f of written) console.log(`[frs] wrote   ${f}`);
+  for (const f of skipped)
+    // eslint-disable-next-line no-console
+    console.log(`[frs] skipped ${f} (use --force to overwrite)`);
+  // eslint-disable-next-line no-console
+  console.log(
+    `\n[frs] reminder: export the \`${serverType === "crud" ? "api" : serverType}\` from your Functions entrypoint (e.g. src/index.ts).`,
+  );
 }
 
 /**

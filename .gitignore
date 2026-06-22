@@ -10,6 +10,10 @@ out
 docs/static/.vitepress/cache
 docs/static/.vitepress/dist
 
+# Generated LLM context files (derived from the docs at build time)
+docs/static/public/llms.txt
+docs/static/public/llms-full.txt
+
 # code coverage
 coverage
 *.lcov

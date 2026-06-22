@@ -148,8 +148,9 @@
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
-    "build": "tsup",
-    "build:docs": "bun run --cwd docs/static docs:build",
+    "build": "tsup && bun scripts/generate-llms.ts",
+    "build:llms": "bun scripts/generate-llms.ts",
+    "build:docs": "bun scripts/generate-llms.ts && bun run --cwd docs/static docs:build",
     "prepublishOnly": "bun run build",
     "test": "bun test test/repo.test.ts",
     "test:watch": "concurrently --kill-others -n emu,test -c cyan,yellow \"bun run emulator\" \"wait-on tcp:8080 && bun test test/repo.test.ts --watch\"",
