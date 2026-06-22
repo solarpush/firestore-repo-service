@@ -238,6 +238,25 @@ export function getLiteralValue(schema: z.ZodType): unknown {
   return s._def?.value;
 }
 
+/**
+ * Get the member schemas of a ZodUnion (or ZodDiscriminatedUnion).
+ * Works with both Zod 3 (`_def.options`) and Zod 4 (`.options` /
+ * `_zod.def.options`). Returns an empty array when none can be resolved.
+ */
+export function getUnionOptions(schema: z.ZodType): z.ZodType[] {
+  const s = schema as any;
+
+  // Zod 4
+  if (Array.isArray(s.options)) return s.options as z.ZodType[];
+  if (Array.isArray(s._zod?.def?.options))
+    return s._zod.def.options as z.ZodType[];
+
+  // Zod 3
+  if (Array.isArray(s._def?.options)) return s._def.options as z.ZodType[];
+
+  return [];
+}
+
 // ---------------------------------------------------------------------------
 // String checks
 // ---------------------------------------------------------------------------

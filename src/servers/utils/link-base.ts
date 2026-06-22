@@ -18,11 +18,22 @@
  *
  * @param req           The incoming request (needs `headers.host` / `hostname`).
  * @param staticBasePath The user-configured base path (e.g. `"/api"`).
+ * @param region        Explicit deployment region (e.g. `"europe-west1"`).
+ *                      Used **only** in the emulator branch to build the
+ *                      `/{project}/{region}/{target}` prefix; when omitted it
+ *                      falls back to `FUNCTION_REGION` then `"us-central1"`.
+ *                      Pass it (e.g. from `httpsOptions.region`) whenever the
+ *                      function is deployed outside `us-central1`, since the
+ *                      emulator does not reliably expose the region via env.
  * @returns A path prefix (no trailing slash) suitable for prepending to
  *          `req.url` to build a same-function absolute URL.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getLinkBase(req: any, staticBasePath: string): string {
+export function getLinkBase(
+  req: any,
+  staticBasePath: string,
+  region?: string,
+): string {
   const base = staticBasePath === "/" ? "" : staticBasePath.replace(/\/$/, "");
 
   if (process.env["FUNCTIONS_EMULATOR"] === "true") {
@@ -30,11 +41,12 @@ export function getLinkBase(req: any, staticBasePath: string): string {
       process.env["GCLOUD_PROJECT"] ??
       process.env["GOOGLE_CLOUD_PROJECT"] ??
       "demo-project";
-    const region = process.env["FUNCTION_REGION"] ?? "us-central1";
+    const resolvedRegion =
+      region ?? process.env["FUNCTION_REGION"] ?? "us-central1";
     // FUNCTION_TARGET uses dots (e.g. "sync.functions.adminsync") but the
     // emulator URL uses hyphens ("sync-functions-adminsync").
     const target = (process.env["FUNCTION_TARGET"] ?? "").replace(/\./g, "-");
-    return `/${project}/${region}/${target}${base}`;
+    return `/${project}/${resolvedRegion}/${target}${base}`;
   }
 
   // Cloud Functions v2: K_SERVICE = function name = URL path prefix.
@@ -50,4 +62,19 @@ export function getLinkBase(req: any, staticBasePath: string): string {
   }
 
   return base;
+}
+
+/**
+ * Normalise the `region` field of a Firebase `HttpsOptions` (which may be a
+ * single region, an array, a CEL `Expression`, or a `ResetValue`) into a single
+ * concrete region string for {@link getLinkBase}. Returns `undefined` for
+ * anything that is not a plain string at config time.
+ */
+export function resolveRegion(region: unknown): string | undefined {
+  if (typeof region === "string") return region;
+  if (Array.isArray(region)) {
+    const first = region[0];
+    return typeof first === "string" ? first : undefined;
+  }
+  return undefined;
 }

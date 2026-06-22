@@ -739,17 +739,21 @@ function getMutableSchema(
  * Compute the link base for all UI links.
  * @see {@link import("../utils/link-base").getLinkBase}
  */
-function getLinkBase(req: AnyReq, staticBasePath: string): string {
-  return getLinkBaseShared(req, staticBasePath);
+function getLinkBase(req: AnyReq, staticBasePath: string, region?: string): string {
+  return getLinkBaseShared(req, staticBasePath, region);
 }
 
-export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
+export function createAdminHandlers(
+  registry: RepoRegistry,
+  basePath: string,
+  region?: string,
+) {
   // ── Dashboard ─────────────────────────────────────────────────────────────
   const handleDashboard = (
     req: AnyReq & { params: RouteParams },
     res: AnyRes,
   ): void => {
-    const lb = getLinkBase(req, basePath);
+    const lb = getLinkBase(req, basePath, region);
     const repos = Object.values(registry).map((e) => ({
       name: e.name,
       path: e.path,
@@ -901,7 +905,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
     const nextCursorId = isError ? "" : (result.nextCursor?.id ?? "");
     const prevCursorId = isError ? "" : (result.prevCursor?.id ?? "");
     const queryError = isError ? result.queryError : undefined;
-    const lb = getLinkBase(req, basePath);
+    const lb = getLinkBase(req, basePath, region);
 
     sendHtml(
       res,
@@ -949,7 +953,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       return;
     }
 
-    const lb = getLinkBase(req, basePath);
+    const lb = getLinkBase(req, basePath, region);
     const createSchema = getMutableSchema(entry.schema, entry.createFields);
     const fields = zodToFields(createSchema);
     const actionUrl = `${lb}/${entry.name}/create`;
@@ -974,7 +978,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       return;
     }
 
-    const lb = getLinkBase(req, basePath);
+    const lb = getLinkBase(req, basePath, region);
     const rawBody =
       (req.body as Record<string, string | string[] | undefined>) ?? {};
     const parsed = parseFormBody(rawBody, entry.schema);
@@ -1054,7 +1058,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       return;
     }
 
-    const lb = getLinkBase(req, basePath);
+    const lb = getLinkBase(req, basePath, region);
 
     let doc: Record<string, unknown> | null = null;
     try {
@@ -1110,7 +1114,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       sendHtml(res, "Repository not found", 404);
       return;
     }
-    const lb = getLinkBase(req, basePath);
+    const lb = getLinkBase(req, basePath, region);
     const rawBody =
       (req.body as Record<string, string | string[] | undefined>) ?? {};
     const parsed = parseFormBody(rawBody, entry.schema);
@@ -1193,7 +1197,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       sendHtml(res, "Delete is not allowed for this repository", 403);
       return;
     }
-    const lb = getLinkBase(req, basePath);
+    const lb = getLinkBase(req, basePath, region);
     try {
       // Fetch document to extract path args for subcollection repos
       const doc = await fetchDocById(entry, docId);
@@ -1240,7 +1244,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       sendHtml(res, "Repository not found", 404);
       return;
     }
-    const lb = getLinkBase(req, basePath);
+    const lb = getLinkBase(req, basePath, region);
     const query = (req as any).query as Record<string, string> | undefined;
     const type = query?.["type"] === "many" ? "many" : "one";
     const ps = Math.max(1, Math.min(100, Number(query?.["ps"] ?? 25) || 25));
@@ -1582,7 +1586,7 @@ export function createAdminHandlers(registry: RepoRegistry, basePath: string) {
       return;
     }
 
-    const lb = getLinkBase(req, basePath);
+    const lb = getLinkBase(req, basePath, region);
     const subcollection = entry.historySubcollection ?? "history";
 
     let pathArgs: string[] = [docId];

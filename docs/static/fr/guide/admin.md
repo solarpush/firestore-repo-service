@@ -230,6 +230,8 @@ Le callback `allow()` mappe un utilisateur Firebase vérifié vers votre context
 
 ::: tip Émulateur Auth
 L'Admin SDK cible déjà l'émulateur Auth quand `FIREBASE_AUTH_EMULATOR_HOST` est défini. La page de login fait désormais de même : passe `authEmulatorHost` (par défaut cette même variable d'env) et son SDK client est câblé via `connectAuthEmulator`, pour que les connexions locales `firebase emulators:start` marchent de bout en bout. Passe `authEmulatorHost: ""` pour forcer la prod même sous l'émulateur. Vaut pour `servers.admin()`, `servers.crud()` et l'admin de sync.
+
+**Région hors `us-central1` ?** Sous l'émulateur la région n'est pas exposée de façon fiable : les URLs same-function de la page de login retombent sur `us-central1`, d'où un POST de session en 404 si tu déploies ailleurs. Passe ta région à `firebaseAuth({ region: "europe-west1", ... })` pour que le préfixe login/session soit correct. (Le reste des liens de l'UI admin récupère la région automatiquement depuis `httpsOptions.region`.)
 :::
 
 ## Règles d'autorisation par repo (CRUD)

@@ -60,6 +60,7 @@ import {
   getShape,
   getStringChecks,
   getTypeName,
+  getUnionOptions,
 } from "../../shared/zod-compat";
 
 // ---------------------------------------------------------------------------
@@ -259,6 +260,39 @@ function zodFieldToDescriptor(
         nullable,
         defaultValue,
         options: [value],
+      };
+    }
+
+    case "ZodUnion": {
+      // A union of string/number literals (e.g.
+      // `z.union([z.literal("a"), z.literal("b")])`) is semantically an enum —
+      // render it as a <select>. Mixed / non-literal unions fall through to the
+      // JSON textarea default below.
+      const options = getUnionOptions(inner);
+      const allLiterals =
+        options.length > 0 &&
+        options.every((opt) => getTypeName(opt) === "ZodLiteral");
+      if (allLiterals) {
+        const values = options.map((opt) => String(getLiteralValue(opt) ?? ""));
+        return {
+          name,
+          label,
+          type: "select",
+          required,
+          nullable,
+          defaultValue,
+          options: values,
+        };
+      }
+      // Mixed / non-literal union → JSON textarea fallback.
+      return {
+        name,
+        label,
+        type: "textarea",
+        required,
+        nullable,
+        defaultValue,
+        hint: "JSON",
       };
     }
 

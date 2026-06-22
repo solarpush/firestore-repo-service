@@ -201,6 +201,16 @@ export interface FirebaseAuthConfig<TContext = unknown> {
   sameSite?: "Strict" | "Lax" | "None";
 
   /**
+   * Deployment region (e.g. `"europe-west1"`). Used to build the login page's
+   * same-function URLs **under the Firebase emulator**, which does not reliably
+   * expose the region via env — without it the emulator prefix falls back to
+   * `us-central1`, so the session POST 404s when deployed elsewhere. Has no
+   * effect in production (the prefix is derived from the request there). When
+   * created via `servers.admin/crud()` this defaults to `httpsOptions.region`.
+   */
+  region?: string;
+
+  /**
    * Firebase Auth emulator host (e.g. `127.0.0.1:9099`). When set, the login
    * page's client SDK is pointed at the emulator via `connectAuthEmulator`,
    * matching the Admin SDK (which already targets the emulator when
@@ -459,7 +469,7 @@ export function firebaseAuth<TContext = unknown>(
     // custom domains) + the in-router request path. The browser otherwise
     // resolves form actions relative to the public URL, which doesn't
     // include the function name on Cloud Functions.
-    const prefix = getLinkBase(req, "/");
+    const prefix = getLinkBase(req, "/", config.region);
     const inner = req.url ?? "/";
     // Sanitize to a same-origin path so a crafted request URL (e.g.
     // `//evil.com/...` on a custom domain where the prefix is empty) cannot

@@ -51,6 +51,7 @@ import {
   type SecurityHeadersOptions,
   securityHeaders,
 } from "../utils/security-headers";
+import { resolveRegion } from "../utils/link-base";
 // ---------------------------------------------------------------------------
 // Public option types
 // ---------------------------------------------------------------------------
@@ -524,7 +525,11 @@ export function createAdminServer<
     registry[name] = entry;
   }
 
-  const handlers = createAdminHandlers(registry, base);
+  const handlers = createAdminHandlers(
+    registry,
+    base,
+    resolveRegion(httpsOptions?.region),
+  );
 
   // ── Router ─────────────────────────────────────────────────────────────
   const router = new MiniRouter();
