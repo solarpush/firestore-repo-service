@@ -42,7 +42,7 @@ describe("apis.spec — static Hono OpenAPI export", () => {
 
   test("throws on an unknown api tag", () => {
     const apis = createApiRegistry({ v1: { basePath: "/v1", openapi } });
-    // @ts-expect-error unknown tag
+    // @ts-expect-error unknown tag — also a compile error (literal-key inference)
     expect(() => apis.spec("ghost", [])).toThrow(/unknown api/);
   });
 });

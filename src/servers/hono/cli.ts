@@ -16,6 +16,7 @@ import { dirname, relative, resolve } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
 
 import { generateRoutesManifest } from "./codegen/generator";
 import { DEFAULT_DERIVE, type PathDeriveOptions } from "./codegen/path-utils";
@@ -1350,13 +1351,22 @@ async function runSdkSpec(flags: ParsedArgs["flags"]): Promise<void> {
     console.error(`[frs] entry not found: ${entryAbs}`);
     process.exit(2);
   }
+  // Node can't import a TypeScript entry. When we're not already on a TS-capable
+  // runtime, transparently re-run this exact command under `bun` (which imports
+  // TS natively) so the whole resolution logic is reused as-is.
   if (/\.tsx?$/.test(entryAbs) && !process.versions.bun) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `[frs] cannot import a TypeScript entry under Node: ${entry}\n` +
-        "      Build it to JS first (e.g. tsc → lib/…) and point --entry there, or run with a TS runtime: `bunx frs sdk:spec ...`.",
-    );
-    process.exit(2);
+    const argv = process.argv.slice(1); // [thisCliPath, ...originalArgs]
+    const res = spawnSync("bun", argv, { stdio: "inherit" });
+    if (res.error && (res.error as NodeJS.ErrnoException).code === "ENOENT") {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[frs] a TypeScript entry needs a TS runtime, and \`bun\` was not found on PATH: ${entry}\n` +
+          "      Either: (a) build it to JS first (e.g. tsc → lib/…) and point --entry there, or " +
+          "(b) install bun and re-run, or run with `bun frs sdk:spec ...`.",
+      );
+      process.exit(2);
+    }
+    process.exit(res.status ?? 0);
   }
 
   const outFile = asString(flags.out) ?? "openapi.json";

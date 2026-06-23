@@ -193,10 +193,7 @@ export interface ApiRegistry<
   ): { [K in keyof TMap & string]: ReturnType<OnRequestFn> };
 
   /** Build the underlying {@link HonoServer} for a given API (escape hatch). */
-  serverFor<K extends keyof TMap & string>(
-    api: K,
-    routes: AnyRouteDef[],
-  ): HonoServer;
+  serverFor(api: keyof TMap & string, routes: AnyRouteDef[]): HonoServer;
 
   /**
    * Build the OpenAPI 3.1 document for a given API **statically** (no server
@@ -209,11 +206,10 @@ export interface ApiRegistry<
    * import { routes } from "./domains/__generated__/routes.js";
    * export const openapi = apis.spec("v1", routes);
    * ```
+   *
+   * The `api` argument is constrained to the registered tags.
    */
-  spec<K extends keyof TMap & string>(
-    api: K,
-    routes: AnyRouteDef[],
-  ): Record<string, unknown>;
+  spec(api: keyof TMap & string, routes: AnyRouteDef[]): Record<string, unknown>;
 }
 
 /**
@@ -231,7 +227,12 @@ export function createApiRegistry<
   const TMap extends ApiConfigMap,
   TServices extends AnyServicesContainer = AnyServicesContainer,
 >(
-  configs: { [K in keyof TMap]: StrictApiConfig<TMap[K]> },
+  // `TMap & { … StrictApiConfig … }` rather than just the mapped type: the
+  // intersection lets `const TMap` infer the **literal API tag keys** from the
+  // argument (so `keyof TMap` is e.g. `"v1" | "v2"`, used to type `defineRoute`,
+  // `toFunctions`, `serverFor`, `spec`), while the mapped half still rejects
+  // unknown / typo'd config keys via {@link StrictApiConfig}.
+  configs: TMap & { [K in keyof TMap]: StrictApiConfig<TMap[K]> },
   options?: ApiRegistryOptions<TServices>,
 ): ApiRegistry<TMap, TServices> {
   const sharedServices = options?.services;
