@@ -337,42 +337,18 @@ function frsGetBasePath() {
     var renderValueInput = function () {
       if (!valueContainer || !select) return;
       var name = select.value;
-      var meta = fields.filter(function (f) {
-        return f.name === name;
-      })[0];
-      if (!meta) {
+      if (!name) {
         valueContainer.innerHTML = "";
         return;
       }
-      var inputHtml = "";
-      var label =
-        '<div class="label"><span class="label-text text-xs uppercase tracking-wide">Value</span></div>';
-      if (meta.type === "boolean") {
-        inputHtml =
-          '<select name="value" class="select select-bordered select-sm w-full">' +
-          '<option value="true">true</option><option value="false">false</option>' +
-          "</select>";
-      } else if (
-        (meta.type === "enum" || meta.type === "literal") &&
-        meta.enumValues &&
-        meta.enumValues.length
-      ) {
-        inputHtml =
-          '<select name="value" class="select select-bordered select-sm w-full">';
-        meta.enumValues.forEach(function (v) {
-          inputHtml +=
-            '<option value="' + escapeAttr(v) + '">' + escapeHtml(v) + "</option>";
-        });
-        inputHtml += "</select>";
-      } else if (meta.type === "number" || meta.type === "bigint") {
-        inputHtml =
-          '<input type="number" step="any" name="value" class="input input-bordered input-sm w-full" />';
+      var template = document.querySelector(
+        '[data-frs-bulk-template-for="' + escapeAttr(name) + '"]',
+      );
+      if (template) {
+        valueContainer.innerHTML = template.innerHTML;
       } else {
-        inputHtml =
-          '<input type="text" name="value" class="input input-bordered input-sm w-full" />';
+        valueContainer.innerHTML = "";
       }
-      valueContainer.innerHTML =
-        '<label class="form-control w-full">' + label + inputHtml + "</label>";
     };
     if (select) {
       select.value = "";
@@ -384,24 +360,37 @@ function frsGetBasePath() {
       form.onsubmit = function (e) {
         e.preventDefault();
         if (!select || !select.value) return;
-        var meta = fields.filter(function (f) {
-          return f.name === select.value;
-        })[0];
-        if (!meta) return;
-        var input = valueContainer.querySelector(
-          'input[name="value"], select[name="value"]',
-        );
-        if (!input) return;
-        var raw = input.value;
-        var typed;
-        if (meta.type === "boolean") typed = raw === "true";
-        else if (meta.type === "number") typed = raw === "" ? null : Number(raw);
-        else if (meta.type === "bigint") typed = raw === "" ? null : Number(raw);
-        else typed = raw;
+
+        // Run validation & array serialization
+        if (!frsSerializeForm(form)) return;
+
         var payload = buildPayload();
         if (!payload) return;
         payload.field = select.value;
-        payload.value = typed;
+
+        // Gather all form inputs except the select box itself
+        var formData = new FormData(form);
+        var formPayload = {};
+        formData.forEach(function (value, key) {
+          if (key === "field") return;
+          if (formPayload[key] !== undefined) {
+            if (!Array.isArray(formPayload[key])) {
+              formPayload[key] = [formPayload[key]];
+            }
+            formPayload[key].push(value);
+          } else {
+            formPayload[key] = value;
+          }
+        });
+
+        // Also merge hidden inputs created by the array serializer
+        form.querySelectorAll("input[type=hidden][name]").forEach(function (h) {
+          if (h.name !== "field") {
+            formPayload[h.name] = h.value;
+          }
+        });
+
+        payload.formPayload = formPayload;
         var url = repoEndpoint("update");
         if (!url) return;
         fetch(url, {
@@ -484,10 +473,7 @@ function frsGetBasePath() {
 })();
 
 // ── Form validation + array serialization ───────────────────────────────────
-document.addEventListener("submit", function (e) {
-  var form = e.target;
-  if (!form.hasAttribute("data-frs-form")) return;
-
+function frsSerializeForm(form) {
   // 1. Validate JSON textareas
   var valid = true;
   form.querySelectorAll("textarea[data-json]").forEach(function (ta) {
@@ -497,11 +483,10 @@ document.addEventListener("submit", function (e) {
       JSON.parse(v);
     } catch (err) {
       valid = false;
-      e.preventDefault();
       alert('Invalid JSON in field "' + ta.name + '":\n' + err.message);
     }
   });
-  if (!valid) return;
+  if (!valid) return false;
 
   // 2. Serialize array fields into hidden inputs
   form.querySelectorAll("[data-frs-array]").forEach(function (fieldset) {
@@ -554,6 +539,16 @@ document.addEventListener("submit", function (e) {
 
     hidden.value = JSON.stringify(arr);
   });
+  
+  return true;
+}
+
+document.addEventListener("submit", function (e) {
+  var form = e.target;
+  if (!form.hasAttribute("data-frs-form")) return;
+  if (!frsSerializeForm(form)) {
+    e.preventDefault();
+  }
 });
 
 // ── Array add / remove buttons ──────────────────────────────────────────────

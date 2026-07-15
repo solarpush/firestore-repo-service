@@ -16,6 +16,7 @@ import { z } from "zod";
 import type { ConfiguredRepository } from "../../repositories/types";
 import type { RepositoryConfig } from "../../shared/types";
 import {
+  getEffectInnerType,
   getEnumValues,
   getInnerType,
   getLiteralValue,
@@ -23,8 +24,8 @@ import {
   getShape,
   getTypeName,
   getUnionOptions,
-  getEffectInnerType,
 } from "../../shared/zod-compat";
+import { getLinkBase as getLinkBaseShared } from "../utils/link-base";
 import { renderForm, zodToFields, type FieldDescriptor } from "./form-gen";
 import { isMissingIndexError, toQueryError } from "./index-url";
 import type {
@@ -40,7 +41,6 @@ import {
   renderPage,
 } from "./renderer";
 import type { AnyReq, AnyRes, RouteParams } from "./router";
-import { getLinkBase as getLinkBaseShared } from "../utils/link-base";
 
 // ---------------------------------------------------------------------------
 // Registry type
@@ -400,7 +400,11 @@ function resolveTypeName(schema: z.ZodType): string {
     const tn = getTypeName(s);
     if (tn === "ZodOptional" || tn === "ZodNullable" || tn === "ZodDefault") {
       s = getInnerType(s)!;
-    } else if (tn === "ZodEffects" || tn === "ZodPipe" || tn === "ZodTransform") {
+    } else if (
+      tn === "ZodEffects" ||
+      tn === "ZodPipe" ||
+      tn === "ZodTransform"
+    ) {
       const effectInner = getEffectInnerType(s);
       if (!effectInner) return tn;
       s = effectInner;
@@ -418,7 +422,11 @@ function resolveInnerSchema(schema: z.ZodType): z.ZodType {
     const tn = getTypeName(s);
     if (tn === "ZodOptional" || tn === "ZodNullable" || tn === "ZodDefault") {
       s = getInnerType(s)!;
-    } else if (tn === "ZodEffects" || tn === "ZodPipe" || tn === "ZodTransform") {
+    } else if (
+      tn === "ZodEffects" ||
+      tn === "ZodPipe" ||
+      tn === "ZodTransform"
+    ) {
       const effectInner = getEffectInnerType(s);
       if (!effectInner) return s;
       s = effectInner;
@@ -778,7 +786,11 @@ function getMutableSchema(
  * Compute the link base for all UI links.
  * @see {@link import("../utils/link-base").getLinkBase}
  */
-function getLinkBase(req: AnyReq, staticBasePath: string, region?: string): string {
+function getLinkBase(
+  req: AnyReq,
+  staticBasePath: string,
+  region?: string,
+): string {
   return getLinkBaseShared(req, staticBasePath, region);
 }
 
@@ -824,9 +836,7 @@ export function createAdminHandlers(
     // Sort
     const sortField = query["ob"] ?? "";
     const sortDir = (query["od"] === "desc" ? "desc" : "asc") as "asc" | "desc";
-    let sortState = sortField
-      ? { field: sortField, dir: sortDir }
-      : undefined;
+    let sortState = sortField ? { field: sortField, dir: sortDir } : undefined;
 
     // Rows per page (query ?ps= overrides config, capped at 200)
     const psRaw = parseInt(query["ps"] ?? "");
@@ -1501,7 +1511,7 @@ export function createAdminHandlers(
       selectAll?: unknown;
       filters?: unknown;
       field?: unknown;
-      value?: unknown;
+      formPayload?: Record<string, string | string[]>;
     };
     const field = String(body.field ?? "");
     if (!field) {
@@ -1517,9 +1527,29 @@ export function createAdminHandlers(
     const fieldSchema = (entry.schema as any).shape?.[field] as
       | z.ZodType
       | undefined;
-    let parsedValue: unknown = body.value;
+    let parsedValue: unknown;
     if (fieldSchema) {
-      const parsed = fieldSchema.safeParse(body.value);
+      // Use parseFormBody to properly extract objects (like GeoPoint) and dates from url-encoded-like payloads
+      const dummySchema =
+        typeof entry.schema === "object" &&
+        entry.schema &&
+        "constructor" in entry.schema &&
+        (entry.schema.constructor as any).name.includes("Zod")
+          ? (entry.schema as z.ZodObject<any>).pick({ [field]: true })
+          : undefined;
+
+      if (!dummySchema) {
+        sendJson(res, { error: "Invalid schema structure" }, 500);
+        return;
+      }
+
+      const parsedMap = parseFormBody(
+        (body.formPayload ?? {}) as Record<string, string | string[] | undefined>,
+        dummySchema as z.ZodObject<any>,
+      );
+      parsedValue = parsedMap[field];
+
+      const parsed = fieldSchema.safeParse(parsedValue);
       if (!parsed.success) {
         sendJson(
           res,

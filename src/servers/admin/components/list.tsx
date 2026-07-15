@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { renderField, zodToFields } from "../form-gen";
 import { CellValue } from "./cell-value";
 import { FilterBar } from "./filter-bar";
 import { PageShell, renderHtml } from "./shell";
@@ -119,17 +120,9 @@ export function renderListJsx(
     }
   }
 
-  // Bulk capability: scalar mutable fields (excluding object/array/date/unknown)
+  // Bulk capability: allow all mutable fields (complex fields will fallback to JSON input)
   const scalarMutable = (mutableFields ?? []).filter((f) => {
-    const t = expectedTypes[f] ?? expectedTypeOf(resolveAtPath(schema, f));
-    return (
-      t === "string" ||
-      t === "number" ||
-      t === "bigint" ||
-      t === "boolean" ||
-      t === "enum" ||
-      t === "literal"
-    );
+    return true;
   });
   const canBulkUpdate = scalarMutable.length > 0;
   const canBulkDelete = allowDelete;
@@ -147,6 +140,14 @@ export function renderListJsx(
       nullable: meta?.nullable ?? false,
     };
   });
+
+  let bulkFieldsDescriptors: any[] = [];
+  if (schema) {
+    const allFields = zodToFields(schema);
+    bulkFieldsDescriptors = allFields.filter((f) =>
+      scalarMutable.includes(f.name),
+    );
+  }
 
   return renderHtml(
     <PageShell
@@ -550,7 +551,7 @@ export function renderListJsx(
             >
               Update one field on the selected documents.
             </p>
-            <form method="dialog" data-frs-bulk-update-form>
+            <form method="dialog" data-frs-bulk-update-form data-frs-form>
               <label class="form-control w-full mb-3">
                 <div class="label">
                   <span class="label-text text-xs uppercase tracking-wide">
@@ -597,6 +598,16 @@ export function renderListJsx(
           </form>
         </dialog>
       )}
+      {/* Pre-rendered form-gen templates for bulk update */}
+      <div class="hidden" data-frs-bulk-templates>
+        {bulkFieldsDescriptors.map((f) => (
+          <div 
+            key={f.name} 
+            data-frs-bulk-template-for={f.name}
+            dangerouslySetInnerHTML={{ __html: renderField(f) }}
+          />
+        ))}
+      </div>
     </PageShell>,
   );
 }
