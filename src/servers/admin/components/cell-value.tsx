@@ -81,7 +81,7 @@ function renderInner(val: unknown) {
       <ul class="list-none p-0 m-0 space-y-0.5 text-xs">
         {val.slice(0, 8).map((item, i) => (
           <li key={i} class="break-all">
-            {typeof item === "object" ? JSON.stringify(item) : String(item)}
+            {renderInner(item)}
           </li>
         ))}
         {val.length > 8 && (
@@ -104,7 +104,7 @@ function renderInner(val: unknown) {
             <dt class="text-base-content/50 font-semibold whitespace-nowrap">
               {k}
             </dt>
-            <dd class="break-all">{String(v ?? "")}</dd>
+            <dd class="break-all">{renderInner(v)}</dd>
           </>
         ))}
         {entries.length > 8 && (
