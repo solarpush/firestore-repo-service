@@ -486,34 +486,50 @@ function prefillFromDoc(
     }
     if (val === undefined) continue;
 
-    // Unwrap Optional/Nullable/Default to check inner type
-    let innerSchema: z.ZodType = schema.shape[key] as z.ZodType;
-    while (true) {
-      const itn = getTypeName(innerSchema);
-      if (
-        itn === "ZodOptional" ||
-        itn === "ZodNullable" ||
-        itn === "ZodDefault"
-      ) {
-        innerSchema = getInnerType(innerSchema)!;
-      } else break;
-    }
+    // Unwrap Optional/Nullable/Default/Effects to check inner type
+    const innerSchema = resolveInnerSchema(schema.shape[key] as z.ZodType);
     const innerTn = getTypeName(innerSchema);
 
+    let isObjectLike = innerTn === "ZodObject";
+    let objectSchema: z.ZodType = innerSchema;
+    let isDateUnion = false;
+
+    if (innerTn === "ZodUnion") {
+      const options = getUnionOptions(innerSchema);
+      if (options.some((opt) => getTypeName(opt) === "ZodDate")) {
+        isDateUnion = true;
+      }
+      const geoOpt = options.find((opt) => {
+        if (getTypeName(opt) === "ZodObject") {
+          const s = getShape(opt);
+          return "latitude" in s && "longitude" in s;
+        }
+        return false;
+      });
+      if (geoOpt) {
+        isObjectLike = true;
+        objectSchema = geoOpt;
+      }
+    }
+
     if (
-      innerTn === "ZodObject" &&
+      isObjectLike &&
       typeof val === "object" &&
       val !== null &&
-      !Array.isArray(val)
+      !Array.isArray(val) &&
+      // Don't mistake a raw Timestamp object { _seconds } for a general nested object,
+      // it should fall through to the Date/Timestamp handling below.
+      !("_seconds" in val) &&
+      typeof (val as any).toDate !== "function"
     ) {
       // Recursively flatten nested object fields with dot-notation
       const nested = prefillFromDoc(
         val as Record<string, unknown>,
-        innerSchema as z.ZodObject<any>,
+        objectSchema as z.ZodObject<any>,
         fullKey,
       );
       Object.assign(result, nested);
-    } else if (innerTn === "ZodDate") {
+    } else if (innerTn === "ZodDate" || isDateUnion) {
       // Convert Date / Firestore Timestamp → datetime-local string
       const dtLocal = toDatetimeLocal(val);
       if (dtLocal !== null) result[fullKey] = dtLocal;
