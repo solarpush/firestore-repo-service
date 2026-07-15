@@ -137,7 +137,11 @@ function unwrap(schema: z.ZodType): {
       required = false;
       defaultValue = getDefaultValue(inner);
       inner = getInnerType(inner)!;
-    } else if (tn === "ZodEffects" || tn === "ZodPipe" || tn === "ZodTransform") {
+    } else if (
+      tn === "ZodEffects" ||
+      tn === "ZodPipe" ||
+      tn === "ZodTransform"
+    ) {
       // See through `.transform()` / `.refine()` / `.preprocess()` to the
       // source schema so e.g. `z.string().transform(...)` still renders as a
       // text input instead of a JSON textarea.
@@ -292,6 +296,44 @@ function zodFieldToDescriptor(
           options: values,
         };
       }
+
+      // Détection 1 : Firestore Timestamp (présence d'une Date dans l'union)
+      const hasDate = options.some((opt) => getTypeName(opt) === "ZodDate");
+      if (hasDate) {
+        return {
+          name,
+          label,
+          type: "datetime-local",
+          required,
+          nullable,
+          defaultValue,
+        };
+      }
+
+      // Détection 2 : Firestore GeoPoint (objet avec latitude et longitude)
+      const geoPointSchema = options.find((opt) => {
+        if (getTypeName(opt) === "ZodObject") {
+          const shape = getShape(opt);
+          return (
+            ("_latitude" in shape && "_longitude" in shape) ||
+            ("latitude" in shape && "longitude" in shape)
+          );
+        }
+        return false;
+      });
+      if (geoPointSchema) {
+        return {
+          name,
+          label,
+          type: "textarea", // Sera rendu comme un <fieldset> car on passe 'nested'
+          required,
+          nullable,
+          defaultValue,
+          nested: zodToFields(geoPointSchema, name),
+          hint: "GeoPoint",
+        };
+      }
+
       // Mixed / non-literal union → JSON textarea fallback.
       return {
         name,
@@ -583,9 +625,8 @@ function renderArrayField(field: FieldDescriptor, depth: number): string {
     : renderPrimitiveItem(field, "");
 
   // Null toggle for nullable array fields
-  const nullToggle =
-    field.nullable
-      ? `<span class="flex items-center gap-1 mt-2">
+  const nullToggle = field.nullable
+    ? `<span class="flex items-center gap-1 mt-2">
           <input type="hidden" id="${id}__isnull" name="${e(field.name)}__isnull" value="${isNullValue ? "1" : ""}">
           <label class="flex items-center gap-1 cursor-pointer select-none text-xs text-base-content/40 hover:text-base-content/70 border border-base-300 rounded px-2 py-1">
             <input type="checkbox" class="checkbox checkbox-xs" ${isNullValue ? "checked" : ""}
@@ -599,7 +640,7 @@ function renderArrayField(field: FieldDescriptor, depth: number): string {
             <span>null</span>
           </label>
         </span>`
-      : "";
+    : "";
 
   return `
       <fieldset class="fieldset border border-base-300 rounded-box p-3 mb-3 ${indent}"
@@ -617,10 +658,7 @@ function renderArrayField(field: FieldDescriptor, depth: number): string {
       </fieldset>`;
 }
 
-function renderPrimitiveItem(
-  field: FieldDescriptor,
-  value: unknown,
-): string {
+function renderPrimitiveItem(field: FieldDescriptor, value: unknown): string {
   const strVal = value != null ? String(value) : "";
   let inputHtml: string;
 
