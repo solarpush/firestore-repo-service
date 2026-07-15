@@ -22,6 +22,8 @@ import {
   getNativeEnumValues,
   getShape,
   getTypeName,
+  getUnionOptions,
+  getEffectInnerType,
 } from "../../shared/zod-compat";
 import { renderForm, zodToFields, type FieldDescriptor } from "./form-gen";
 import { isMissingIndexError, toQueryError } from "./index-url";
@@ -234,15 +236,39 @@ function parseFormBody(
   const result: Record<string, unknown> = {};
 
   for (const [key, zodField] of Object.entries(shape)) {
-    const tn = resolveTypeName(zodField as z.ZodType);
+    const innerSchema = resolveInnerSchema(zodField as z.ZodType);
+    const tn = getTypeName(innerSchema);
+
+    // Determine if it should be processed as an object (has dot-keys) or date
+    let isObjectLike = tn === "ZodObject";
+    let objectSchema: z.ZodType = innerSchema;
+    let isDateUnion = false;
+
+    if (tn === "ZodUnion") {
+      const options = getUnionOptions(innerSchema);
+      if (options.some((opt) => getTypeName(opt) === "ZodDate")) {
+        isDateUnion = true;
+      }
+      const geoOpt = options.find((opt) => {
+        if (getTypeName(opt) === "ZodObject") {
+          const s = getShape(opt);
+          return "latitude" in s && "longitude" in s;
+        }
+        return false;
+      });
+      if (geoOpt) {
+        isObjectLike = true;
+        objectSchema = geoOpt;
+      }
+    }
+
+    if (raw[key + "__isnull"] === "1") {
+      result[key] = null;
+      continue;
+    }
 
     // ── ZodObject: prefer dot-notation sub-keys over raw JSON textarea ──────
-    if (tn === "ZodObject") {
-      // Check for explicit null marker first
-      if (raw[key + "__isnull"] === "1") {
-        result[key] = null;
-        continue;
-      }
+    if (isObjectLike) {
       const subRaw: Record<string, string | string[] | undefined> = {};
       let hasDotKeys = false;
       for (const [k, v] of Object.entries(raw)) {
@@ -252,19 +278,7 @@ function parseFormBody(
         }
       }
       if (hasDotKeys) {
-        // Unwrap to the inner ZodObject schema and recurse
-        let innerSchema: z.ZodType = zodField as z.ZodType;
-        while (true) {
-          const itn = getTypeName(innerSchema);
-          if (
-            itn === "ZodOptional" ||
-            itn === "ZodNullable" ||
-            itn === "ZodDefault"
-          ) {
-            innerSchema = getInnerType(innerSchema)!;
-          } else break;
-        }
-        result[key] = parseFormBody(subRaw, innerSchema as z.ZodObject<any>);
+        result[key] = parseFormBody(subRaw, objectSchema as z.ZodObject<any>);
         continue;
       }
       // Fallback: try to JSON-parse the textarea value
@@ -283,14 +297,15 @@ function parseFormBody(
     // ── All other types ─────────────────────────────────────────────────────
     const rawVal = raw[key];
     const strVal = Array.isArray(rawVal) ? rawVal[rawVal.length - 1] : rawVal;
-    // Nullable field explicitly set to null via the toggle
-    if (raw[key + "__isnull"] === "1") {
-      result[key] = null;
-      continue;
-    }
+
     if (strVal === undefined || strVal === "") {
       // Checkbox unchecked → false; everything else → omit
       if (tn === "ZodBoolean") result[key] = false;
+      continue;
+    }
+
+    if (isDateUnion) {
+      result[key] = new Date(strVal);
       continue;
     }
 
@@ -377,7 +392,7 @@ function toDatetimeLocal(val: unknown): string | null {
   );
 }
 
-/** Resolve the innermost Zod type name (unwrapping Optional/Nullable/Default) */
+/** Resolve the innermost Zod type name (unwrapping Optional/Nullable/Default/Effects) */
 function resolveTypeName(schema: z.ZodType): string {
   let s: z.ZodType = schema;
   // eslint-disable-next-line no-constant-condition
@@ -385,13 +400,17 @@ function resolveTypeName(schema: z.ZodType): string {
     const tn = getTypeName(s);
     if (tn === "ZodOptional" || tn === "ZodNullable" || tn === "ZodDefault") {
       s = getInnerType(s)!;
+    } else if (tn === "ZodEffects" || tn === "ZodPipe" || tn === "ZodTransform") {
+      const effectInner = getEffectInnerType(s);
+      if (!effectInner) return tn;
+      s = effectInner;
     } else {
       return tn;
     }
   }
 }
 
-/** Resolve the innermost Zod schema (unwrapping Optional/Nullable/Default) */
+/** Resolve the innermost Zod schema (unwrapping Optional/Nullable/Default/Effects) */
 function resolveInnerSchema(schema: z.ZodType): z.ZodType {
   let s: z.ZodType = schema;
   // eslint-disable-next-line no-constant-condition
@@ -399,6 +418,10 @@ function resolveInnerSchema(schema: z.ZodType): z.ZodType {
     const tn = getTypeName(s);
     if (tn === "ZodOptional" || tn === "ZodNullable" || tn === "ZodDefault") {
       s = getInnerType(s)!;
+    } else if (tn === "ZodEffects" || tn === "ZodPipe" || tn === "ZodTransform") {
+      const effectInner = getEffectInnerType(s);
+      if (!effectInner) return s;
+      s = effectInner;
     } else {
       return s;
     }
