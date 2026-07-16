@@ -92,7 +92,7 @@ const repositoryMapping = {
   posts: createRepositoryConfig(postSchema)({
     path: "posts",
     isGroup: false,
-    foreignKeys: ["docId", "userId"] as const,
+    foreignKeys: ["docId"] as const,
     queryKeys: ["status", "userId"] as const,
     documentKey: "docId",
     pathKey: "documentPath",
@@ -143,17 +143,17 @@ const repositoryMappingWithRelations = buildRepositoryRelations(
   {
     // Un user a plusieurs posts (via docId → userId)
     users: {
-      docId: { repo: "posts", key: "userId", type: "many" as const },
+      docId: { repo: "posts", key: "userId", type: "many" },
     },
     // Un post appartient à un user et a plusieurs comments
     posts: {
-      userId: { repo: "users", key: "docId", type: "one" as const },
-      docId: { repo: "comments", key: "postId", type: "many" as const },
+      userId: { repo: "users", key: "docId", type: "one" },
+      docId: { repo: "comments", key: "postId", type: "many" },
     },
     // Un comment appartient à un post et à un user
     comments: {
-      postId: { repo: "posts", key: "docId", type: "one" as const },
-      userId: { repo: "users", key: "docId", type: "one" as const },
+      postId: { repo: "posts", key: "docId", type: "one" },
+      userId: { repo: "users", key: "docId", type: "one" },
     },
   },
 );
@@ -163,7 +163,6 @@ export const repos = createRepositoryMapping(
   () => db,
   repositoryMappingWithRelations,
 );
-
 export const server = onRequest(async (req, res) => {
   try {
     res.json({

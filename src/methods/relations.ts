@@ -166,7 +166,8 @@ export function createPopulateMethods<
             return [key, undefined] as const;
           }
 
-          const fieldValue = document[key];
+          const sourceKeyToRead = relation.sourceKey || key;
+          const fieldValue = document[sourceKeyToRead];
           if (fieldValue === undefined || fieldValue === null) {
             return [key, relation.type === "one" ? null : []] as const;
           }

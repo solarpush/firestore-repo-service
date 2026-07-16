@@ -5,16 +5,21 @@
 ```typescript
 const mappingWithRelations = buildRepositoryRelations(repositoryMapping, {
   users: {
-    docId: { repo: "posts", key: "userId", type: "many" as const },
+    docId: { repo: "posts", key: "userId", type: "many" },
   },
   posts: {
-    userId: { repo: "users",    key: "docId",  type: "one"  as const },
-    docId:  { repo: "comments", key: "postId", type: "many" as const },
+    userId: { repo: "users",    key: "docId",  type: "one" },
+    docId:  { repo: "comments", key: "postId", type: "many" },
   },
   comments: {
-    postId: { repo: "posts", key: "docId", type: "one" as const },
-    userId: { repo: "users", key: "docId", type: "one" as const },
+    postId: { repo: "posts", key: "docId", type: "one" },
+    userId: { repo: "users", key: "docId", type: "one" },
   },
+  residences: {
+    // Multiple relations originating from the same source field
+    events: { repo: "events", key: "residenceId", type: "many", sourceKey: "docId" },
+    quotes: { repo: "quotes", key: "residenceId", type: "many", sourceKey: "docId" }
+  }
 });
 ```
 
@@ -24,8 +29,9 @@ Each entry maps a field in the source model to a target repository:
 |----------------|------------------------------------------------|
 | `repo`         | Name of the target repository                  |
 | `key`          | Field on the target repo used for the lookup   |
-| `type: "one"`  | The field holds a single ID → returns one doc  |
-| `type: "many"` | The field holds an ID used to filter → returns array |
+| `type: "one"`  | The target key must exist in `foreignKeys` → returns one doc |
+| `type: "many"` | The target key must exist in `queryKeys` → returns array |
+| `sourceKey`    | Optional. Field in the current document containing the value to look up (required if the relation name is not a valid model key) |
 
 ## `populate()` — on a single document
 

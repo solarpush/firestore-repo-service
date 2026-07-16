@@ -5,16 +5,21 @@
 ```typescript
 const mappingWithRelations = buildRepositoryRelations(repositoryMapping, {
   users: {
-    docId: { repo: "posts", key: "userId", type: "many" as const },
+    docId: { repo: "posts", key: "userId", type: "many" },
   },
   posts: {
-    userId: { repo: "users",    key: "docId",  type: "one"  as const },
-    docId:  { repo: "comments", key: "postId", type: "many" as const },
+    userId: { repo: "users",    key: "docId",  type: "one" },
+    docId:  { repo: "comments", key: "postId", type: "many" },
   },
   comments: {
-    postId: { repo: "posts", key: "docId", type: "one" as const },
-    userId: { repo: "users", key: "docId", type: "one" as const },
+    postId: { repo: "posts", key: "docId", type: "one" },
+    userId: { repo: "users", key: "docId", type: "one" },
   },
+  residences: {
+    // Plusieurs relations utilisant le même champ source (docId)
+    events: { repo: "events", key: "residenceId", type: "many", sourceKey: "docId" },
+    quotes: { repo: "quotes", key: "residenceId", type: "many", sourceKey: "docId" }
+  }
 });
 ```
 
@@ -22,8 +27,9 @@ const mappingWithRelations = buildRepositoryRelations(repositoryMapping, {
 |-----------------|-----------------------------------------------------------|
 | `repo`          | Nom du repository cible                                   |
 | `key`           | Champ du repository cible utilisé pour la recherche      |
-| `type: "one"`   | Le champ contient un ID unique → retourne un document    |
-| `type: "many"`  | Le champ est utilisé comme filtre → retourne un tableau  |
+| `type: "one"`   | La clé cible doit exister dans `foreignKeys` → retourne un objet |
+| `type: "many"`  | La clé cible doit exister dans `queryKeys` → retourne un tableau |
+| `sourceKey`     | Optionnel. Nom du champ du document courant contenant la valeur à chercher (exigé si le nom de la relation n'est pas une clé du modèle) |
 
 ## `populate()` — sur un document unique
 

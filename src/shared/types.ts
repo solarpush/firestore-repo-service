@@ -187,6 +187,7 @@ export interface RelationConfig<
   repo: TRepoKey;
   key: TForeignKey;
   type: TType;
+  sourceKey?: string;
   targetType?: TTargetModel;
 }
 
@@ -196,17 +197,15 @@ export interface RelationConfig<
  * @template T - Current model type
  * @template TMapping - All repositories mapping for validation
  * @example { userId: { repo: "users", key: "docId", type: "one" } }
- *
- * IMPORTANT: Keys must exist in T (the current model)
- * This prevents creating relations on non-existent fields
+ * @example { events: { repo: "events", key: "residenceId", type: "many", sourceKey: "docId" } }
  */
 export type RelationalKeys<T = any, TMapping = any> = {
-  [K in keyof T]?: TMapping extends Record<string, any>
+  [K in string]?: TMapping extends Record<string, any>
     ? {
         [R in keyof TMapping]: TMapping[R] extends RepositoryConfig<
           any,
-          infer FKeys,
-          any,
+          infer FKeys extends readonly any[],
+          infer QKeys extends readonly any[],
           any,
           any,
           any,
@@ -216,11 +215,20 @@ export type RelationalKeys<T = any, TMapping = any> = {
           any,
           any
         >
-          ? {
-              repo: R;
-              key: FKeys[number];
-              type: "one" | "many";
-            }
+          ? (
+              | {
+                  repo: R;
+                  key: FKeys[number];
+                  type: "one";
+                  sourceKey?: keyof T;
+                }
+              | {
+                  repo: R;
+                  key: QKeys[number];
+                  type: "many";
+                  sourceKey?: keyof T;
+                }
+            )
           : never;
       }[keyof TMapping]
     : RelationConfig;

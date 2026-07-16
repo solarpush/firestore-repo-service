@@ -214,7 +214,13 @@ type ResolveRelation<TMapping, TRelationConfig> = TRelationConfig extends {
  *
  * const mappingWithRelations = buildRepositoryRelations(mapping, {
  *   posts: {
- *     userId: { repo: "users", key: "docId", type: "one" as const }
+ *     // Using the property name directly as the relation key (sourceKey is inferred)
+ *     userId: { repo: "users", key: "docId", type: "one" }
+ *   },
+ *   users: {
+ *     // Using an arbitrary name with a specific sourceKey (useful for multiple relations from same field)
+ *     userPosts: { repo: "posts", key: "userId", type: "many", sourceKey: "docId" },
+ *     userDrafts: { repo: "posts", key: "userId", type: "many", sourceKey: "docId" }
  *   }
  * });
  *
@@ -238,11 +244,11 @@ export function buildRepositoryRelations<
       any
     >
       ? {
-          [RK in keyof T]?: {
+          [RK in keyof TRelations[K]]?: {
             [R in keyof TMapping]: TMapping[R] extends RepositoryConfig<
               infer TTargetModel,
-              infer TForeignKeys,
-              any,
+              infer TForeignKeys extends readonly any[],
+              infer TQueryKeys extends readonly any[],
               any,
               any,
               any,
@@ -252,11 +258,22 @@ export function buildRepositoryRelations<
               any,
               any
             >
-              ? {
-                  repo: R;
-                  key: TForeignKeys[number];
-                  type: "one" | "many";
-                }
+              ? (
+                  | ({
+                      repo: R;
+                      key: TForeignKeys[number];
+                      type: "one";
+                    } & (RK extends keyof T
+                      ? { sourceKey?: keyof T }
+                      : { sourceKey: keyof T }))
+                  | ({
+                      repo: R;
+                      key: TQueryKeys[number];
+                      type: "many";
+                    } & (RK extends keyof T
+                      ? { sourceKey?: keyof T }
+                      : { sourceKey: keyof T }))
+                )
               : never;
           }[keyof TMapping];
         }
