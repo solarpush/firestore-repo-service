@@ -174,7 +174,8 @@ export interface AdminRepoConfig<
    * ```
    */
   relationalFields?: {
-    key: keyof RepoModelType<TRepo> & string;
+    /** The relation name defined in buildRepositoryRelations (or the model property name) */
+    key: string;
     column: string;
   }[];
 }
@@ -513,7 +514,7 @@ export function createAdminServer<
           const rel = repoRelKeys[entry.key];
           if (rel) {
             meta.push({
-              key: entry.key,
+              key: rel.sourceKey ? String(rel.sourceKey) : entry.key,
               column: entry.column,
               targetRepo: String(rel.repo),
               targetKey: String(rel.key),
