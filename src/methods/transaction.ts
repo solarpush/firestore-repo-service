@@ -70,7 +70,13 @@ import { maybeNormalize } from "../shared/date-config";
 export function createTransactionMethods(
   db: Firestore,
   documentRef: (...args: any[]) => any,
+  documentKey: string,
+  pathKey?: string,
+  createdKey?: string,
+  updatedKey?: string,
 ) {
+  const now = () => new Date();
+
   return {
     run: async <R>(
       updateFunction: (transaction: any) => Promise<R>,
@@ -100,7 +106,23 @@ export function createTransactionMethods(
             const mergeOption = hasOptions ? options : { merge: true };
 
             const docRef = documentRef(...pathArgs);
-            rawTransaction.set(docRef, data, mergeOption);
+
+            const enrichedData = { ...data };
+            const docIdValue = pathArgs[pathArgs.length - 1];
+            if (documentKey && docIdValue) {
+              enrichedData[documentKey] = docIdValue;
+            }
+            if (pathKey) {
+              enrichedData[pathKey] = docRef.path;
+            }
+            if (createdKey) {
+              enrichedData[createdKey] = now();
+            }
+            if (updatedKey) {
+              enrichedData[updatedKey] = now();
+            }
+
+            rawTransaction.set(docRef, enrichedData, mergeOption);
           },
 
           // Type-safe update method
@@ -108,7 +130,13 @@ export function createTransactionMethods(
             const data = args[args.length - 1];
             const pathArgs = args.slice(0, -1);
             const docRef = documentRef(...pathArgs);
-            rawTransaction.update(docRef, data);
+
+            const enrichedData = { ...data };
+            if (updatedKey) {
+              enrichedData[updatedKey] = now();
+            }
+
+            rawTransaction.update(docRef, enrichedData);
           },
 
           // Delete method

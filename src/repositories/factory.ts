@@ -154,7 +154,14 @@ export function createRepository<
     config.createdKey as string | undefined,
     config.updatedKey as string | undefined,
   );
-  const transactionMethods = createTransactionMethods(db, documentRef);
+  const transactionMethods = createTransactionMethods(
+    db,
+    documentRef,
+    config.documentKey as string,
+    config.pathKey as string | undefined,
+    config.createdKey as string | undefined,
+    config.updatedKey as string | undefined,
+  );
   const bulkMethods = createBulkMethods(
     db,
     config.createdKey as string | undefined,
