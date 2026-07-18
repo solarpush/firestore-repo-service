@@ -17,11 +17,7 @@ import {
   getDateHandling,
   maybeNormalize,
 } from "../../shared/date-config";
-import {
-  isMissingIndexError,
-  toQueryError,
-  type QueryErrorContext,
-} from "../admin/index-url";
+import { toQueryError, type QueryErrorContext } from "../admin/index-url";
 import type {
   ApiResponse,
   CrudRepoEntry,
@@ -39,7 +35,12 @@ function sendJson<T>(c: any, data: ApiResponse<T>, status = 200) {
   return c.json(payload, status as any);
 }
 
-function sendSuccess<T>(c: any, data: T, meta?: ApiResponse["meta"], status = 200) {
+function sendSuccess<T>(
+  c: any,
+  data: T,
+  meta?: ApiResponse["meta"],
+  status = 200,
+) {
   return sendJson(c, { success: true, data, meta }, status);
 }
 
@@ -53,11 +54,21 @@ function sendError(c: any, error: string, status = 400) {
  * and an `indexUrl` pointing to the Firebase Console index-creation wizard —
  * crucial for collection-group queries where the SDK omits the link.
  */
-function sendQueryError(c: any, err: unknown, ctx: QueryErrorContext, fallbackMessage: string, verbose: boolean) {
+function sendQueryError(
+  c: any,
+  err: unknown,
+  ctx: QueryErrorContext,
+  fallbackMessage: string,
+  verbose: boolean,
+) {
   const qe = toQueryError(err, ctx);
   const isIndex = qe.type === "index";
   const status = isIndex ? 424 : 500;
-  const message = isIndex ? qe.message : verbose && err instanceof Error ? err.message : fallbackMessage;
+  const message = isIndex
+    ? qe.message
+    : verbose && err instanceof Error
+      ? err.message
+      : fallbackMessage;
   const payload: ApiResponse = { success: false, error: message };
   if (isIndex) {
     payload.errorType = "index";
@@ -389,17 +400,18 @@ export function createCrudHandlers(
    * operation without an explicit rule. When `auth` is absent, rules are
    * ignored entirely (open API).
    */
-  async function assertRule<TCtx>(c: any, entry: CrudRepoEntry, op: keyof NonNullable<CrudRepoEntry["rules"]>, ctx: TCtx): Promise<boolean> {
+  async function assertRule<TCtx>(
+    c: any,
+    entry: CrudRepoEntry,
+    op: keyof NonNullable<CrudRepoEntry["rules"]>,
+    ctx: TCtx,
+  ): Promise<boolean> {
     if (!entry.rules) return true;
     const rule = entry.rules?.[op] as
       | ((c: TCtx) => boolean | Promise<boolean>)
       | undefined;
     if (!rule) {
-      sendError(
-        c,
-        `Operation "${op}" is not allowed for this repository`,
-        403,
-      );
+      sendError(c, `Operation "${op}" is not allowed for this repository`, 403);
       return false;
     }
     try {
@@ -426,9 +438,11 @@ export function createCrudHandlers(
   ): Promise<T[]> {
     if (!entry.rules) return docs;
     const filter = entry.rules?.filter as
-      | ((c: { user: any; doc: T; params: Record<string, string> }) =>
-          | boolean
-          | Promise<boolean>)
+      | ((c: {
+          user: any;
+          doc: T;
+          params: Record<string, string>;
+        }) => boolean | Promise<boolean>)
       | undefined;
     if (!filter) return docs;
     const out: T[] = [];
@@ -444,7 +458,7 @@ export function createCrudHandlers(
 
   /** Pull the authenticated user from the request (may be undefined when auth is off). */
   function userOf(c: any): any {
-    return c.get('user') ?? c.get('docsUser') ?? null;
+    return c.get("user") ?? c.get("docsUser") ?? null;
   }
 
   // ── Helper to get repo entry ────────────────────────────────────────────
@@ -452,11 +466,19 @@ export function createCrudHandlers(
     repoName: string | undefined,
     c: any,
   ): CrudRepoEntry | null {
+    if (!repoName) {
+      const parts = c.req.path.split("/");
+      for (const part of parts) {
+        if (registry[part]) {
+          repoName = part;
+          break;
+        }
+      }
+    }
     if (!repoName || !registry[repoName]) {
-      return sendError(c, `Repository "${repoName}" not found`, 404);
       return null;
     }
-    return registry[repoName];
+    return registry[repoName] ?? null;
   }
 
   /**
@@ -511,7 +533,7 @@ export function createCrudHandlers(
 
     const params = c.req.param();
     const entry = getRepoEntry(params.repoName, c);
-    if (!entry) return;
+    if (!entry) return sendError(c, `Repository not found`, 404);
 
     const user = userOf(c);
     if (
@@ -651,13 +673,13 @@ export function createCrudHandlers(
 
     const params = c.req.param();
     const entry = getRepoEntry(params.repoName, c);
-    if (!entry) return;
+    if (!entry) return sendError(c, `Repository not found`, 404);
 
     const user = userOf(c);
     if (
       !(await assertRule(c, entry, "list", {
         user,
-        query: (ctx.input || {}),
+        query: ctx.input || {},
         params,
       }))
     )
@@ -668,7 +690,7 @@ export function createCrudHandlers(
     let ctxSort: { field: string; dir: "asc" | "desc" } | undefined;
 
     try {
-      const body: QueryRequestBody = (ctx.input || {});
+      const body: QueryRequestBody = ctx.input || {};
       const pageSize = Math.min(body.pageSize || entry.pageSize, 100);
       const direction = body.direction === "prev" ? "prev" : "next";
 
@@ -847,7 +869,7 @@ export function createCrudHandlers(
 
     const params = c.req.param();
     const entry = getRepoEntry(params.repoName, c);
-    if (!entry) return;
+    if (!entry) return sendError(c, `Repository not found`, 404);
 
     const id = params.id;
     if (!id) {
@@ -910,10 +932,10 @@ export function createCrudHandlers(
 
     const params = c.req.param();
     const entry = getRepoEntry(params.repoName, c);
-    if (!entry) return;
+    if (!entry) return sendError(c, `Repository not found`, 404);
 
     try {
-      const body = (ctx.input || {});
+      const body = ctx.input || {};
 
       const user = userOf(c);
       if (
@@ -964,8 +986,7 @@ export function createCrudHandlers(
           return;
         }
         const parentIds = entry.parentKeys.map((k) => data[k] as string);
-        const docId =
-          data[entry.documentKey] || generateFirestoreId();
+        const docId = data[entry.documentKey] || generateFirestoreId();
         created = await entry.repo.set(...parentIds, docId, data);
       } else {
         created = await entry.repo.create(validation.data as any);
@@ -986,7 +1007,7 @@ export function createCrudHandlers(
     const c = ctx.c;
     const params = c.req.param();
     const entry = getRepoEntry(params.repoName, c);
-    if (!entry) return;
+    if (!entry) return sendError(c, `Repository not found`, 404);
 
     const id = params.id;
     if (!id) {
@@ -994,7 +1015,7 @@ export function createCrudHandlers(
     }
 
     try {
-      const body = (ctx.input || {});
+      const body = ctx.input || {};
 
       // Fetch existing doc so the rule can authorize against current state
       const existingDoc = await fetchDocById(entry, id);
@@ -1034,8 +1055,7 @@ export function createCrudHandlers(
       }
 
       // Update document — derive path args for subcollections
-      const pathArgs =
-        extractPathArgs(existingDoc, entry.pathKey) ?? [id];
+      const pathArgs = extractPathArgs(existingDoc, entry.pathKey) ?? [id];
       const updated = await entry.repo.update(
         ...pathArgs,
         validation.data as any,
@@ -1057,7 +1077,7 @@ export function createCrudHandlers(
 
     const params = c.req.param();
     const entry = getRepoEntry(params.repoName, c);
-    if (!entry) return;
+    if (!entry) return sendError(c, `Repository not found`, 404);
 
     if (!entry.allowDelete) {
       return sendError(c, "Delete not allowed for this repository", 403);
@@ -1103,7 +1123,7 @@ export function createCrudHandlers(
     return c.text("", 204, {
       "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      "Access-Control-Max-Age": "86400"
+      "Access-Control-Max-Age": "86400",
     });
   }
 
@@ -1112,72 +1132,117 @@ export function createCrudHandlers(
     const c = ctx.c;
     const params = c.req.param();
     const entry = getRepoEntry(params.repoName, c);
-    if (!entry) return;
+    if (!entry) return sendError(c, `Repository not found`, 404);
 
     try {
       const body = ctx.input || {};
       if (!Array.isArray(body.operations)) {
         return sendError(c, "operations array is required", 400);
       }
-      
+
       const user = userOf(c);
-      
+
       const batch = entry.repo.batch.create();
       const results = [];
-      
+
       for (const op of body.operations) {
-        if (!op.type || !['create', 'update', 'delete'].includes(op.type)) {
+        if (!op.type || !["create", "update", "delete"].includes(op.type)) {
           return sendError(c, "Invalid operation type", 400);
         }
-        
-        if (op.type === 'create') {
-          if (!(await assertRule(c, entry, "create", { user, body: op.data, params }))) return;
-          const validation = validateData(entry.schema, op.data, entry.createFields, false, entry.systemKeys);
-          if (!validation.success) return sendError(c, (validation as any).error, 400);
-          
+
+        if (op.type === "create") {
+          if (
+            !(await assertRule(c, entry, "create", {
+              user,
+              body: op.data,
+              params,
+            }))
+          )
+            return;
+          const validation = validateData(
+            entry.schema,
+            op.data,
+            entry.createFields,
+            false,
+            entry.systemKeys,
+          );
+          if (!validation.success)
+            return sendError(c, (validation as any).error, 400);
+
           let docId = op.data[entry.documentKey] || generateFirestoreId();
           const data = { ...validation.data };
           if (entry.createdKey) data[entry.createdKey] = new Date();
-          
+
           if (entry.isGroup && entry.parentKeys) {
-             const parentIds = entry.parentKeys.map((k: string) => data[k] as string);
-             batch.set(...parentIds, docId, data);
+            const parentIds = entry.parentKeys.map(
+              (k: string) => data[k] as string,
+            );
+            batch.set(...parentIds, docId, data);
           } else {
-             batch.set(docId, data);
+            batch.set(docId, data);
           }
-          results.push({ op: 'create', id: docId });
-        } else if (op.type === 'update') {
+          results.push({ op: "create", id: docId });
+        } else if (op.type === "update") {
           if (!op.id) return sendError(c, "id required for update", 400);
-          
+
           const existingDoc = await fetchDocById(entry, op.id);
-          if (!existingDoc) return sendError(c, `Document ${op.id} not found`, 404);
-          
-          if (!(await assertRule(c, entry, "update", { user, doc: existingDoc as any, body: op.data, params }))) return;
-          
-          const validation = validateData(entry.schema, op.data, entry.mutableFields, true, entry.systemKeys);
-          if (!validation.success) return sendError(c, (validation as any).error, 400);
-          
-          const pathArgs = extractPathArgs(existingDoc, entry.pathKey) ?? [op.id];
+          if (!existingDoc)
+            return sendError(c, `Document ${op.id} not found`, 404);
+
+          if (
+            !(await assertRule(c, entry, "update", {
+              user,
+              doc: existingDoc as any,
+              body: op.data,
+              params,
+            }))
+          )
+            return;
+
+          const validation = validateData(
+            entry.schema,
+            op.data,
+            entry.mutableFields,
+            true,
+            entry.systemKeys,
+          );
+          if (!validation.success)
+            return sendError(c, (validation as any).error, 400);
+
+          const pathArgs = extractPathArgs(existingDoc, entry.pathKey) ?? [
+            op.id,
+          ];
           batch.update(...pathArgs, validation.data);
-          results.push({ op: 'update', id: op.id });
-        } else if (op.type === 'delete') {
-          if (!entry.allowDelete) return sendError(c, "Delete not allowed", 403);
+          results.push({ op: "update", id: op.id });
+        } else if (op.type === "delete") {
+          if (!entry.allowDelete)
+            return sendError(c, "Delete not allowed", 403);
           if (!op.id) return sendError(c, "id required for delete", 400);
-          
+
           const doc = await fetchDocById(entry, op.id);
           if (!doc) return sendError(c, `Document ${op.id} not found`, 404);
-          if (!(await assertRule(c, entry, "delete", { user, doc: doc as any, params }))) return;
-          
+          if (
+            !(await assertRule(c, entry, "delete", {
+              user,
+              doc: doc as any,
+              params,
+            }))
+          )
+            return;
+
           const pathArgs = extractPathArgs(doc, entry.pathKey) ?? [op.id];
           batch.delete(...pathArgs);
-          results.push({ op: 'delete', id: op.id });
+          results.push({ op: "delete", id: op.id });
         }
       }
-      
+
       await batch.commit();
       return sendSuccess(c, { results });
     } catch (err) {
-      const message = verbose && err instanceof Error ? err.message : "Batch operation failed";
+      const message =
+        verbose && err instanceof Error
+          ? err.message
+          : "Batch operation failed";
       return sendError(c, message, 500);
     }
   }
@@ -1193,4 +1258,3 @@ export function createCrudHandlers(
     handleOptions,
   };
 }
-

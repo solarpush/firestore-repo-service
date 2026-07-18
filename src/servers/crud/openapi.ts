@@ -407,6 +407,44 @@ function buildPathsForEntry(
     },
   };
 
+  // ── POST /:repo/batch → batch operations ─────────────────────────
+  paths[`${collectionPath}/batch`] = {
+    post: {
+      operationId: `batch${capitalize(entry.name)}`,
+      summary: `Execute batch operations on ${entry.name}`,
+      tags: [tag],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: schemaRef(`${modelSchemaName}BatchRequest`),
+          },
+        },
+      },
+      responses: {
+        "200": successResponse("Batch operations completed", {
+          type: "object",
+          properties: {
+            results: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  op: { type: "string" },
+                  id: { type: "string" },
+                },
+              },
+            },
+          },
+        }),
+        "400": errorResponse("Validation error"),
+        "403": errorResponse("Forbidden"),
+        "404": errorResponse("Document not found"),
+        "500": errorResponse("Internal server error"),
+      },
+    },
+  };
+
   // ── Single-document paths ────────────────────────────────────────
   const docOps: Record<string, OpenAPIOperation> = {};
 
@@ -593,6 +631,53 @@ export function generateOpenAPISpec(
       schemas[updateName] = zodToJsonSchema(z.object(updateShape));
       updateSchemaName = updateName;
     }
+
+    // Batch schema
+    schemas[`${modelName}BatchRequest`] = {
+      type: "object",
+      properties: {
+        operations: {
+          type: "array",
+          items: {
+            oneOf: [
+              {
+                type: "object",
+                properties: {
+                  type: { type: "string", enum: ["create"] },
+                  data: schemaRef(createSchemaName ?? modelName),
+                },
+                required: ["type", "data"],
+              },
+              {
+                type: "object",
+                properties: {
+                  type: { type: "string", enum: ["update"] },
+                  id: { type: "string" },
+                  data: {
+                    allOf: [schemaRef(updateSchemaName ?? modelName)],
+                    description: "Partial updates allowed",
+                  },
+                },
+                required: ["type", "id", "data"],
+              },
+              ...(entry.allowDelete
+                ? [
+                    {
+                      type: "object",
+                      properties: {
+                        type: { type: "string", enum: ["delete"] },
+                        id: { type: "string" },
+                      },
+                      required: ["type", "id"],
+                    },
+                  ]
+                : []),
+            ],
+          },
+        },
+      },
+      required: ["operations"],
+    };
 
     // Build paths
     const entryPaths = buildPathsForEntry(

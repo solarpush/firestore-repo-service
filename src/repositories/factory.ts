@@ -87,7 +87,14 @@ export function buildRepoStaticMeta(config: any): Record<string, unknown> {
 export function makeLazyRepo<R>(config: any, resolve: () => R): R {
   const overlay = buildRepoStaticMeta(config);
   let resolved: R | undefined;
-  const ensure = (): R => (resolved ??= resolve());
+  const ensure = (): R => {
+    const res = resolved ??= resolve();
+    if (!res) {
+      const path = (overlay as any)._collectionPath || "unknown";
+      throw new Error(`[makeLazyRepo] Failed to resolve repository for path "${path}". The repository mapping resolved to undefined. This almost always indicates a circular import where the repository was exported as undefined.`);
+    }
+    return res;
+  };
   return new Proxy(overlay as any, {
     get(_t, prop) {
       if (typeof prop === "string" && prop in overlay) {

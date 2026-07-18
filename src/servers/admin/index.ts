@@ -441,6 +441,10 @@ export function createAdminServer<
   // Build the registry
   const registry: RepoRegistry = {};
   for (const [name, cfg] of Object.entries(repos)) {
+    if (!cfg.repo) {
+      throw new Error(`[createAdminServer] Repository "${name}" has no 'repo' defined. Did you forget to pass it or is there a circular import?`);
+    }
+
     // Schema resolution: explicit cfg.schema > embedded in repo (createRepositoryConfig(schema))
     const resolvedSchema = cfg.schema ?? (cfg.repo as any).schema ?? null;
     if (!resolvedSchema) {
