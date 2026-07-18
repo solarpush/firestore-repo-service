@@ -1,228 +1,18 @@
 /**
  * @module servers/crud
  *
- * Creates a REST API server for CRUD operations on Firestore repositories.
- *
- * Features:
- *  - RESTful endpoints for List, Get, Create, Update, Delete
- *  - Request validation using Zod schemas
- *  - Cursor-based pagination
- *  - Query filtering with operators (eq, ne, lt, gt, in, etc.)
- *  - Field selection
- *  - CORS support
- *  - Configurable auth (Basic Auth or custom middleware)
- *
- * @example
- * ```ts
- * import * as functions from "firebase-functions";
- * import { z } from "zod";
- * import { createCrudServer } from "@lpdjs/firestore-repo-service/servers/crud";
- *
- * const postSchema = z.object({
- *   title:    z.string().min(1),
- *   content:  z.string(),
- *   status:   z.enum(["draft", "published"]),
- *   authorId: z.string(),
- * });
- *
- * export const api = functions.https.onRequest(
- *   createCrudServer({
- *     basePath: "/api",
- *     repos: {
- *       posts: {
- *         repo: repos.posts,
- *         schema: postSchema,
- *         path: "posts",
- *         fieldsConfig: {
- *           status:   ["filterable"],
- *           authorId: ["filterable"],
- *         },
- *         allowDelete: true,
- *       },
- *     },
- *   })
- * );
- * ```
- *
- * ## API Endpoints
- *
- * | Method | Path              | Description              |
- * |--------|-------------------|--------------------------|
- * | GET    | /:repo            | List documents (paginated) |
- * | GET    | /:repo/:id        | Get single document      |
- * | POST   | /:repo            | Create document          |
- * | PUT    | /:repo/:id        | Update document (full)   |
- * | PATCH  | /:repo/:id        | Update document (partial)|
- * | DELETE | /:repo/:id        | Delete document          |
- *
- * ## Query Parameters (GET list)
- *
- * | Param      | Description                              |
- * |------------|------------------------------------------|
- * | pageSize   | Number of items per page (max 100)       |
- * | cursor     | Base64 pagination cursor                 |
- * | orderBy    | Field to order by                        |
- * | orderDir   | Order direction (asc/desc)               |
- * | select     | Comma-separated fields to return         |
- * | field      | Filter by field (field=value)            |
- * | field__op  | Filter with operator (field__gt=10)      |
- *
- * ## Filter Operators
- *
- * | Suffix      | Firestore Op      | Example               |
- * |-------------|-------------------|-----------------------|
- * | (none)      | ==                | status=active         |
- * | __eq        | ==                | status__eq=active     |
- * | __ne        | !=                | status__ne=draft      |
- * | __lt        | <                 | age__lt=18            |
- * | __lte       | <=                | age__lte=18           |
- * | __gt        | >                 | age__gt=18            |
- * | __gte       | >=                | age__gte=18           |
- * | __in        | in                | status__in=a,b,c      |
- * | __nin       | not-in            | status__nin=x,y       |
- * | __contains  | array-contains    | tags__contains=news   |
+ * Creates a REST API server for CRUD operations on Firestore repositories using HonoServer.
  */
-
-import { MiniRouter } from "../admin/router";
-import { isAuthExtension } from "../auth";
 import type { HttpsOptions } from "firebase-functions/v2/https";
-import type { HttpRequest, HttpResponse } from "../http-types";
 import type { ConfiguredRepository } from "../../repositories/types";
 import { createCrudHandlers } from "./handlers";
 import { generateOpenAPISpec, type OpenAPIDocument } from "./openapi";
-import type {
-  CrudRepoEntry,
-  CrudRepoRegistry,
-  CrudServerOptions,
-} from "./types";
-
-// ---------------------------------------------------------------------------
-// Scalar API docs HTML template
-// ---------------------------------------------------------------------------
-
-/** Returns a self-contained HTML page using Scalar to render the spec. */
-function scalarDocsHtml(title: string, specUrl: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${title}</title>
-</head>
-<body>
-  <script id="api-reference" data-url="${specUrl}"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
-</body>
-</html>`;
-}
-
+import type { CrudRepoEntry, CrudRepoRegistry, CrudServerOptions } from "./types";
+import { HonoServer } from "../hono/server";
+import type { AnyRouteDef } from "../hono/types";
 import { getLinkBase } from "../utils/link-base";
-import { securityHeaders } from "../utils/security-headers";
 
-// ---------------------------------------------------------------------------
-// Body parser
-// ---------------------------------------------------------------------------
 
-/** Eagerly reads the raw request body as a string */
-async function readRawBody(req: HttpRequest): Promise<string> {
-  if (typeof (req as any).rawBody === "string")
-    return (req as any).rawBody as string;
-  if (Buffer.isBuffer((req as any).rawBody))
-    return ((req as any).rawBody as Buffer).toString("utf8");
-  return "";
-}
-
-// ---------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------
-
-/**
- * Creates an Express-compatible request handler for a REST CRUD API.
- *
- * @template TRepos - Shape of the repos map (inferred automatically)
- * @param options - CRUD server configuration
- * @returns Express-compatible request handler for Firebase Functions
- *
- * @example
- * ```typescript
- * // Basic CRUD server
- * import { onRequest } from "firebase-functions/https";
- * import { createCrudServer } from "@lpdjs/firestore-repo-service/servers/crud";
- *
- * export const api = onRequest(
- *   createCrudServer({
- *     basePath: "/api",
- *     repos: {
- *       users: {
- *         repo: repos.users,
- *         path: "users",
- *         fieldsConfig: {
- *           name:     ["create", "mutable"],
- *           email:    ["create", "mutable", "filterable"],
- *           isActive: ["filterable"],
- *         },
- *         allowDelete: false,
- *       },
- *       posts: {
- *         repo: repos.posts,
- *         path: "posts",
- *         fieldsConfig: {
- *           status: ["filterable"],
- *           userId: ["filterable"],
- *         },
- *         allowDelete: true,
- *       },
- *     },
- *   })
- * );
- *
- * // With authentication
- * export const api = onRequest(
- *   createCrudServer({
- *     basePath: "/api",
- *     auth: {
- *       type: "basic",
- *       username: "api",
- *       password: process.env.API_PASSWORD!,
- *     },
- *     repos: { ... },
- *   })
- * );
- *
- * // With custom auth middleware
- * export const api = onRequest(
- *   createCrudServer({
- *     auth: async (req, res, next) => {
- *       const token = req.headers?.authorization?.replace("Bearer ", "");
- *       if (!token || !(await verifyToken(token))) {
- *         res.status(401).json({ success: false, error: "Unauthorized" });
- *         return;
- *       }
- *       next();
- *     },
- *     repos: { ... },
- *   })
- * );
- *
- * // With custom validation
- * export const api = onRequest(
- *   createCrudServer({
- *     repos: {
- *       posts: {
- *         repo: repos.posts,
- *         path: "posts",
- *         validate: async (data, operation) => {
- *           if (operation === "create" && !data.title) {
- *             return "Title is required";
- *           }
- *           return undefined;
- *         },
- *       },
- *     },
- *   })
- * );
- * ```
- */
 export function createCrudServer<
   TRepos extends Record<string, ConfiguredRepository<any>>,
 >(
@@ -233,28 +23,19 @@ export function createCrudServer<
     repos,
     parseBody = true,
     securityHeaders: securityHeadersOpt,
-    auth,
-    middleware: extraMiddleware = [],
     verbose = false,
     httpsOptions,
   } = options;
 
-  // Normalise basePath: no trailing slash
   const base = basePath === "/" ? "" : basePath.replace(/\/$/, "");
 
-  // Build the registry
   const registry: CrudRepoRegistry = {};
   for (const [name, cfg] of Object.entries(repos)) {
-    // Schema resolution: explicit cfg.schema > embedded in repo (createRepositoryConfig(schema))
     const resolvedSchema = cfg.schema ?? (cfg.repo as any).schema ?? null;
     if (!resolvedSchema) {
-      throw new Error(
-        `[createCrudServer] Repository "${name}" has no Zod schema. ` +
-          `Either use createRepositoryConfig(schema)(config) or pass schema: explicitly.`,
-      );
+      throw new Error(`[createCrudServer] Repository "${name}" has no Zod schema.`);
     }
 
-    // Resolve fieldsConfig → separate arrays for runtime
     let filterableFields: string[] | undefined;
     let orderableFields: string[] | undefined;
     let mutableFields: string[] | undefined;
@@ -273,19 +54,13 @@ export function createCrudServer<
           else if (role === "create") createFields.push(field);
         }
       }
-      // Fail-closed sort whitelist: when no field is explicitly "orderable",
-      // reuse the filterable set so existing configs keep working but fields
-      // that are neither filterable nor orderable cannot be sorted on (#03).
       if (orderableFields.length === 0) orderableFields = filterableFields;
       if (filterableFields.length === 0) filterableFields = undefined;
-      if (orderableFields && orderableFields.length === 0)
-        orderableFields = undefined;
+      if (orderableFields && orderableFields.length === 0) orderableFields = undefined;
       if (mutableFields.length === 0) mutableFields = undefined;
       if (createFields.length === 0) createFields = undefined;
     }
 
-    // For collection-group repos, ensure parentKeys are included in createFields
-    // so the validation accepts them in the request body.
     const parentKeys = (() => {
       const pk = (cfg.repo as any)._parentKeys as string[] | undefined;
       return pk && pk.length > 0 ? pk : undefined;
@@ -321,204 +96,155 @@ export function createCrudServer<
     registry[name] = entry;
   }
 
-  const authEnabled = !!auth;
-  const handlers = createCrudHandlers(registry, base, verbose, authEnabled);
+  const handlers = createCrudHandlers(registry, base, verbose);
 
-  // ── OpenAPI spec (cached) ─────────────────────────────────────────────
   const openapi = options.openapi;
   const openapiOpts = openapi && typeof openapi === "object" ? openapi : {};
   let _specCache: OpenAPIDocument | null = null;
   function getSpec(): OpenAPIDocument {
     if (!_specCache) {
-      const authType = !auth
-        ? false
-        : isAuthExtension(auth) || typeof auth === "function"
-          ? ("bearer" as const)
-          : ("basic" as const);
       _specCache = generateOpenAPISpec(registry, base, {
         ...openapiOpts,
-        auth: openapiOpts.auth ?? authType,
+        auth: openapiOpts.auth ?? false,
       });
     }
     return _specCache;
   }
 
-  // ── Router ─────────────────────────────────────────────────────────────
-  const router = new MiniRouter();
+  const routes: AnyRouteDef[] = [];
 
-  // ── Security headers (runs first). CSP defaults off for the JSON API so the
-  //    bundled Scalar docs UI keeps loading; callers can opt in via options.
-  if (securityHeadersOpt !== false) {
-    const base0 =
-      securityHeadersOpt === undefined ? { csp: false as const } : securityHeadersOpt;
-    router.use(securityHeaders(base0));
+  for (const name of Object.keys(registry)) {
+    routes.push({
+      api: "crud",
+      method: "get",
+      path: `/${name}`,
+      source: "query",
+      handler: handlers.handleList,
+    });
+    routes.push({
+      api: "crud",
+      method: "post",
+      path: `/${name}/query`,
+      source: "json",
+      handler: handlers.handleQuery,
+    });
+    routes.push({
+      api: "crud",
+      method: "get",
+      path: `/${name}/:id`,
+      source: "query",
+      handler: handlers.handleGet,
+    });
+    routes.push({
+      api: "crud",
+      method: "post",
+      path: `/${name}`,
+      source: "json",
+      handler: handlers.handleCreate,
+    });
+    routes.push({
+      api: "crud",
+      method: "put",
+      path: `/${name}/:id`,
+      source: "json",
+      handler: (ctx) => handlers.handleUpdate(ctx, false),
+    });
+    routes.push({
+      api: "crud",
+      method: "patch",
+      path: `/${name}/:id`,
+      source: "json",
+      handler: (ctx) => handlers.handleUpdate(ctx, true),
+    });
+    routes.push({
+      api: "crud",
+      method: "delete",
+      path: `/${name}/:id`,
+      source: "query",
+      handler: handlers.handleDelete,
+    });
+    routes.push({
+      api: "crud",
+      method: "post",
+      path: `/${name}/batch`,
+      source: "json",
+      handler: handlers.handleBatch,
+    });
   }
 
-  // ── CORS middleware ─────────────────────────────────────────────────────
-  router.use((req, res, next) => {
-    res.set("Access-Control-Allow-Origin", "*");
-    res.set("Access-Control-Allow-Credentials", "true");
-    next();
+  // Create the HonoServer
+  const server = new HonoServer({
+    ...options,
+    openapi: openapi !== false ? {
+      path: openapiOpts.path ?? "/openapi.json",
+      docsPath: openapiOpts.docsPath ?? "/docs",
+      info: { 
+        title: openapiOpts.title ?? "CRUD API", 
+        version: openapiOpts.version ?? "1.0.0" 
+      },
+      docsAuth: openapiOpts.docsAuth as any,
+    } : undefined,
+    basePath,
+    api: "crud",
+    routes,
+    middlewares: [
+      async (c, next) => {
+        if (c.req.method === "OPTIONS") {
+          return c.text("", 204 as any, {
+            "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Max-Age": "86400",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": "true",
+          });
+        }
+        c.header("Access-Control-Allow-Origin", "*");
+        c.header("Access-Control-Allow-Credentials", "true");
+        await next();
+        return;
+      },
+      ...(options.middlewares || []),
+    ],
   });
 
-  // ── 1. Body-parsing middleware ──────────────────────────────────────────
-  if (parseBody) {
-    router.use(async (req, _res, next) => {
-      const r = req as unknown as HttpRequest;
-      const contentType = String(r.headers?.["content-type"] ?? "");
-      if (contentType.includes("application/json")) {
-        if (typeof r.body === "string") {
-          try {
-            (req as any).body = JSON.parse(r.body);
-          } catch {
-            /* keep as string */
-          }
-        } else if (Buffer.isBuffer((req as any).rawBody)) {
-          try {
-            const raw = await readRawBody(r);
-            (req as any).body = JSON.parse(raw);
-          } catch {
-            /* keep as is */
-          }
-        }
-      }
+  if (openapi !== false) {
+    server.buildOpenApiSpec = getSpec as any;
+  }
+
+  if (securityHeadersOpt !== false) {
+    const { securityHeaders } = require("../utils/security-headers");
+    const base0 = securityHeadersOpt === undefined ? { csp: false as const } : securityHeadersOpt;
+    server.hono.use("*", async (c, next) => {
+      const adapter = securityHeaders(base0);
+      await new Promise<void>((resolve) => {
+        const fakeReq = c.req.raw;
+        const fakeRes = {
+          setHeader: (k: string, v: string) => c.header(k, v),
+          removeHeader: (k: string) => c.res.headers.delete(k),
+        };
+        adapter(fakeReq, fakeRes, () => resolve());
+      });
       await next();
     });
   }
 
-  // ── 2. Auth middleware ──────────────────────────────────────────────────
-  if (auth) {
-    if (isAuthExtension(auth)) {
-      // Mount login/session/logout routes BEFORE the protected chain.
-      for (const route of auth.routes) {
-        const mountPath = `${base}${route.path}`;
-        if (route.method === "GET") router.get(mountPath, route.handler);
-        else router.post(mountPath, route.handler);
-      }
-      router.use(auth.middleware);
-    } else if (typeof auth === "function") {
-      // Custom middleware
-      router.use(auth);
-    } else {
-      // HTTP Basic Auth
-      const realm = auth.realm ?? "API";
-      const expected =
-        "Basic " +
-        Buffer.from(`${auth.username}:${auth.password}`).toString("base64");
-      router.use((req, res, next) => {
-        const authorization = (req as any).headers?.["authorization"] ?? "";
-        if (authorization !== expected) {
-          res
-            .status(401)
-            .set("WWW-Authenticate", `Basic realm="${realm}"`)
-            .set("Content-Type", "application/json")
-            .send(JSON.stringify({ success: false, error: "Unauthorized" }));
-          return;
-        }
-        next();
-      });
-    }
-  }
+  const handler = server.nodeHandler as any;
+  handler.spec = getSpec;
+  if (httpsOptions) handler.httpsOptions = httpsOptions;
 
-  // ── 3. Extra user middleware ────────────────────────────────────────────
-  for (const mw of extraMiddleware) {
-    router.use(mw);
-  }
-
-  // ── 4. Routes ─────────────────────────────────────────────────────────────
-
-  // ── OpenAPI spec & docs endpoints (before auth so they're public) ────
-  if (openapi !== false) {
-    const specPath = `${base}/__spec.json`;
-    const docsPath = `${base}/__docs`;
-
-    router.get(specPath, (_req: any, res: any) => {
-      const spec = getSpec();
-      res
-        .status(200)
-        .set("Content-Type", "application/json; charset=utf-8")
-        .send(JSON.stringify(spec, null, 2));
-    });
-
-    router.get(docsPath, (req: any, res: any) => {
-      // Rebuild spec URL with the correct prefix for the current context
-      // (emulator, Cloud Functions URL, or custom domain).
-      const specUrl = getLinkBase(req, base) + "/__spec.json";
-      const html = scalarDocsHtml(openapiOpts.title ?? "CRUD API", specUrl);
-      res
-        .status(200)
-        .set("Content-Type", "text/html; charset=utf-8")
-        .send(html);
-    });
-  }
-
-  // OPTIONS for CORS preflight
-  router.use((req, res, next) => {
-    if (req.method === "OPTIONS") {
-      handlers.handleOptions(req, res);
-      return;
-    }
-    next();
-  });
-
-  // List: GET /:repoName
-  router.get(`${base}/:repoName`, handlers.handleList);
-
-  // Query: POST /:repoName/query (advanced filtering with body)
-  router.post(`${base}/:repoName/query`, handlers.handleQuery);
-
-  // Get: GET /:repoName/:id
-  router.get(`${base}/:repoName/:id`, handlers.handleGet);
-
-  // Create: POST /:repoName
-  router.post(`${base}/:repoName`, handlers.handleCreate);
-
-  // Update (full): PUT /:repoName/:id
-  router.put(`${base}/:repoName/:id`, (req: any, res: any) =>
-    handlers.handleUpdate(req, res, false),
-  );
-
-  // Update (partial): PATCH /:repoName/:id
-  router.patch(`${base}/:repoName/:id`, (req: any, res: any) =>
-    handlers.handleUpdate(req, res, true),
-  );
-
-  // Delete: DELETE /:repoName/:id
-  router.delete(`${base}/:repoName/:id`, handlers.handleDelete);
-
-  // ── Request handler ─────────────────────────────────────────────────────
-  const handler = async (
-    req: HttpRequest,
-    res: HttpResponse,
-  ): Promise<void> => {
-    await router.handle(req as any, res as any);
-  };
-
-  // Attach spec getter so users can call server.spec() programmatically
-  (handler as any).spec = getSpec;
-  if (httpsOptions) (handler as any).httpsOptions = httpsOptions;
-
-  return handler as ((req: any, res: any) => Promise<void>) & {
-    /** Return the generated OpenAPI 3.1 document. */
-    spec: () => OpenAPIDocument;
-    /** Options to forward to `onRequest()` from firebase-functions. */
-    httpsOptions?: HttpsOptions;
-  };
+  return handler;
 }
 
-// Re-exports for convenience
 export { generateOpenAPISpec } from "./openapi";
 export type { OpenAPIDocument, OpenAPISpecOptions } from "./openapi";
 export type {
   ApiResponse,
-  BasicAuthConfig,
   CrudRepoConfig,
   CrudRepoEntry,
   CrudRepoRegistry,
   CrudServerOptions,
   FieldRole,
   ListResponseData,
-  Middleware,
   QueryRequestBody,
   RepoFieldPath,
   RepoRelationKeys,

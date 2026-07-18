@@ -218,6 +218,12 @@ const servers = createServers(repos, { onRequest });
 
 export const api = servers.crud({
   basePath: "/api",
+  middlewares: [
+    async (c, next) => {
+      // Hono middlewares (e.g. Auth)
+      await next();
+    }
+  ],
   repos: {
     posts: {
       schema: postSchema,
@@ -232,9 +238,11 @@ export const api = servers.crud({
 });
 ```
 
-### Firebase Auth (cookie session for admin, bearer for CRUD)
+The CRUD server also exposes a `POST /:repoName/batch` endpoint to perform bulk operations (create, update, delete) atomically over HTTP.
 
-A built-in helper wires Firebase Authentication into both `servers.admin()` and `servers.crud()`:
+### Authentication (Admin UI vs CRUD API)
+
+The Admin UI uses the legacy built-in router and is secured via `firebaseAuth`:
 
 ```typescript
 import { firebaseAuth } from "@lpdjs/firestore-repo-service/servers/auth";
@@ -254,29 +262,43 @@ auth: firebaseAuth({
 })
 ```
 
-Modes:
+The CRUD server is based on Hono. It uses standard Hono middlewares for authentication (like `firebaseBearerAuth` for the API and `firebaseDocsAuth` to secure the generated Swagger/Scalar UI):
 
-- `"cookie"` — auto-mounts `GET /__login`, `POST /__session`, `POST /__logout`. Uses HttpOnly cookies. Best for browser admin UIs.
-- `"bearer"` — verifies `Authorization: Bearer <idToken>`. Best for REST/CRUD APIs.
-- `"both"` — accepts either; useful for hybrid backends.
+```typescript
+import { firebaseBearerAuth, firebaseDocsAuth } from "@lpdjs/firestore-repo-service/servers/hono";
 
-The `allow()` callback maps a verified Firebase user to your business context (returning `null` rejects). Whatever it returns becomes `req.user.context` inside handlers and rules.
+export const api = servers.crud({
+  middlewares: [
+    firebaseBearerAuth({
+      getAuth: () => getAuth(),
+      allow: (token) => true,
+    })
+  ],
+  openapi: {
+    docsAuth: firebaseDocsAuth({
+      getAuth: () => getAuth(),
+      apiKey: process.env.WEB_API_KEY,
+      authDomain: process.env.AUTH_DOMAIN,
+    })
+  },
+  // ...
+});
+```
 
 ::: tip Auth emulator
-The Admin SDK already targets the Auth emulator when `FIREBASE_AUTH_EMULATOR_HOST` is set. The bundled login page now follows suit: pass `authEmulatorHost` (defaults to that same env var) and its client SDK is wired with `connectAuthEmulator`, so local `firebase emulators:start` sign-ins work end-to-end. Pass `authEmulatorHost: ""` to force production even under the emulator. This applies to `servers.admin()`, `servers.crud()` and the sync admin alike.
-
-**Non-`us-central1` region?** Under the emulator the region isn't reliably exposed, so the login page's same-function URLs fall back to `us-central1` — making the session POST 404 when you deploy elsewhere. Pass your region to `firebaseAuth({ region: "europe-west1", ... })` so the login/session prefix is correct. (The rest of the admin UI links pick the region up automatically from `httpsOptions.region`.)
+The Admin SDK already targets the Auth emulator when `FIREBASE_AUTH_EMULATOR_HOST` is set. The bundled login page now follows suit: pass `authEmulatorHost` (defaults to that same env var) and its client SDK is wired with `connectAuthEmulator`, so local `firebase emulators:start` sign-ins work end-to-end. Pass `authEmulatorHost: ""` to force production even under the emulator. This applies to `servers.admin()`, `servers.crud()` (via `firebaseDocsAuth`) and the sync admin alike.
 :::
 
 ## Per-repo authorization rules (CRUD)
 
-When `auth` is set on `servers.crud()`, each repo follows a **default-deny** policy: any operation without an explicit `rules.<op>` returns `403`. Use `allowAll` or `() => true` to explicitly open one.
+When authentication middlewares populate Hono's global `user` variable, each repo follows a **default-deny** policy: any operation without an explicit `rules.<op>` returns `403`. Use `allowAll` or `() => true` to explicitly open one.
 
 ```typescript
-import { firebaseAuth, allowAll } from "@lpdjs/firestore-repo-service/servers/auth";
+import { firebaseBearerAuth } from "@lpdjs/firestore-repo-service/servers/hono";
+import { allowAll } from "@lpdjs/firestore-repo-service/servers/auth";
 
 export const api = servers.crud({
-  auth: firebaseAuth({ getAuth, mode: "bearer" }),
+  middlewares: [firebaseBearerAuth({ getAuth: () => getAuth() })],
   repos: {
     comments: {
       path: "comments",
@@ -284,13 +306,13 @@ export const api = servers.crud({
       rules: {
         list:   allowAll,
         get:    allowAll,
-        create: ({ user })       => !!user.uid,
-        update: ({ user, doc })  => doc.authorId === user.uid,
+        create: ({ user })       => !!user?.uid,
+        update: ({ user, doc })  => doc.authorId === user?.uid,
         delete: ({ user, doc })  =>
-          doc.authorId === user.uid || user.context?.role === "moderator",
+          doc.authorId === user?.uid || user?.context?.role === "moderator",
         // Row-level filter applied to every doc returned by list/query/get
         filter: ({ user, doc })  =>
-          doc.public || doc.authorId === user.uid,
+          doc.public || doc.authorId === user?.uid,
       },
     },
   },

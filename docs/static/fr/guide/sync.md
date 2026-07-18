@@ -421,11 +421,11 @@ admin: {
 }
 ```
 
-### Auth Firebase (unifiée avec admin / crud)
+### Auth Firebase (unifiée avec l'admin UI)
 
 Le champ `auth` accepte aussi une `AuthExtension` retournée par
-`firebaseAuth({ ... })` — la même que celle utilisée par `servers.admin()` et
-`servers.crud()`. La page de connexion inline, les cookies de session et le
+`firebaseAuth({ ... })` — la même que celle utilisée par `servers.admin()`.
+La page de connexion inline, les cookies de session et le
 callback `allow()` fonctionnent à l'identique :
 
 ```typescript

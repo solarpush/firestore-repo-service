@@ -6,6 +6,7 @@ import type { z } from "zod";
 import type { HttpsOptions } from "firebase-functions/v2/https";
 import type { ConfiguredRepository } from "../../repositories/types";
 import type { FieldPath, RepositoryConfig } from "../../shared/types";
+import type { HonoServerOptions } from "../hono/types";
 
 // ---------------------------------------------------------------------------
 // OpenAPI options
@@ -27,6 +28,12 @@ export interface OpenAPISpecOptions {
   servers?: { url: string; description?: string }[];
   /** Whether the API requires auth — adds securitySchemes */
   auth?: "basic" | "bearer" | false;
+  /** Path served by the JSON spec (e.g. `/openapi.json`). Default: `/openapi.json`. */
+  path?: string;
+  /** Path serving the documentation UI. Set to `false` to disable. Default: `/docs`. */
+  docsPath?: string | false;
+  /** Auth guards for the docs UI (same as HonoServer DocsAuthExtension or middleware) */
+  docsAuth?: import("../hono/types").OpenAPIConfig["docsAuth"];
 }
 
 // ---------------------------------------------------------------------------
@@ -373,26 +380,6 @@ export interface CrudRepoEntry {
 export type CrudRepoRegistry = Record<string, CrudRepoEntry>;
 
 /**
- * HTTP Basic Auth configuration.
- */
-export interface BasicAuthConfig {
-  type: "basic";
-  /** Realm displayed in the browser login dialog */
-  realm?: string;
-  username: string;
-  password: string;
-}
-
-/**
- * Middleware function type
- */
-export type Middleware = (
-  req: any,
-  res: any,
-  next: () => void | Promise<void>,
-) => void | Promise<void>;
-
-/**
  * Options for `createCrudServer`.
  *
  * Made generic so TypeScript can infer the model type of each repo entry
@@ -406,14 +393,7 @@ export interface CrudServerOptions<
     string,
     ConfiguredRepository<any>
   >,
-> {
-  /**
-   * Base URL path of the function (e.g. "/api").
-   * Must match the path where the Firebase Function is mounted.
-   * Default: "/"
-   */
-  basePath?: string;
-
+> extends Omit<HonoServerOptions<any>, "routes" | "api" | "openapi"> {
   /**
    * Repository entries keyed by a name (used as route prefix).
    * TypeScript infers the model type from each `repo` field,
@@ -449,23 +429,6 @@ export interface CrudServerOptions<
    * `false` to disable (issue #12).
    */
   securityHeaders?: import("../utils/security-headers").SecurityHeadersOptions | false;
-
-  /**
-   * Authentication guard executed before every request.
-   * - Pass an {@link AuthExtension} (e.g. result of `firebaseAuth({...})`) to
-   *   wire Firebase Auth (typically `mode: "bearer"` for REST APIs).
-   * - Pass a `BasicAuthConfig` to enable HTTP Basic Auth.
-   * - Pass a `Middleware` function for fully custom auth logic.
-   *
-   * When an `AuthExtension` is set, per-repo `rules` follow a **default deny**
-   * policy: any operation without an explicit rule returns 403.
-   */
-  auth?: import("../auth").AuthExtension | BasicAuthConfig | Middleware;
-
-  /**
-   * Additional middleware functions executed after auth, before route handlers.
-   */
-  middleware?: Middleware[];
 
   /**
    * Whether to include detailed error messages in responses.

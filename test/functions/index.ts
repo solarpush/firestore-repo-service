@@ -179,6 +179,10 @@ export const server = onRequest(async (req, res) => {
 import { BigQuery } from "@google-cloud/bigquery";
 import { PubSub } from "@google-cloud/pubsub";
 import { firebaseAuth } from "@lpdjs/firestore-repo-service/servers/auth";
+import {
+  firebaseBearerAuth,
+  firebaseDocsAuth,
+} from "@lpdjs/firestore-repo-service/servers/hono";
 import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
 import { getAuth } from "firebase-admin/auth";
 import * as firestoreTriggers from "firebase-functions/v2/firestore";
@@ -261,17 +265,15 @@ export const admin = servers.admin({
 export const crud = servers.crud({
   basePath: "/",
 
-  auth: firebaseAuth({
-    getAuth: () => getAuth(),
-    // Cookie mode → renders the inline login page on unauthenticated GETs.
-    // Use "bearer" only for REST APIs (no UI), or "both" for hybrid backends.
-    mode: "both",
-    // Required when loginPage is enabled (default in cookie/both modes).
-    // Find both in Firebase Console → Project Settings → General → Web app.
-    apiKey: process.env["WEB_API_KEY"],
-    authDomain: process.env["AUTH_DOMAIN"],
-    allow: () => true,
-  }),
+  middlewares: [
+    async (c, next) => {
+      const apiKey = c.req.header("x-api-key");
+      if (!apiKey || apiKey !== process.env["WEB_API_KEY"]) {
+        return c.json({ error: "Unauthorized" }, 401);
+      }
+      return await next();
+    },
+  ],
 
   repos: {
     posts: {
@@ -341,6 +343,12 @@ export const crud = servers.crud({
       { url: "http://127.0.0.1:5001/firestore-repo-services/us-central1/crud" },
     ],
     auth: "bearer",
+    docsAuth: firebaseDocsAuth({
+      getAuth: () => getAuth(),
+      apiKey: process.env["WEB_API_KEY"] as string,
+      authDomain: process.env["AUTH_DOMAIN"] as string,
+      allow: () => true,
+    }),
   },
 });
 
