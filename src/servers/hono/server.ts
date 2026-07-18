@@ -366,22 +366,25 @@ function makeRouteHandler(
     const callNext = async (): Promise<unknown> => {
       let payload: unknown = undefined;
 
+      // Always read payload if it's expected, even without an input schema.
+      // E.g., generic handlers that manually validate the body.
+      let raw: unknown;
+      try {
+        raw = await readPayload(c, source, route.method);
+      } catch (err) {
+        throw new BadRequestError(
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+
       if (inputSchema) {
-        let raw: unknown;
-        try {
-          raw = await readPayload(c, source, route.method);
-        } catch (err) {
-          // Body parse failure → wrap as a generic Error so the interceptor
-          // can decide. Use a 400-shaped Error subclass.
-          throw new BadRequestError(
-            err instanceof Error ? err.message : String(err),
-          );
-        }
         const parsed = inputSchema.safeParse(raw);
         if (!parsed.success) {
           throw new ValidationError(parsed.error, source);
         }
         payload = parsed.data;
+      } else {
+        payload = raw;
       }
 
       const result = await (route.handler as (ctx: {
