@@ -621,6 +621,7 @@ export function createAdminServer<
   router.get(`${base}/:repoName/_panel`, handlers.handlePanel as any);
   router.post(`${base}/:repoName/_bulk/delete`, handlers.handleBulkDelete as any);
   router.post(`${base}/:repoName/_bulk/update`, handlers.handleBulkUpdate as any);
+  router.post(`${base}/:repoName/_bulk/backfill`, handlers.handleBulkBackfill as any);
 
   router.get(`${base}/:repoName`, handlers.handleList);
 

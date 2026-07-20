@@ -956,6 +956,22 @@ export function createAdminHandlers(
     const queryError = isError ? result.queryError : undefined;
     const lb = getLinkBase(req, basePath, region);
 
+    let flashObj:
+      | { type: "success" | "error" | "warning"; message: string }
+      | undefined;
+    const flashQ = query["flash"];
+    if (flashQ === "created")
+      flashObj = { type: "success", message: "Document created successfully." };
+    else if (flashQ === "updated")
+      flashObj = { type: "success", message: "Document updated successfully." };
+    else if (flashQ === "deleted")
+      flashObj = { type: "success", message: "Document deleted successfully." };
+    else if (flashQ === "backfilled")
+      flashObj = {
+        type: "success",
+        message: "Repository backfilled successfully.",
+      };
+
     sendHtml(
       res,
       renderList(
@@ -969,7 +985,7 @@ export function createAdminHandlers(
           prevCursor: prevCursorId,
           nextCursor: nextCursorId,
         },
-        undefined,
+        flashObj,
         columnMeta,
         activeFilters,
         entry.allowDelete ?? false,
@@ -1397,6 +1413,35 @@ export function createAdminHandlers(
   };
 
   // ── Bulk operations ──────────────────────────────────────────────────────
+  const handleBulkBackfill = async (
+    req: AnyReq & { params: RouteParams },
+    res: AnyRes,
+  ): Promise<void> => {
+    const repoName = req.params["repoName"];
+    if (!repoName) {
+      sendHtml(res, "Bad request", 400);
+      return;
+    }
+    const entry = registry[repoName];
+    if (!entry) {
+      sendHtml(res, "Repository not found", 404);
+      return;
+    }
+    const lb = getLinkBase(req, basePath, region);
+    try {
+      await entry.repo.system.backfillKeys();
+      // Since it's a form submit, we just redirect back to the list
+      redirect(res, `${lb}/${entry.name}?flash=backfilled`);
+    } catch (err) {
+      // Very basic error handling
+      sendHtml(
+        res,
+        `<div class="p-6 text-error">Backfill failed: ${(err as Error).message}</div>`,
+        500,
+      );
+    }
+  };
+
   /** Build DocumentReferences for a list of docIds, handling subcollections via fetchDocById. */
   const resolveRefs = async (
     entry: AdminRepoEntry,
@@ -1544,7 +1589,10 @@ export function createAdminHandlers(
       }
 
       const parsedMap = parseFormBody(
-        (body.formPayload ?? {}) as Record<string, string | string[] | undefined>,
+        (body.formPayload ?? {}) as Record<
+          string,
+          string | string[] | undefined
+        >,
         dummySchema as z.ZodObject<any>,
       );
       parsedValue = parsedMap[field];
@@ -1788,6 +1836,7 @@ export function createAdminHandlers(
     handlePanel,
     handleBulkDelete,
     handleBulkUpdate,
+    handleBulkBackfill,
     handleHistory,
   };
 }

@@ -257,9 +257,20 @@ export function renderListJsx(
             </div>
           </div>
         </div>
-        <a href={createUrl} class="btn btn-primary btn-sm">
-          + New
-        </a>
+        <div class="flex gap-2">
+          <form
+            method="post"
+            action={`${listUrl}/_bulk/backfill`}
+            onsubmit="return confirm('Backfill entire repository? This will scan all documents and fill missing system keys.')"
+          >
+            <button type="submit" class="btn btn-outline btn-sm">
+              Backfill
+            </button>
+          </form>
+          <a href={createUrl} class="btn btn-primary btn-sm">
+            + New
+          </a>
+        </div>
       </div>
 
       {/* Bulk action bar (hidden until at least one row is selected) */}
@@ -601,8 +612,8 @@ export function renderListJsx(
       {/* Pre-rendered form-gen templates for bulk update */}
       <div class="hidden" data-frs-bulk-templates>
         {bulkFieldsDescriptors.map((f) => (
-          <div 
-            key={f.name} 
+          <div
+            key={f.name}
             data-frs-bulk-template-for={f.name}
             dangerouslySetInnerHTML={{ __html: renderField(f) }}
           />
