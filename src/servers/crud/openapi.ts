@@ -8,6 +8,7 @@
  */
 
 import { z } from "zod";
+import { getOpenApiMetadata } from "@asteasolutions/zod-to-openapi";
 import type { CrudRepoEntry, CrudRepoRegistry, OpenAPISpecOptions } from "./types";
 
 export type { OpenAPISpecOptions };
@@ -65,12 +66,17 @@ function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
       target: "openapi-3.1",
       unrepresentable: "any",
       override: (ctx) => {
+        const metadata = getOpenApiMetadata(ctx.zodSchema as unknown as z.ZodTypeAny);
+        if (metadata) {
+          Object.assign(ctx.jsonSchema, metadata);
+        }
+
         const def: any = (ctx.zodSchema as any)?._zod?.def;
         if (!def) return;
-        if (def.type === "date") {
+        if (def.type === "date" && !(ctx.jsonSchema as any).type) {
           (ctx.jsonSchema as any).type = "string";
           (ctx.jsonSchema as any).format = "date-time";
-        } else if (def.type === "bigint") {
+        } else if (def.type === "bigint" && !(ctx.jsonSchema as any).type) {
           (ctx.jsonSchema as any).type = "string";
           (ctx.jsonSchema as any).format = "int64";
         }

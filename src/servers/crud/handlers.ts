@@ -617,7 +617,21 @@ export function createCrudHandlers(
       }
 
       if (filters.length > 0) {
-        queryOptions.where = filters.map((f) => [f.field, f.op, f.value]);
+        queryOptions.where = [];
+        for (const f of filters) {
+          let finalValue = f.value;
+          const fieldSchema = (entry.schema as any)?.shape?.[f.field];
+          if (fieldSchema && typeof fieldSchema.safeParse === "function") {
+            const parsed = fieldSchema.safeParse(f.value);
+            if (parsed.success) {
+              finalValue = parsed.data;
+            } else {
+              const messages = parsed.error.issues.map((e: any) => e.message).join(", ");
+              return sendError(c, `Invalid filter value for '${f.field}': ${messages}`, 400);
+            }
+          }
+          queryOptions.where.push([f.field, f.op, finalValue]);
+        }
       }
 
       if (select) {
