@@ -119,6 +119,49 @@ function generateFirestoreId(): string {
 }
 
 /**
+ * Rehydrate a cursor snapshot for both root collections and subcollections (collection groups).
+ */
+async function rehydrateAdminCursor(
+  entry: AdminRepoEntry,
+  cursorStr: string,
+): Promise<import("firebase-admin/firestore").DocumentSnapshot | undefined> {
+  if (!cursorStr) return undefined;
+  try {
+    const colRef = entry.repo.ref as any;
+    const firestore = colRef?.firestore;
+
+    // 1. If cursorStr is a JSON string
+    if (cursorStr.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(cursorStr);
+        if (parsed.docPath && firestore && typeof firestore.doc === "function") {
+          const snap = await firestore.doc(parsed.docPath).get();
+          if (snap.exists) return snap;
+        }
+        if (parsed.docId) cursorStr = parsed.docId;
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // 2. If cursorStr is a full document path
+    if (cursorStr.includes("/") && firestore && typeof firestore.doc === "function") {
+      const snap = await firestore.doc(cursorStr).get();
+      if (snap.exists) return snap;
+    }
+
+    // 3. Root collection fallback
+    if (typeof colRef.doc === "function") {
+      const snap = await colRef.doc(cursorStr).get();
+      if (snap.exists) return snap;
+    }
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
+
+/**
  * Extract Firestore document path args from a document's stored path.
  * e.g. "posts/abc/comments/xyz" → ["abc", "xyz"] (the doc-ID segments).
  * Returns `undefined` when no usable path is available.
@@ -901,14 +944,7 @@ export function createAdminHandlers(
       | import("firebase-admin/firestore").DocumentSnapshot
       | undefined;
     if (cursorStr) {
-      try {
-        const colRef = entry.repo.ref as any;
-        if (typeof colRef.doc === "function") {
-          cursorSnapshot = await colRef.doc(cursorStr).get();
-        }
-      } catch {
-        /* ignore */
-      }
+      cursorSnapshot = await rehydrateAdminCursor(entry, cursorStr);
     }
 
     const [result, totalCount] = await Promise.all([
@@ -951,8 +987,8 @@ export function createAdminHandlers(
     // Discriminate between success and error results
     const isError = "queryError" in result;
     const docs = isError ? [] : (result.data as Record<string, unknown>[]);
-    const nextCursorId = isError ? "" : (result.nextCursor?.id ?? "");
-    const prevCursorId = isError ? "" : (result.prevCursor?.id ?? "");
+    const nextCursorId = isError ? "" : (result.nextCursor?.ref?.path ?? result.nextCursor?.id ?? "");
+    const prevCursorId = isError ? "" : (result.prevCursor?.ref?.path ?? result.prevCursor?.id ?? "");
     const queryError = isError ? result.queryError : undefined;
     const lb = getLinkBase(req, basePath, region);
 
@@ -1368,14 +1404,7 @@ export function createAdminHandlers(
       | import("firebase-admin/firestore").DocumentSnapshot
       | undefined;
     if (cursorStr) {
-      try {
-        const colRef = entry.repo.ref as any;
-        if (typeof colRef.doc === "function") {
-          cursorSnapshot = await colRef.doc(cursorStr).get();
-        }
-      } catch {
-        /* ignore */
-      }
+      cursorSnapshot = await rehydrateAdminCursor(entry, cursorStr);
     }
     try {
       const result = await entry.repo.query.paginate({
@@ -1396,8 +1425,8 @@ export function createAdminHandlers(
           pagination: {
             hasPrev: result.hasPrevPage,
             hasNext: result.hasNextPage,
-            prevCursor: result.prevCursor?.id ?? "",
-            nextCursor: result.nextCursor?.id ?? "",
+            prevCursor: result.prevCursor?.ref?.path ?? result.prevCursor?.id ?? "",
+            nextCursor: result.nextCursor?.ref?.path ?? result.nextCursor?.id ?? "",
             pageSize: ps,
           },
         }) as any,

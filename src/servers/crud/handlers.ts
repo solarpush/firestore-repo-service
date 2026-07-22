@@ -358,28 +358,66 @@ function serializeCursor(
   snapshot: import("firebase-admin/firestore").DocumentSnapshot | undefined,
 ): Record<string, unknown> | null {
   if (!snapshot) return null;
-  return { docId: snapshot.id };
+  return {
+    docId: snapshot.id,
+    docPath: snapshot.ref?.path ?? undefined,
+  };
 }
 
 /**
  * Deserialize a cursor object back to a DocumentSnapshot.
  * Fetches the document from Firestore to get the actual snapshot.
+ * Supports root collections and subcollections/collection groups via full docPath.
  */
 async function deserializeCursor(
   entry: CrudRepoEntry,
   cursor: unknown,
 ): Promise<import("firebase-admin/firestore").DocumentSnapshot | undefined> {
-  if (!cursor || typeof cursor !== "object") return undefined;
-  const docId = (cursor as Record<string, unknown>).docId;
-  if (typeof docId !== "string") return undefined;
+  if (!cursor) return undefined;
+
+  let cursorObj: Record<string, unknown> | undefined;
+  if (typeof cursor === "string") {
+    try {
+      cursorObj = JSON.parse(cursor);
+    } catch {
+      cursorObj = cursor.includes("/")
+        ? { docPath: cursor }
+        : { docId: cursor };
+    }
+  } else if (typeof cursor === "object") {
+    cursorObj = cursor as Record<string, unknown>;
+  }
+
+  if (!cursorObj) return undefined;
+
+  const docPath =
+    typeof cursorObj.docPath === "string" ? cursorObj.docPath : undefined;
+  const docId =
+    typeof cursorObj.docId === "string" ? cursorObj.docId : undefined;
 
   try {
-    // Get the collection reference from the repo
-    const colRef = entry.repo
-      .ref as import("firebase-admin/firestore").CollectionReference;
-    if (typeof colRef.doc !== "function") return undefined;
-    const snapshot = await colRef.doc(docId).get();
-    return snapshot.exists ? snapshot : undefined;
+    const colRef = entry.repo.ref as any;
+    const firestore = colRef?.firestore;
+
+    // 1. If docPath is available and firestore instance exists, get doc directly by full path
+    if (docPath && firestore && typeof firestore.doc === "function") {
+      const snapshot = await firestore.doc(docPath).get();
+      if (snapshot.exists) return snapshot;
+    }
+
+    // 2. If docId is a full path (e.g. "users/u1/comments/c1"), get doc by full path
+    if (docId && docId.includes("/") && firestore && typeof firestore.doc === "function") {
+      const snapshot = await firestore.doc(docId).get();
+      if (snapshot.exists) return snapshot;
+    }
+
+    // 3. Root collection fallback (colRef.doc exists for CollectionReference)
+    if (docId && typeof colRef.doc === "function") {
+      const snapshot = await colRef.doc(docId).get();
+      if (snapshot.exists) return snapshot;
+    }
+
+    return undefined;
   } catch {
     return undefined;
   }
