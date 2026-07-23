@@ -337,7 +337,7 @@ function parseValue(val: string): unknown {
   // Boolean
   if (val === "true") return true;
   if (val === "false") return false;
-  if (val === "null") return null;
+  if (val === "null" || val === "__null__") return null;
 
   // Number
   const num = Number(val);
@@ -663,9 +663,41 @@ export function createCrudHandlers(
             const parsed = fieldSchema.safeParse(f.value);
             if (parsed.success) {
               finalValue = parsed.data;
+            } else if (Array.isArray(f.value)) {
+              // If f.value is an array (e.g. for `__in` / `__nin` operators) and fieldSchema is for a single element,
+              // try validating each element of the array individually.
+              const parsedArray: unknown[] = [];
+              let hasError = false;
+              let errorMessage = "";
+              for (const item of f.value) {
+                const itemParsed = fieldSchema.safeParse(item);
+                if (itemParsed.success) {
+                  parsedArray.push(itemParsed.data);
+                } else {
+                  hasError = true;
+                  errorMessage = itemParsed.error.issues
+                    .map((e: any) => e.message)
+                    .join(", ");
+                  break;
+                }
+              }
+              if (hasError) {
+                return sendError(
+                  c,
+                  `Invalid filter value for '${f.field}': ${errorMessage}`,
+                  400,
+                );
+              }
+              finalValue = parsedArray;
             } else {
-              const messages = parsed.error.issues.map((e: any) => e.message).join(", ");
-              return sendError(c, `Invalid filter value for '${f.field}': ${messages}`, 400);
+              const messages = parsed.error.issues
+                .map((e: any) => e.message)
+                .join(", ");
+              return sendError(
+                c,
+                `Invalid filter value for '${f.field}': ${messages}`,
+                400,
+              );
             }
           }
           queryOptions.where.push([f.field, f.op, finalValue]);

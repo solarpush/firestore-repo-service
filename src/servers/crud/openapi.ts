@@ -218,7 +218,31 @@ function paginationParams(entry: CrudRepoEntry): Record<string, unknown>[] {
 
 function filterParams(entry: CrudRepoEntry): Record<string, unknown>[] {
   const fields = entry.filterableFields ?? Object.keys(entry.schema.shape);
-  const ops = ["eq", "ne", "lt", "lte", "gt", "gte", "in", "nin", "contains"];
+  const ops = [
+    "eq",
+    "ne",
+    "lt",
+    "lte",
+    "gt",
+    "gte",
+    "in",
+    "nin",
+    "contains",
+    "containsAny",
+  ];
+
+  const opDescriptions: Record<string, string> = {
+    eq: "equals. Use 'null' or '__null__' to match null values",
+    ne: "not equals. Use 'null' or '__null__' to match non-null values",
+    lt: "less than",
+    lte: "less than or equal",
+    gt: "greater than",
+    gte: "greater than or equal",
+    in: "in list (comma-separated values). Supports 'null' and '__null__' (e.g. val1,val2,__null__)",
+    nin: "not in list (comma-separated values). Supports 'null' and '__null__'",
+    contains: "array-contains",
+    containsAny: "array-contains-any (comma-separated values). Supports 'null' and '__null__'",
+  };
 
   const params: Record<string, unknown>[] = [];
   for (const field of fields) {
@@ -227,15 +251,16 @@ function filterParams(entry: CrudRepoEntry): Record<string, unknown>[] {
       name: field,
       in: "query",
       schema: { type: "string" },
-      description: `Filter by ${field} (equality)`,
+      description: `Filter by ${field} (equality). Use 'null' or '__null__' for null values`,
     });
     // Operator filters: ?field__op=value
     for (const op of ops) {
+      const descDetail = opDescriptions[op] ? ` (${opDescriptions[op]})` : "";
       params.push({
         name: `${field}__${op}`,
         in: "query",
         schema: { type: "string" },
-        description: `Filter ${field} with operator ${op}`,
+        description: `Filter ${field} with operator ${op}${descDetail}`,
       });
     }
   }
