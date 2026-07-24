@@ -178,12 +178,30 @@ export type GenerateGetMethods<
 > = {
   [K in TConfig["foreignKeys"][number] as K extends string
     ? `by${Capitalize<K>}`
-    : never]: <ReturnDoc extends boolean = false>(
-    value: TConfig["type"][K extends keyof TConfig["type"] ? K : never],
-    options?:
-      | ReturnDoc
-      | (GetOptions<TConfig["type"]> & { returnDoc?: ReturnDoc }),
-  ) => Promise<GetResult<TConfig["type"], ReturnDoc>>;
+    : never]: K extends TConfig["documentKey"]
+    ? <ReturnDoc extends boolean = false>(
+        ...args:
+          | [
+              ...Parameters<TConfig["documentRef"]>,
+              (
+                | ReturnDoc
+                | (GetOptions<TConfig["type"]> & { returnDoc?: ReturnDoc })
+              )?,
+            ]
+          | [
+              TConfig["type"][K extends keyof TConfig["type"] ? K : never],
+              (
+                | ReturnDoc
+                | (GetOptions<TConfig["type"]> & { returnDoc?: ReturnDoc })
+              )?,
+            ]
+      ) => Promise<GetResult<TConfig["type"], ReturnDoc>>
+    : <ReturnDoc extends boolean = false>(
+        value: TConfig["type"][K extends keyof TConfig["type"] ? K : never],
+        options?:
+          | ReturnDoc
+          | (GetOptions<TConfig["type"]> & { returnDoc?: ReturnDoc }),
+      ) => Promise<GetResult<TConfig["type"], ReturnDoc>>;
 };
 
 /**

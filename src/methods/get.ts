@@ -98,29 +98,49 @@ export function createGetMethods<T>(
   foreignKeys.forEach((foreignKey: string) => {
     const methodName = `by${capitalize(String(foreignKey))}`;
     getMethods[methodName] = async (
-      value: string,
-      options: GetOptions | boolean = {},
+      ...args: any[]
     ): Promise<T | { data: T; doc: DocumentSnapshot } | null> => {
-      // Handle legacy boolean returnDoc parameter
-      const opts: GetOptions =
-        typeof options === "boolean" ? { returnDoc: options } : options;
-
-      // Special case: if foreignKey is the documentKey, use direct document reference
-      if (String(foreignKey) === documentKey) {
-        const docRef = documentRef(value);
-        const doc = await docRef.get();
-        if (!doc.exists) return null;
-        const data = maybeNormalize(doc.data()) as T;
-        return opts.returnDoc ? { data, doc } : data;
+      let options: GetOptions = {};
+      const lastArg = args[args.length - 1];
+      if (typeof lastArg === "boolean") {
+        options = { returnDoc: lastArg };
+        args = args.slice(0, -1);
+      } else if (
+        typeof lastArg === "object" &&
+        lastArg !== null &&
+        !Array.isArray(lastArg)
+      ) {
+        options = lastArg;
+        args = args.slice(0, -1);
       }
 
-      // For other keys, query by field value
+      // Special case: if foreignKey is the documentKey
+      if (String(foreignKey) === documentKey) {
+        // Direct document reference works if:
+        // - explicit parent path arguments are provided (args.length > 1)
+        // - OR it's a regular root collection (actualCollection !== null) AND args.length === 1
+        if (
+          args.length > 1 ||
+          (args.length === 1 && actualCollection !== null)
+        ) {
+          const docRef = documentRef(...args);
+          const doc = await docRef.get();
+          if (!doc.exists) return null;
+          const data = maybeNormalize(doc.data()) as T;
+          return options.returnDoc ? { data, doc } : data;
+        }
+      }
+
+      // Fallback or other foreign keys: query via collectionRef (collectionGroup query for isGroup: true)
+      const value = args[0];
+      if (value === undefined) return null;
+
       let q: Query = collectionRef as any;
       q = q.where(String(foreignKey), "==", value).limit(1);
 
       // Apply select if specified
-      if (opts.select && opts.select.length > 0) {
-        q = q.select(...opts.select.map((f) => String(f)));
+      if (options.select && options.select.length > 0) {
+        q = q.select(...options.select.map((f) => String(f)));
       }
 
       const snapshot: QuerySnapshot = await q.get();
@@ -128,7 +148,7 @@ export function createGetMethods<T>(
       const doc = snapshot.docs[0];
       if (!doc) return null;
       const data = maybeNormalize(doc.data()) as T;
-      return opts.returnDoc ? { data, doc } : data;
+      return options.returnDoc ? { data, doc } : data;
     };
   });
 
