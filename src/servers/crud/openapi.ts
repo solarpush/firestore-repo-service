@@ -178,10 +178,110 @@ function listResponse(
 }
 
 // ---------------------------------------------------------------------------
+// Introspection & Zod-to-OpenAPI Type Resolution
+// ---------------------------------------------------------------------------
+
+/** Helper to unwrap Zod modifiers (optional, nullable, default, catch, effects, etc.) */
+function unwrapZodType(zodType: any): any {
+  let cur = zodType;
+  while (cur) {
+    const def = cur._zod?.def ?? cur._def;
+    if (!def) break;
+    if (def.innerType) {
+      cur = def.innerType;
+    } else if (def.schema) {
+      cur = def.schema;
+    } else if (
+      def.type === "optional" ||
+      def.type === "nullable" ||
+      def.type === "default" ||
+      def.type === "catch" ||
+      def.type === "effects"
+    ) {
+      cur = def.innerType ?? def.schema;
+    } else {
+      break;
+    }
+  }
+  return cur;
+}
+
+/** Resolve a dot-notation path (e.g. "address.city") from a Zod schema */
+function resolveFieldPathSchema(entrySchema: any, path: string): any {
+  const parts = path.split(".");
+  let cur = unwrapZodType(entrySchema);
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (!part) continue;
+    const shape: Record<string, any> | undefined = (cur as any)?.shape;
+    if (!shape || !shape[part]) {
+      return undefined;
+    }
+    const rawSub = shape[part];
+    if (i === parts.length - 1) {
+      return rawSub;
+    }
+    cur = unwrapZodType(rawSub);
+  }
+  return cur;
+}
+
+/** Recursively extract leaf fields and parent object fields from a Zod object schema */
+function extractLeafFields(
+  zodSchema: any,
+  prefix = "",
+  depth = 0,
+): { path: string; zodSchema: any }[] {
+  if (depth > 5) return [];
+  const unwrapped = unwrapZodType(zodSchema);
+  const shape = unwrapped?.shape;
+  if (!shape) return [];
+
+  const results: { path: string; zodSchema: any }[] = [];
+  for (const [key, rawSub] of Object.entries(shape)) {
+    const fieldPath = prefix ? `${prefix}.${key}` : key;
+    const subUnwrapped = unwrapZodType(rawSub);
+    if (subUnwrapped?.shape && typeof subUnwrapped.shape === "object") {
+      results.push({ path: fieldPath, zodSchema: rawSub });
+      results.push(...extractLeafFields(subUnwrapped, fieldPath, depth + 1));
+    } else {
+      results.push({ path: fieldPath, zodSchema: rawSub });
+    }
+  }
+  return results;
+}
+
+/** Get all filterable leaf fields for a CrudRepoEntry */
+function getFilterableLeafFields(
+  entry: CrudRepoEntry,
+): { path: string; zodSchema: any }[] {
+  if (entry.filterableFields && entry.filterableFields.length > 0) {
+    return entry.filterableFields.map((path) => ({
+      path,
+      zodSchema: resolveFieldPathSchema(entry.schema, path),
+    }));
+  }
+  return extractLeafFields(entry.schema);
+}
+
+/** Convert a Zod field schema to an inline OpenAPI JSON Schema for its value */
+function zodTypeToJsonValueSchema(zodType: any): Record<string, unknown> {
+  if (!zodType) return { type: "string" };
+  const jsonSchema = zodToJsonSchema(zodType);
+  delete jsonSchema["$schema"];
+  delete jsonSchema["title"];
+  return jsonSchema;
+}
+
+// ---------------------------------------------------------------------------
 // Pagination / filter query parameters (shared across list endpoints)
 // ---------------------------------------------------------------------------
 
 function paginationParams(entry: CrudRepoEntry): Record<string, unknown>[] {
+  const leafFields = getFilterableLeafFields(entry);
+  const orderableFields =
+    entry.orderableFields ?? leafFields.map((f) => f.path);
+
   return [
     {
       name: "pageSize",
@@ -198,7 +298,10 @@ function paginationParams(entry: CrudRepoEntry): Record<string, unknown>[] {
     {
       name: "orderBy",
       in: "query",
-      schema: { type: "string" },
+      schema: {
+        type: "string",
+        ...(orderableFields.length > 0 ? { enum: orderableFields } : {}),
+      },
       description: "Field name to order by",
     },
     {
@@ -211,13 +314,17 @@ function paginationParams(entry: CrudRepoEntry): Record<string, unknown>[] {
       name: "select",
       in: "query",
       schema: { type: "string" },
-      description: "Comma-separated list of fields to return",
+      description: `Comma-separated list of fields to return${
+        leafFields.length > 0
+          ? ` (${leafFields.map((f) => f.path).join(", ")})`
+          : ""
+      }`,
     },
   ];
 }
 
 function filterParams(entry: CrudRepoEntry): Record<string, unknown>[] {
-  const fields = entry.filterableFields ?? Object.keys(entry.schema.shape);
+  const leafFields = getFilterableLeafFields(entry);
   const ops = [
     "eq",
     "ne",
@@ -245,21 +352,26 @@ function filterParams(entry: CrudRepoEntry): Record<string, unknown>[] {
   };
 
   const params: Record<string, unknown>[] = [];
-  for (const field of fields) {
+  for (const { path: field, zodSchema } of leafFields) {
+    const valSchema = zodTypeToJsonValueSchema(zodSchema);
+
     // Direct equality filter: ?field=value
     params.push({
       name: field,
       in: "query",
-      schema: { type: "string" },
+      schema: valSchema,
       description: `Filter by ${field} (equality). Use 'null' or '__null__' for null values`,
     });
     // Operator filters: ?field__op=value
     for (const op of ops) {
       const descDetail = opDescriptions[op] ? ` (${opDescriptions[op]})` : "";
+      const isListOp = op === "in" || op === "nin" || op === "containsAny";
       params.push({
         name: `${field}__${op}`,
         in: "query",
-        schema: { type: "string" },
+        schema: isListOp
+          ? { type: "string", description: "Comma-separated list of values" }
+          : valSchema,
         description: `Filter ${field} with operator ${op}${descDetail}`,
       });
     }
@@ -359,6 +471,182 @@ function queryBodySchema(): Record<string, unknown> {
   };
 }
 
+/** Build a strongly-typed OpenAPI QueryRequestBody schema tailored to a CrudRepoEntry */
+function buildTypedQueryBodySchema(entry: CrudRepoEntry): Record<string, unknown> {
+  const leafFields = getFilterableLeafFields(entry);
+  const orderableFieldNames =
+    entry.orderableFields ?? leafFields.map((f) => f.path);
+  const leafFieldNames = leafFields.map((f) => f.path);
+
+  if (leafFields.length === 0) {
+    return queryBodySchema();
+  }
+
+  const whereTuples: Record<string, unknown>[] = [];
+
+  for (const { path, zodSchema } of leafFields) {
+    const valSchema = zodTypeToJsonValueSchema(zodSchema);
+    const unwrapped = unwrapZodType(zodSchema);
+
+    const isArrayType =
+      (unwrapped as any)?._zod?.def?.type === "array" ||
+      (unwrapped as any)?._def?.typeName === "ZodArray" ||
+      (unwrapped as any)?._def?.type === "array";
+
+    const elemSchema = isArrayType
+      ? zodTypeToJsonValueSchema(
+          (unwrapped as any)?._zod?.def?.element ??
+            (unwrapped as any)?._def?.type ??
+            (unwrapped as any)?._def?.element,
+        )
+      : valSchema;
+
+    // Standard comparison operators (==, !=, <, <=, >, >=)
+    whereTuples.push({
+      type: "array",
+      description: `Condition on '${path}'`,
+      prefixItems: [
+        { type: "string", enum: [path] },
+        {
+          type: "string",
+          enum: ["==", "!=", "<", "<=", ">", ">=", "eq", "ne", "lt", "lte", "gt", "gte"],
+        },
+        valSchema,
+      ],
+      minItems: 3,
+      maxItems: 3,
+    });
+
+    // List operators (in, not-in)
+    whereTuples.push({
+      type: "array",
+      description: `List condition on '${path}' (in, not-in)`,
+      prefixItems: [
+        { type: "string", enum: [path] },
+        { type: "string", enum: ["in", "not-in", "nin"] },
+        { type: "array", items: valSchema },
+      ],
+      minItems: 3,
+      maxItems: 3,
+    });
+
+    // Array contains operators
+    whereTuples.push({
+      type: "array",
+      description: `Array contains condition on '${path}'`,
+      prefixItems: [
+        { type: "string", enum: [path] },
+        { type: "string", enum: ["array-contains", "contains"] },
+        elemSchema,
+      ],
+      minItems: 3,
+      maxItems: 3,
+    });
+
+    whereTuples.push({
+      type: "array",
+      description: `Array contains-any condition on '${path}'`,
+      prefixItems: [
+        { type: "string", enum: [path] },
+        { type: "string", enum: ["array-contains-any", "containsAny"] },
+        { type: "array", items: elemSchema },
+      ],
+      minItems: 3,
+      maxItems: 3,
+    });
+  }
+
+  const whereItemSchema = {
+    oneOf: whereTuples,
+  };
+
+  return {
+    type: "object",
+    properties: {
+      where: {
+        type: "array",
+        items: whereItemSchema,
+        description: "AND conditions: [field, operator, value][]",
+      },
+      orWhere: {
+        type: "array",
+        items: whereItemSchema,
+        description: "Simple OR conditions (each independently OR'd)",
+      },
+      orWhereGroups: {
+        type: "array",
+        items: {
+          type: "array",
+          items: whereItemSchema,
+        },
+        description: "Advanced OR groups (AND within, OR across groups)",
+      },
+      orderBy: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            field: { type: "string", enum: orderableFieldNames },
+            direction: { type: "string", enum: ["asc", "desc"] },
+          },
+          required: ["field"],
+        },
+      },
+      select: {
+        type: "array",
+        items: { type: "string", enum: leafFieldNames },
+        description: "Fields to select (projection)",
+      },
+      pageSize: {
+        type: "integer",
+        maximum: 100,
+        description: "Number of items per page",
+      },
+      cursor: {
+        oneOf: [{ type: "string" }, { type: "object" }],
+        description: "Pagination cursor",
+      },
+      direction: {
+        type: "string",
+        enum: ["next", "prev"],
+        description: "Pagination direction",
+      },
+      includes: {
+        type: "array",
+        items:
+          entry.allowedIncludes && entry.allowedIncludes.length > 0
+            ? {
+                oneOf: [
+                  { type: "string", enum: entry.allowedIncludes },
+                  {
+                    type: "object",
+                    properties: {
+                      relation: { type: "string", enum: entry.allowedIncludes },
+                      select: { type: "array", items: { type: "string" } },
+                    },
+                    required: ["relation"],
+                  },
+                ],
+              }
+            : {
+                oneOf: [
+                  { type: "string" },
+                  {
+                    type: "object",
+                    properties: {
+                      relation: { type: "string" },
+                      select: { type: "array", items: { type: "string" } },
+                    },
+                    required: ["relation"],
+                  },
+                ],
+              },
+        description: "Relations to include (populate)",
+      },
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Path generation per repo entry
 // ---------------------------------------------------------------------------
@@ -369,6 +657,7 @@ function buildPathsForEntry(
   modelSchemaName: string,
   createSchemaName: string | null,
   updateSchemaName: string | null,
+  querySchemaName: string = "QueryRequestBody",
 ): Record<string, Record<string, OpenAPIOperation>> {
   const paths: Record<string, Record<string, OpenAPIOperation>> = {};
   const tag = entry.name;
@@ -426,7 +715,7 @@ function buildPathsForEntry(
         required: true,
         content: {
           "application/json": {
-            schema: schemaRef("QueryRequestBody"),
+            schema: schemaRef(querySchemaName),
           },
         },
       },
@@ -625,9 +914,13 @@ export function generateOpenAPISpec(
     const modelName = capitalize(singularize(name));
     const createName = `${modelName}Create`;
     const updateName = `${modelName}Update`;
+    const queryName = `${modelName}QueryRequestBody`;
 
     // Full model schema
     schemas[modelName] = zodToJsonSchema(entry.schema);
+
+    // Per-repository typed QueryRequestBody schema
+    schemas[queryName] = buildTypedQueryBodySchema(entry);
 
     // Helper: build a filtered shape (respects systemKeys + field list)
     const buildShape = (
@@ -717,6 +1010,7 @@ export function generateOpenAPISpec(
       modelName,
       createSchemaName,
       updateSchemaName,
+      queryName,
     );
     Object.assign(allPaths, entryPaths);
 
@@ -726,6 +1020,7 @@ export function generateOpenAPISpec(
       description: `Operations on ${name} (collection: ${entry.path})`,
     });
   }
+
 
   // ── Security ──────────────────────────────────────────────────────
   const securitySchemes: Record<string, Record<string, unknown>> = {};

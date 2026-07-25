@@ -252,6 +252,48 @@ interface ParsedFilter {
 }
 
 /**
+ * Safely parse a filter value using the entity's schema field definition (if present).
+ * If safeParse succeeds, returns the parsed data.
+ * If safeParse fails on a single value but value is an Array, attempts to safeParse each item.
+ */
+function parseFieldValue(
+  entrySchema: unknown,
+  field: string,
+  val: unknown,
+): { success: true; data: unknown } | { success: false; error: string } {
+  const fieldSchema = (entrySchema as any)?.shape?.[field];
+  if (!fieldSchema || typeof fieldSchema.safeParse !== "function") {
+    return { success: true, data: val };
+  }
+
+  const parsed = fieldSchema.safeParse(val);
+  if (parsed.success) {
+    return { success: true, data: parsed.data };
+  }
+
+  if (Array.isArray(val)) {
+    const parsedArray: unknown[] = [];
+    for (const item of val) {
+      const itemParsed = fieldSchema.safeParse(item);
+      if (itemParsed.success) {
+        parsedArray.push(itemParsed.data);
+      } else {
+        const errorMessage = itemParsed.error.issues
+          .map((e: any) => e.message)
+          .join(", ");
+        return { success: false, error: errorMessage };
+      }
+    }
+    return { success: true, data: parsedArray };
+  }
+
+  const messages = parsed.error.issues
+    .map((e: any) => e.message)
+    .join(", ");
+  return { success: false, error: messages };
+}
+
+/**
  * Parse query params into filter conditions.
  * Supports:
  *   - field=value           → field == value
@@ -657,50 +699,15 @@ export function createCrudHandlers(
       if (filters.length > 0) {
         queryOptions.where = [];
         for (const f of filters) {
-          let finalValue = f.value;
-          const fieldSchema = (entry.schema as any)?.shape?.[f.field];
-          if (fieldSchema && typeof fieldSchema.safeParse === "function") {
-            const parsed = fieldSchema.safeParse(f.value);
-            if (parsed.success) {
-              finalValue = parsed.data;
-            } else if (Array.isArray(f.value)) {
-              // If f.value is an array (e.g. for `__in` / `__nin` operators) and fieldSchema is for a single element,
-              // try validating each element of the array individually.
-              const parsedArray: unknown[] = [];
-              let hasError = false;
-              let errorMessage = "";
-              for (const item of f.value) {
-                const itemParsed = fieldSchema.safeParse(item);
-                if (itemParsed.success) {
-                  parsedArray.push(itemParsed.data);
-                } else {
-                  hasError = true;
-                  errorMessage = itemParsed.error.issues
-                    .map((e: any) => e.message)
-                    .join(", ");
-                  break;
-                }
-              }
-              if (hasError) {
-                return sendError(
-                  c,
-                  `Invalid filter value for '${f.field}': ${errorMessage}`,
-                  400,
-                );
-              }
-              finalValue = parsedArray;
-            } else {
-              const messages = parsed.error.issues
-                .map((e: any) => e.message)
-                .join(", ");
-              return sendError(
-                c,
-                `Invalid filter value for '${f.field}': ${messages}`,
-                400,
-              );
-            }
+          const parsedRes = parseFieldValue(entry.schema, f.field, f.value);
+          if (!parsedRes.success) {
+            return sendError(
+              c,
+              `Invalid filter value for '${f.field}': ${parsedRes.error}`,
+              400,
+            );
           }
-          queryOptions.where.push([f.field, f.op, finalValue]);
+          queryOptions.where.push([f.field, f.op, parsedRes.data]);
         }
       }
 
@@ -848,7 +855,20 @@ export function createCrudHandlers(
             return;
           }
         }
-        queryOptions.where = body.where;
+        const parsedWhere: [string, any, any][] = [];
+        for (const w of body.where) {
+          const parsedRes = parseFieldValue(entry.schema, w[0], w[2]);
+          if (!parsedRes.success) {
+            sendError(
+              c,
+              `Invalid filter value for '${w[0]}': ${parsedRes.error}`,
+              400,
+            );
+            return;
+          }
+          parsedWhere.push([w[0], w[1], parsedRes.data]);
+        }
+        queryOptions.where = parsedWhere;
       }
 
       // OR where conditions (simple)
@@ -865,7 +885,20 @@ export function createCrudHandlers(
             return;
           }
         }
-        queryOptions.orWhere = body.orWhere;
+        const parsedOrWhere: [string, any, any][] = [];
+        for (const w of body.orWhere) {
+          const parsedRes = parseFieldValue(entry.schema, w[0], w[2]);
+          if (!parsedRes.success) {
+            sendError(
+              c,
+              `Invalid filter value for '${w[0]}': ${parsedRes.error}`,
+              400,
+            );
+            return;
+          }
+          parsedOrWhere.push([w[0], w[1], parsedRes.data]);
+        }
+        queryOptions.orWhere = parsedOrWhere;
       }
 
       // OR where groups (advanced)
@@ -884,7 +917,24 @@ export function createCrudHandlers(
             }
           }
         }
-        queryOptions.orWhereGroups = body.orWhereGroups;
+        const parsedOrWhereGroups: [string, any, any][][] = [];
+        for (const group of body.orWhereGroups) {
+          const parsedGroup: [string, any, any][] = [];
+          for (const w of group) {
+            const parsedRes = parseFieldValue(entry.schema, w[0], w[2]);
+            if (!parsedRes.success) {
+              sendError(
+                c,
+                `Invalid filter value for '${w[0]}': ${parsedRes.error}`,
+                400,
+              );
+              return;
+            }
+            parsedGroup.push([w[0], w[1], parsedRes.data]);
+          }
+          parsedOrWhereGroups.push(parsedGroup);
+        }
+        queryOptions.orWhereGroups = parsedOrWhereGroups;
       }
 
       // Order by
