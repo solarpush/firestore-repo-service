@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { generateOpenAPISpec } from "../../src/servers/crud/openapi";
 import { z } from "zod";
+import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
+
+extendZodWithOpenApi(z);
 
 describe("CRUD server - null & __null__ filters & OpenAPI spec", () => {
   test("OpenAPI spec generates descriptions for null, __null__, in, nin, containsAny", () => {
@@ -121,4 +124,46 @@ describe("CRUD server - null & __null__ filters & OpenAPI spec", () => {
     // The JSON Schema for localPartner should allow null
     expect(JSON.stringify(localPartnerParam.schema)).toContain("null");
   });
+
+  test("OpenAPI spec removes top-level 'type' when 'anyOf' or 'oneOf' is present to prevent generator conflicts (e.g. Orval)", () => {
+    const customTimestampSchema = z
+      .union([z.coerce.date(), z.string()])
+      .transform((v) => new Date(v))
+      .openapi({
+        type: "string",
+        format: "date-time",
+        description: "Custom Timestamp",
+      });
+
+    const registry = {
+      workshops: {
+        name: "workshops",
+        repo: {} as any,
+        systemKeys: [],
+        schema: z.object({
+          startSessionDate: customTimestampSchema.optional().nullable(),
+        }),
+      },
+    };
+
+    const spec = generateOpenAPISpec(registry, "/api");
+    const modelSchema = spec.components.schemas["Workshop"] as any;
+    const startSessionDateProp = modelSchema.properties.startSessionDate;
+
+    // Should have anyOf containing type: null
+    expect(startSessionDateProp.anyOf).toBeDefined();
+    // Must NOT have a top-level `type` property that overrides anyOf for generators like Orval
+    expect(startSessionDateProp.type).toBeUndefined();
+
+    // Verify in QueryRequestBody where clause tuple as well
+    const queryBodySchema = spec.components.schemas["WorkshopQueryRequestBody"] as any;
+    const whereItems = queryBodySchema.properties.where.items.oneOf as any[];
+    const startSessionDateTuple = whereItems.find(
+      (item) => item.prefixItems[0].enum[0] === "startSessionDate"
+    );
+    const valSchema = startSessionDateTuple.prefixItems[2];
+    expect(valSchema.anyOf).toBeDefined();
+    expect(valSchema.type).toBeUndefined();
+  });
 });
+

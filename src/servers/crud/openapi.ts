@@ -69,14 +69,17 @@ function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
         const metadata = getOpenApiMetadata(ctx.zodSchema as unknown as z.ZodTypeAny);
         if (metadata) {
           Object.assign(ctx.jsonSchema, metadata);
+          if (ctx.jsonSchema.anyOf || ctx.jsonSchema.oneOf) {
+            delete (ctx.jsonSchema as any).type;
+          }
         }
 
         const def: any = (ctx.zodSchema as any)?._zod?.def;
         if (!def) return;
-        if (def.type === "date" && !(ctx.jsonSchema as any).type) {
+        if (def.type === "date" && !(ctx.jsonSchema as any).type && !ctx.jsonSchema.anyOf) {
           (ctx.jsonSchema as any).type = "string";
           (ctx.jsonSchema as any).format = "date-time";
-        } else if (def.type === "bigint" && !(ctx.jsonSchema as any).type) {
+        } else if (def.type === "bigint" && !(ctx.jsonSchema as any).type && !ctx.jsonSchema.anyOf) {
           (ctx.jsonSchema as any).type = "string";
           (ctx.jsonSchema as any).format = "int64";
         }
