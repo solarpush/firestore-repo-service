@@ -159,6 +159,16 @@ function listResponse(
                 },
                 hasNextPage: { type: "boolean" },
                 hasPrevPage: { type: "boolean" },
+                totalCount: {
+                  type: "integer",
+                  description:
+                    "Total count of matching documents (when requested with withTotal=true)",
+                },
+                totalCountIsExact: {
+                  type: "boolean",
+                  description:
+                    "Whether totalCount is exact (true) or estimated due to OR conditions (false)",
+                },
               },
               required: ["items", "hasNextPage", "hasPrevPage"],
             },
@@ -167,6 +177,8 @@ function listResponse(
               properties: {
                 pageSize: { type: "integer" },
                 hasMore: { type: "boolean" },
+                totalCount: { type: "integer" },
+                totalCountIsExact: { type: "boolean" },
                 cursor: {
                   oneOf: [{ type: "string" }, { type: "null" }],
                 },
@@ -323,6 +335,13 @@ function paginationParams(entry: CrudRepoEntry): Record<string, unknown>[] {
           : ""
       }`,
     },
+    {
+      name: "withTotal",
+      in: "query",
+      schema: { type: "boolean" },
+      description:
+        "Include total document count (totalCount and totalCountIsExact) in response",
+    },
   ];
 }
 
@@ -469,6 +488,11 @@ function queryBodySchema(): Record<string, unknown> {
           ],
         },
         description: "Relations to include (populate)",
+      },
+      withTotal: {
+        type: "boolean",
+        description:
+          "Include total document count (totalCount and totalCountIsExact) in response",
       },
     },
   };
@@ -645,6 +669,11 @@ function buildTypedQueryBodySchema(entry: CrudRepoEntry): Record<string, unknown
                 ],
               },
         description: "Relations to include (populate)",
+      },
+      withTotal: {
+        type: "boolean",
+        description:
+          "Include total document count (totalCount and totalCountIsExact) in response",
       },
     },
   };
@@ -929,15 +958,26 @@ export function generateOpenAPISpec(
     const buildShape = (
       fieldList: string[] | undefined,
     ): Record<string, z.ZodType> => {
-      const source =
-        fieldList && fieldList.length > 0
-          ? fieldList
-          : Object.keys(entry.schema.shape);
       const shape: Record<string, z.ZodType> = {};
-      for (const f of source) {
-        const top = f.split(".")[0];
-        if (top && entry.schema.shape[top] && !entry.systemKeys.includes(top)) {
-          shape[top] = entry.schema.shape[top];
+      const leafFields = extractLeafFields(entry.schema);
+
+      for (const { path: fieldPath, zodSchema: fieldSchema } of leafFields) {
+        const top = fieldPath.split(".")[0]!;
+        if (
+          entry.systemKeys.includes(top) ||
+          entry.systemKeys.includes(fieldPath)
+        ) {
+          continue;
+        }
+        if (fieldList && fieldList.length > 0) {
+          if (!fieldList.includes(fieldPath) && !fieldList.includes(top)) {
+            continue;
+          }
+        }
+        if (fieldPath.includes(".")) {
+          shape[fieldPath] = fieldSchema.optional();
+        } else {
+          shape[fieldPath] = fieldSchema;
         }
       }
       return shape;

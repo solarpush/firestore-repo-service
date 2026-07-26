@@ -1,5 +1,5 @@
 import type { DocumentSnapshot, Query } from "firebase-admin/firestore";
-import { buildAndExecuteQuery } from "./query-builder";
+import { buildAndCountQuery, buildAndExecuteQuery } from "./query-builder";
 import { maybeNormalize } from "./shared/date-config";
 import type { QueryOptions } from "./shared/types";
 import { applyQueryOptions } from "./shared/utils";
@@ -23,6 +23,10 @@ export interface PaginationResult<T> {
   hasPrevPage: boolean;
   /** Total number of items in current page */
   pageSize: number;
+  /** Total count of items matching the query (when withTotal is true) */
+  totalCount?: number;
+  /** Whether totalCount is exact (true) or estimated due to OR conditions (false) */
+  totalCountIsExact?: boolean;
 }
 
 /**
@@ -36,6 +40,8 @@ export interface PaginationOptions<T> extends Omit<QueryOptions<T>, "limit"> {
   cursor?: DocumentSnapshot;
   /** Direction of pagination */
   direction?: "next" | "prev";
+  /** Whether to calculate and return total count of matching items */
+  withTotal?: boolean;
 }
 
 /**
@@ -110,7 +116,13 @@ export async function executePaginatedQuery<T>(
   }
 
   // Use the advanced query builder (handles OR and auto-splitting)
-  const snapshot = await buildAndExecuteQuery(baseQuery, queryOptions);
+  const [snapshot, countResult] = await Promise.all([
+    buildAndExecuteQuery(baseQuery, queryOptions),
+    options.withTotal
+      ? buildAndCountQuery(baseQuery, options)
+      : Promise.resolve(undefined),
+  ]);
+
   const docs = snapshot.docs;
 
   // Check if there are more pages
@@ -142,6 +154,12 @@ export async function executePaginatedQuery<T>(
     hasNextPage: isPrev ? !!options.cursor : hasMore,
     hasPrevPage: isPrev ? hasMore : !!options.cursor,
     pageSize: data.length,
+    ...(countResult !== undefined
+      ? {
+          totalCount: countResult.count,
+          totalCountIsExact: countResult.isExact,
+        }
+      : {}),
   };
 }
 

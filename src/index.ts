@@ -46,7 +46,7 @@ export type {
 } from "./methods/system";
 
 // Query builder
-export { buildAndExecuteQuery } from "./query-builder";
+export { buildAndCountQuery, buildAndExecuteQuery } from "./query-builder";
 
 // Repository types
 export type {

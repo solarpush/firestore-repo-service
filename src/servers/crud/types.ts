@@ -480,6 +480,8 @@ export interface ApiResponse<T = unknown> {
   indexUrl?: string;
   meta?: {
     total?: number;
+    totalCount?: number;
+    totalCountIsExact?: boolean;
     page?: number;
     pageSize?: number;
     hasMore?: boolean;
@@ -500,6 +502,10 @@ export interface ListResponseData<T = unknown> {
   hasNextPage: boolean;
   /** Whether there is a previous page */
   hasPrevPage: boolean;
+  /** Total count of items matching the query (when withTotal is true) */
+  totalCount?: number;
+  /** Whether totalCount is exact (true) or estimated due to OR conditions (false) */
+  totalCountIsExact?: boolean;
 }
 
 /**
@@ -553,4 +559,8 @@ export interface QueryRequestBody {
    * @example ["author", { "relation": "comments", "select": ["text"] }]
    */
   includes?: (string | { relation: string; select?: string[] })[];
+  /**
+   * Whether to calculate and return total count of matching items.
+   */
+  withTotal?: boolean;
 }

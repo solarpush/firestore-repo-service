@@ -116,11 +116,20 @@ interface QueryOptions<T> {
 Pagination basée sur curseur — efficace pour les grandes collections.
 
 ```typescript
-// Première page
+// Première page avec décompte total
 const page1 = await repos.posts.query.paginate({
-  pageSize: 10,
-  orderBy:  [{ field: "createdAt", direction: "desc" }],
+  pageSize:  10,
+  orderBy:   [{ field: "createdAt", direction: "desc" }],
+  withTotal: true,
 });
+
+// page1.data              → PostModel[]
+// page1.hasNextPage       → boolean
+// page1.hasPrevPage       → boolean
+// page1.nextCursor        → DocumentSnapshot | undefined
+// page1.prevCursor        → DocumentSnapshot | undefined
+// page1.totalCount        → number (ex. 142)
+// page1.totalCountIsExact → boolean (true pour requêtes ET, false pour requêtes OU)
 
 // Page suivante
 const page2 = await repos.posts.query.paginate({
@@ -136,6 +145,10 @@ const prev = await repos.posts.query.paginate({
   direction: "prev",
 });
 ```
+
+::: tip Performance de décompte côté serveur (`withTotal`)
+Lorsque `withTotal: true` est spécifié, le nombre total de documents est calculé via l'agrégation native `.count()` de Firestore (**1 lecture d'index pour 1 000 documents**). Pour `orWhere` et `orWhereGroups`, les décomptes des branches sont exécutés en parallèle (estimation rapide sans charger le contenu des documents).
+:::
 
 ### Paginer avec filtres et OR
 

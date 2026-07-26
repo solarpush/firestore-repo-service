@@ -219,11 +219,14 @@ const nextPage = await repos.users.query.by({
   limit: 10,
 });
 
-// Paginate with relations
+// Paginate with total count (server-side .count() aggregation)
 const page = await repos.posts.query.paginate({
   pageSize: 10,
+  withTotal: true,
   include: [{ relation: "userId", select: ["docId", "name", "email"] }],
 });
+console.log(page.totalCount);        // e.g. 142
+console.log(page.totalCountIsExact); // true for AND queries, false for OR queries
 ```
 
 ### Aggregations

@@ -236,3 +236,71 @@ function cartesianProduct<T>(arrays: T[][]): T[][] {
 
   return result;
 }
+
+/**
+ * Build and count query using server-side aggregate count().
+ * Returns { count, isExact }.
+ * Exact for AND queries and split IN queries.
+ * Estimated for OR queries due to potential overlapping documents across branches.
+ */
+export async function buildAndCountQuery<T>(
+  baseQuery: Query,
+  options: QueryOptions<T>,
+): Promise<{ count: number; isExact: boolean }> {
+  const hasOrWhere = options.orWhere && options.orWhere.length > 0;
+  const hasOrWhereGroups =
+    options.orWhereGroups && options.orWhereGroups.length > 0;
+
+  // Case 1: Pure AND query
+  if (!hasOrWhere && !hasOrWhereGroups) {
+    if (!options.where || options.where.length === 0) {
+      const snapshot = await baseQuery.count().get();
+      return { count: snapshot.data().count, isExact: true };
+    }
+    const needsSplit = options.where.some(needsSplitting);
+    if (!needsSplit) {
+      const q = applyWhereClausesToQuery(baseQuery, options.where);
+      const snapshot = await q.count().get();
+      return { count: snapshot.data().count, isExact: true };
+    }
+    const splitClauses: WhereClause<T>[][] =
+      options.where.map(splitWhereClause);
+    const combinations = cartesianProduct(splitClauses);
+    const snapshots = await Promise.all(
+      combinations.map((combination) =>
+        applyWhereClausesToQuery(baseQuery, combination).count().get(),
+      ),
+    );
+    const total = snapshots.reduce((acc, s) => acc + s.data().count, 0);
+    return { count: total, isExact: true };
+  }
+
+  // Case 2: OR query
+  const baseClauses: WhereClause<T>[] = options.where ?? [];
+  const rawGroups: WhereClause<T>[][] = [
+    ...(options.orWhere?.map((clause) => [clause]) ?? []),
+    ...(options.orWhereGroups ?? []),
+  ];
+
+  const allQueries: Query[] = [];
+  for (const orGroup of rawGroups) {
+    const fullGroup: WhereClause<T>[] = [...baseClauses, ...orGroup];
+    const needsSplit = fullGroup.some(needsSplitting);
+
+    if (!needsSplit) {
+      allQueries.push(applyWhereClausesToQuery(baseQuery, fullGroup));
+    } else {
+      const splitClauses = fullGroup.map(splitWhereClause);
+      const combinations = cartesianProduct(splitClauses);
+      const groupQueries = combinations.map((combination) =>
+        applyWhereClausesToQuery(baseQuery, combination),
+      );
+      allQueries.push(...groupQueries);
+    }
+  }
+
+  const snapshots = await Promise.all(allQueries.map((q) => q.count().get()));
+  const total = snapshots.reduce((acc, s) => acc + s.data().count, 0);
+  return { count: total, isExact: false };
+}
+

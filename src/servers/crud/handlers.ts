@@ -194,8 +194,70 @@ function pickSchemaFields(
   return z.object(picked);
 }
 
+/** Helper to unwrap Zod modifiers (optional, nullable, default, catch, effects, etc.) */
+function unwrapZodType(zodType: any): any {
+  let cur = zodType;
+  while (cur) {
+    const def = cur._zod?.def ?? cur._def;
+    if (!def) break;
+    if (def.innerType) {
+      cur = def.innerType;
+    } else if (def.schema) {
+      cur = def.schema;
+    } else if (
+      def.type === "optional" ||
+      def.type === "nullable" ||
+      def.type === "default" ||
+      def.type === "catch" ||
+      def.type === "effects"
+    ) {
+      cur = def.innerType ?? def.schema;
+    } else {
+      break;
+    }
+  }
+  return cur;
+}
+
+/** Resolve a dot-notation path (e.g. "address.city") from a Zod schema */
+function resolveFieldPathSchema(entrySchema: any, path: string): any {
+  const parts = path.split(".");
+  let cur = unwrapZodType(entrySchema);
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (!part) continue;
+    const shape: Record<string, any> | undefined = (cur as any)?.shape;
+    if (!shape || !shape[part]) {
+      return undefined;
+    }
+    const rawSub = shape[part];
+    if (i === parts.length - 1) {
+      return rawSub;
+    }
+    cur = unwrapZodType(rawSub);
+  }
+  return cur;
+}
+
+/** Recursively make Zod objects deep-partial for PATCH updates */
+function makeDeepPartial(s: z.ZodType): z.ZodType {
+  const unwrapped = unwrapZodType(s);
+  const def = (unwrapped as any)?._zod?.def ?? (unwrapped as any)?._def;
+  const typeName = def?.typeName ?? def?.type;
+  if (typeName === "ZodObject" || typeName === "object") {
+    const shape = (unwrapped as z.ZodObject<any>).shape;
+    const newShape: Record<string, z.ZodType> = {};
+    for (const [k, v] of Object.entries(shape)) {
+      newShape[k] = makeDeepPartial(v as z.ZodType);
+    }
+    return z.object(newShape).partial();
+  }
+  return s;
+}
+
 /**
  * Validate data against schema and return parsed result or error.
+ * Supports dot-notation keys (e.g. "address.city") and deep partial nested objects.
  */
 function validateData(
   schema: z.ZodObject<any>,
@@ -206,15 +268,65 @@ function validateData(
 ):
   | { success: true; data: Record<string, unknown> }
   | { success: false; error: string } {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    return { success: false, error: "Data payload must be an object" };
+  }
+
   try {
-    const targetSchema = pickSchemaFields(schema, fields, systemKeys);
-    const partialSchema = partial ? targetSchema.partial() : targetSchema;
-    const finalSchema =
-      getDateHandling() === "normalize"
-        ? (wrapDateSchemas(partialSchema) as z.ZodObject<any>)
-        : partialSchema;
-    const parsed = finalSchema.parse(data);
-    return { success: true, data: parsed as Record<string, unknown> };
+    const dataObj = data as Record<string, unknown>;
+    const resultData: Record<string, unknown> = {};
+    const normalEntries: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(dataObj)) {
+      if (key.includes(".")) {
+        // Dot notation key (e.g. "address.city")
+        const topLevel = key.split(".")[0]!;
+        if (systemKeys.includes(key) || systemKeys.includes(topLevel)) {
+          continue;
+        }
+        if (fields && fields.length > 0) {
+          if (!fields.includes(key) && !fields.includes(topLevel)) {
+            return {
+              success: false,
+              error: `Field '${key}' is not allowed for this operation`,
+            };
+          }
+        }
+        const fieldSchema = resolveFieldPathSchema(schema, key);
+        if (!fieldSchema) {
+          return {
+            success: false,
+            error: `Field '${key}' does not exist in schema`,
+          };
+        }
+        const wrappedSchema =
+          getDateHandling() === "normalize"
+            ? wrapDateSchemas(fieldSchema)
+            : fieldSchema;
+        const parsedValue = wrappedSchema.parse(value);
+        resultData[key] = parsedValue;
+      } else {
+        normalEntries[key] = value;
+      }
+    }
+
+    if (
+      Object.keys(normalEntries).length > 0 ||
+      Object.keys(resultData).length === 0
+    ) {
+      const targetSchema = pickSchemaFields(schema, fields, systemKeys);
+      const partialSchema = partial
+        ? (makeDeepPartial(targetSchema) as z.ZodObject<any>)
+        : targetSchema;
+      const finalSchema =
+        getDateHandling() === "normalize"
+          ? (wrapDateSchemas(partialSchema) as z.ZodObject<any>)
+          : partialSchema;
+      const parsedNormal = finalSchema.parse(normalEntries);
+      Object.assign(resultData, parsedNormal);
+    }
+
+    return { success: true, data: resultData };
   } catch (err) {
     if (err instanceof z.ZodError) {
       const messages = err.issues.map(
@@ -300,7 +412,7 @@ function parseFieldValue(
  *   - field__op=value       → field op value (e.g., status__ne=draft → status != draft)
  *   - field__in=a,b,c       → field in [a, b, c]
  */
-function parseFilters(
+export function parseFilters(
   query: Record<string, string | string[] | undefined>,
   filterableFields: string[] | undefined,
 ): ParsedFilter[] {
@@ -325,9 +437,17 @@ function parseFilters(
 
     // Skip pagination/meta params
     if (
-      ["cursor", "limit", "pageSize", "orderBy", "orderDir", "select"].includes(
-        key,
-      )
+      [
+        "cursor",
+        "direction",
+        "limit",
+        "pageSize",
+        "orderBy",
+        "orderDir",
+        "select",
+        "includes",
+        "withTotal",
+      ].includes(key)
     )
       continue;
 
@@ -646,6 +766,12 @@ export function createCrudHandlers(
         ? selectStr.split(",").map((s) => s.trim())
         : undefined;
 
+      const withTotalParam = query.withTotal;
+      const withTotal =
+        withTotalParam === "true" ||
+        withTotalParam === "1" ||
+        withTotalParam === true;
+
       // Parse includes (relation population)
       let includes:
         | (string | { relation: string; select?: string[] })[]
@@ -677,6 +803,7 @@ export function createCrudHandlers(
       const queryOptions: any = {
         pageSize,
         direction,
+        ...(withTotal ? { withTotal: true } : {}),
       };
 
       if (cursor) {
@@ -734,11 +861,23 @@ export function createCrudHandlers(
         hasPrevPage: result.hasPrevPage,
         nextCursor: serializeCursor(result.nextCursor),
         prevCursor: serializeCursor(result.prevCursor),
+        ...(result.totalCount !== undefined
+          ? {
+              totalCount: result.totalCount,
+              totalCountIsExact: result.totalCountIsExact,
+            }
+          : {}),
       };
 
       return sendSuccess(c, responseData, {
         pageSize,
         hasMore: result.hasNextPage,
+        ...(result.totalCount !== undefined
+          ? {
+              totalCount: result.totalCount,
+              totalCountIsExact: result.totalCountIsExact,
+            }
+          : {}),
       });
     } catch (err) {
       sendQueryError(
@@ -800,10 +939,14 @@ export function createCrudHandlers(
         };
       }
 
+      const withTotal =
+        body.withTotal === true || String(body.withTotal) === "true";
+
       // Build query options
       const queryOptions: any = {
         pageSize,
         direction,
+        ...(withTotal ? { withTotal: true } : {}),
       };
 
       // Cursor
@@ -974,11 +1117,23 @@ export function createCrudHandlers(
         hasPrevPage: result.hasPrevPage,
         nextCursor: serializeCursor(result.nextCursor),
         prevCursor: serializeCursor(result.prevCursor),
+        ...(result.totalCount !== undefined
+          ? {
+              totalCount: result.totalCount,
+              totalCountIsExact: result.totalCountIsExact,
+            }
+          : {}),
       };
 
       return sendSuccess(c, responseData, {
         pageSize,
         hasMore: result.hasNextPage,
+        ...(result.totalCount !== undefined
+          ? {
+              totalCount: result.totalCount,
+              totalCountIsExact: result.totalCountIsExact,
+            }
+          : {}),
       });
     } catch (err) {
       sendQueryError(
