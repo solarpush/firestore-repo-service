@@ -33,13 +33,13 @@ export type ExtractUpdateSignature<T, TType> = T extends (
  * Check if a type is a plain object (not Date, Array, Function, etc.)
  * @internal
  */
-type IsPlainObject<T> = T extends Date
+type IsPlainObject<T> = NonNullable<T> extends Date
   ? false
-  : T extends Array<any>
+  : NonNullable<T> extends Array<any>
     ? false
-    : T extends Function
+    : NonNullable<T> extends Function
       ? false
-      : T extends object
+      : NonNullable<T> extends object
         ? true
         : false;
 
@@ -62,10 +62,10 @@ type NestedPaths<
   : {
       [K in keyof T & string]: IsPlainObject<T[K]> extends true
         ? Prefix extends ""
-          ? K | NestedPaths<T[K], K, [...Depth, 1]>
+          ? K | NestedPaths<NonNullable<T[K]>, K, [...Depth, 1]>
           :
               | `${Prefix}.${K}`
-              | NestedPaths<T[K], `${Prefix}.${K}`, [...Depth, 1]>
+              | NestedPaths<NonNullable<T[K]>, `${Prefix}.${K}`, [...Depth, 1]>
         : Prefix extends ""
           ? K
           : `${Prefix}.${K}`;
@@ -83,12 +83,14 @@ type PathValue<
   T,
   Path extends string,
 > = Path extends `${infer Key}.${infer Rest}`
-  ? Key extends keyof T
-    ? PathValue<T[Key], Rest>
+  ? Key extends keyof NonNullable<T>
+    ? PathValue<NonNullable<T>[Key], Rest>
     : never
   : Path extends keyof T
     ? T[Path]
-    : never;
+    : Path extends keyof NonNullable<T>
+      ? NonNullable<T>[Path]
+      : never;
 
 /**
  * All possible field paths including nested paths

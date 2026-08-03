@@ -30,7 +30,10 @@ export const postSchema = z.object({
   docId: z.string(),
   documentPath: z.string(),
   userId: z.string().nullish(),
-  address: z.object({ street: z.string(), city: z.string() }),
+  address: z
+    .object({ street: z.string(), city: z.string() })
+    .optional()
+    .nullable(),
   title: z.string().nullish(),
   content: z.string().nullish(),
   status: z.enum(["draft", "published", "archived"]),
@@ -179,10 +182,7 @@ export const server = onRequest(async (req, res) => {
 import { BigQuery } from "@google-cloud/bigquery";
 import { PubSub } from "@google-cloud/pubsub";
 import { firebaseAuth } from "@lpdjs/firestore-repo-service/servers/auth";
-import {
-  firebaseBearerAuth,
-  firebaseDocsAuth,
-} from "@lpdjs/firestore-repo-service/servers/hono";
+import { firebaseDocsAuth } from "@lpdjs/firestore-repo-service/servers/hono";
 import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
 import { getAuth } from "firebase-admin/auth";
 import * as firestoreTriggers from "firebase-functions/v2/firestore";

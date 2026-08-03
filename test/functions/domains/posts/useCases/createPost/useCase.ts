@@ -31,7 +31,12 @@ export class CreatePostUseCase extends AppUseCase<typeof input, typeof output> {
     this.logger.info(`post access by role=${user.role}`, {
       postId: payload.id,
     });
-
+    const post = await this.services.repository.db.posts.query.by({
+      where: [
+        ["address", "!=", null],
+        ["address.street", "==", "Paris"],
+      ],
+    });
     // Guard thrown freely — the shared AppErrorHandler maps it to HTTP 400 + logs it.
     if (!payload.example) throw this.error.badRequest("example is required");
 
