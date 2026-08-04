@@ -37,6 +37,7 @@ export class CreatePostUseCase extends AppUseCase<typeof input, typeof output> {
         ["address.street", "==", "Paris"],
       ],
     });
+    const j = await this.services.repository.db.posts.get.byDocId(payload.id);
     // Guard thrown freely — the shared AppErrorHandler maps it to HTTP 400 + logs it.
     if (!payload.example) throw this.error.badRequest("example is required");
 

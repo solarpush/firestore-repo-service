@@ -14,6 +14,7 @@ import type { createPaginationIterator, PaginationResult } from "../pagination";
 import type {
   GetOptions,
   GetResult,
+  ExtractReturnDoc,
   QueryOptions,
   RelationConfig,
   RepositoryConfig,
@@ -179,29 +180,21 @@ export type GenerateGetMethods<
   [K in TConfig["foreignKeys"][number] as K extends string
     ? `by${Capitalize<K>}`
     : never]: K extends TConfig["documentKey"]
-    ? <ReturnDoc extends boolean = false>(
+    ? <O extends boolean | GetOptions<TConfig["type"]> = false>(
         ...args:
           | [
               ...Parameters<TConfig["documentRef"]>,
-              (
-                | ReturnDoc
-                | (GetOptions<TConfig["type"]> & { returnDoc?: ReturnDoc })
-              )?,
+              O?
             ]
           | [
               TConfig["type"][K extends keyof TConfig["type"] ? K : never],
-              (
-                | ReturnDoc
-                | (GetOptions<TConfig["type"]> & { returnDoc?: ReturnDoc })
-              )?,
+              O?
             ]
-      ) => Promise<GetResult<TConfig["type"], ReturnDoc>>
-    : <ReturnDoc extends boolean = false>(
+      ) => Promise<GetResult<TConfig["type"], O>>
+    : <O extends boolean | GetOptions<TConfig["type"]> = false>(
         value: TConfig["type"][K extends keyof TConfig["type"] ? K : never],
-        options?:
-          | ReturnDoc
-          | (GetOptions<TConfig["type"]> & { returnDoc?: ReturnDoc }),
-      ) => Promise<GetResult<TConfig["type"], ReturnDoc>>;
+        options?: O,
+      ) => Promise<GetResult<TConfig["type"], O>>;
 };
 
 /**
@@ -257,13 +250,13 @@ export type ConfiguredRepository<
   ref: CollectionReference | Query;
 
   get: GenerateGetMethods<T> & {
-    byList: <K extends keyof T["type"], ReturnDoc extends boolean = false>(
+    byList: <K extends keyof T["type"], O extends boolean | GetOptions<T["type"]> = false>(
       key: K,
       values: T["type"][K][],
       operator?: "in" | "array-contains-any",
-      returnDoc?: ReturnDoc,
+      options?: O,
     ) => Promise<
-      ReturnDoc extends true
+      ExtractReturnDoc<O> extends true
         ? Array<{ data: T["type"]; doc: DocumentSnapshot }>
         : T["type"][]
     >;

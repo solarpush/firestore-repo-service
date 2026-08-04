@@ -166,10 +166,20 @@ export interface GetOptions<T = any> {
 }
 
 /**
+ * Extracts the boolean value from a ReturnDoc parameter or options object
+ * @internal
+ */
+export type ExtractReturnDoc<O> = O extends true
+  ? true
+  : O extends { returnDoc: true }
+    ? true
+    : false;
+
+/**
  * Result type for get operations with optional document snapshot
  * @internal
  */
-export type GetResult<T, ReturnDoc extends boolean> = ReturnDoc extends true
+export type GetResult<T, O> = ExtractReturnDoc<O> extends true
   ? { data: T; doc: DocumentSnapshot } | null
   : T | null;
 
