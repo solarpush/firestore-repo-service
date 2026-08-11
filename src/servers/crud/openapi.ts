@@ -704,19 +704,8 @@ function buildPathsForEntry(
     description: `Unique document identifier`,
   };
 
-  // ── GET /:repo → list ──────────────────────────────────────────────
+  // ── POST /:repo → create ────────────────────────────────────────
   paths[collectionPath] = {
-    get: {
-      operationId: `list${capitalize(entry.name)}`,
-      summary: `List ${entry.name} (paginated)`,
-      tags: [tag],
-      parameters: [...paginationParams(entry), ...filterParams(entry)],
-      responses: {
-        "200": listResponse(schemaRef(modelSchemaName)),
-        "500": errorResponse("Internal server error"),
-      },
-    },
-    // ── POST /:repo → create ────────────────────────────────────────
     post: {
       operationId: `create${capitalize(entry.name)}`,
       summary: `Create a ${singularize(entry.name)}`,
@@ -1000,6 +989,46 @@ export function generateOpenAPISpec(
     }
 
     // Batch schema
+    const createOpName = `${modelName}BatchCreateOperation`;
+    const updateOpName = `${modelName}BatchUpdateOperation`;
+    const deleteOpName = `${modelName}BatchDeleteOperation`;
+
+    schemas[createOpName] = {
+      type: "object",
+      title: `${modelName} Create Operation`,
+      properties: {
+        type: { type: "string", enum: ["create"], const: "create" },
+        data: schemaRef(createSchemaName ?? modelName),
+      },
+      required: ["type", "data"],
+    };
+
+    schemas[updateOpName] = {
+      type: "object",
+      title: `${modelName} Update Operation`,
+      properties: {
+        type: { type: "string", enum: ["update"], const: "update" },
+        id: { type: "string" },
+        data: {
+          allOf: [schemaRef(updateSchemaName ?? modelName)],
+          description: "Partial updates allowed",
+        },
+      },
+      required: ["type", "id", "data"],
+    };
+
+    if (entry.allowDelete) {
+      schemas[deleteOpName] = {
+        type: "object",
+        title: `${modelName} Delete Operation`,
+        properties: {
+          type: { type: "string", enum: ["delete"], const: "delete" },
+          id: { type: "string" },
+        },
+        required: ["type", "id"],
+      };
+    }
+
     schemas[`${modelName}BatchRequest`] = {
       type: "object",
       properties: {
@@ -1007,39 +1036,13 @@ export function generateOpenAPISpec(
           type: "array",
           items: {
             oneOf: [
-              {
-                type: "object",
-                properties: {
-                  type: { type: "string", enum: ["create"] },
-                  data: schemaRef(createSchemaName ?? modelName),
-                },
-                required: ["type", "data"],
-              },
-              {
-                type: "object",
-                properties: {
-                  type: { type: "string", enum: ["update"] },
-                  id: { type: "string" },
-                  data: {
-                    allOf: [schemaRef(updateSchemaName ?? modelName)],
-                    description: "Partial updates allowed",
-                  },
-                },
-                required: ["type", "id", "data"],
-              },
-              ...(entry.allowDelete
-                ? [
-                    {
-                      type: "object",
-                      properties: {
-                        type: { type: "string", enum: ["delete"] },
-                        id: { type: "string" },
-                      },
-                      required: ["type", "id"],
-                    },
-                  ]
-                : []),
+              schemaRef(createOpName),
+              schemaRef(updateOpName),
+              ...(entry.allowDelete ? [schemaRef(deleteOpName)] : []),
             ],
+            discriminator: {
+              propertyName: "type",
+            },
           },
         },
       },

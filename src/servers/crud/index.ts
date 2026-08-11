@@ -120,13 +120,6 @@ export function createCrudServer<
   for (const name of Object.keys(registry)) {
     routes.push({
       api: "crud",
-      method: "get",
-      path: `/${name}`,
-      source: "query",
-      handler: handlers.handleList,
-    });
-    routes.push({
-      api: "crud",
       method: "post",
       path: `/${name}/query`,
       source: "json",

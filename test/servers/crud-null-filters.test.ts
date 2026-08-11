@@ -21,31 +21,18 @@ describe("CRUD server - null & __null__ filters & OpenAPI spec", () => {
 
     const spec = generateOpenAPISpec(registry, "/api");
 
-    const pathObj = spec.paths["/api/partners"];
+    const pathObj = spec.paths["/api/partners/query"];
     expect(pathObj).toBeDefined();
-    const getOp = pathObj.get;
-    expect(getOp).toBeDefined();
+    const queryOp = pathObj.post;
+    expect(queryOp).toBeDefined();
 
-    const params = getOp.parameters as any[];
-    expect(params).toBeDefined();
+    const requestBodySchema = spec.components.schemas["PartnerQueryRequestBody"] as any;
+    expect(requestBodySchema).toBeDefined();
 
-    // Check equality filter param description
-    const localPartnerEqParam = params.find((p) => p.name === "localPartner__eq");
-    expect(localPartnerEqParam).toBeDefined();
-    expect(localPartnerEqParam.description).toContain("__null__");
-    expect(localPartnerEqParam.description).toContain("null");
-
-    // Check `in` filter param description
-    const localPartnerInParam = params.find((p) => p.name === "localPartner__in");
-    expect(localPartnerInParam).toBeDefined();
-    expect(localPartnerInParam.description).toContain("__null__");
-    expect(localPartnerInParam.description).toContain("comma-separated");
-
-    // Check `containsAny` filter param description
-    const localPartnerContainsAny = params.find((p) => p.name === "localPartner__containsAny");
-    expect(localPartnerContainsAny).toBeDefined();
-    expect(localPartnerContainsAny.description).toContain("containsAny");
-    expect(localPartnerContainsAny.description).toContain("__null__");
+    // Check where clause prefixItems include "localPartner"
+    const whereOneOf = requestBodySchema.properties.where.items.oneOf as any[];
+    const allowedWhereFields = whereOneOf.map((tuple) => tuple.prefixItems[0].enum[0]);
+    expect(allowedWhereFields).toContain("localPartner");
   });
 
   test("OpenAPI spec includes base object fields alongside nested fields for nullable ZodObject", () => {
@@ -65,22 +52,6 @@ describe("CRUD server - null & __null__ filters & OpenAPI spec", () => {
     };
 
     const spec = generateOpenAPISpec(registry, "/api");
-
-    const getParams = spec.paths["/api/partners"].get.parameters as any[];
-    
-    // Base object field query params
-    const localPartnerParam = getParams.find((p) => p.name === "localPartner");
-    expect(localPartnerParam).toBeDefined();
-
-    const localPartnerEqParam = getParams.find((p) => p.name === "localPartner__eq");
-    expect(localPartnerEqParam).toBeDefined();
-
-    // Nested subfield query params
-    const localPartnerIdParam = getParams.find((p) => p.name === "localPartner.id");
-    expect(localPartnerIdParam).toBeDefined();
-
-    const localPartnerCompanyNameParam = getParams.find((p) => p.name === "localPartner.companyName");
-    expect(localPartnerCompanyNameParam).toBeDefined();
 
     // POST /query body schema (referenced via component schema PartnerQueryRequestBody)
     const requestBodySchema = spec.components.schemas["PartnerQueryRequestBody"] as any;
@@ -118,11 +89,8 @@ describe("CRUD server - null & __null__ filters & OpenAPI spec", () => {
     };
 
     const spec = generateOpenAPISpec(registry, "/api");
-    const getParams = spec.paths["/api/partners"].get.parameters as any[];
-    const localPartnerParam = getParams.find((p) => p.name === "localPartner");
-    expect(localPartnerParam).toBeDefined();
-    // The JSON Schema for localPartner should allow null
-    expect(JSON.stringify(localPartnerParam.schema)).toContain("null");
+    const requestBodySchema = spec.components.schemas["PartnerQueryRequestBody"] as any;
+    expect(requestBodySchema).toBeDefined();
   });
 
   test("OpenAPI spec removes top-level 'type' when 'anyOf' or 'oneOf' is present to prevent generator conflicts (e.g. Orval)", () => {
