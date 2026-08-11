@@ -120,7 +120,8 @@ export function createQueryMethods<T>(
             const targetRepo = allRepositories[relation.repo];
             if (!targetRepo) return [key, undefined] as const;
 
-            const fieldValue = (doc as any)[key];
+            const sourceKeyToRead = relation.sourceKey || key;
+            const fieldValue = (doc as any)[sourceKeyToRead];
             if (fieldValue === undefined || fieldValue === null) {
               return [key, relation.type === "one" ? null : []] as const;
             }

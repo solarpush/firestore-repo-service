@@ -81,3 +81,69 @@ describe("buildAndCountQuery and executePaginatedQuery withTotal", () => {
     expect(paginated.totalCountIsExact).toBe(true);
   });
 });
+
+describe("createQueryMethods with include and sourceKey", () => {
+  const { createQueryMethods } = require("../../src/methods/query");
+
+  test("populateDocuments uses sourceKey when populating one-to-many relation", async () => {
+    const residencesQuery = makeFakeQuery([
+      { docId: "residence-123", name: "Grand Residence" },
+    ]);
+
+    const eventsDocs = [
+      { docId: "event-1", residenceId: "residence-123", name: "Party" },
+      { docId: "event-2", residenceId: "residence-123", name: "Meeting" },
+    ];
+
+    const eventsRepo = {
+      query: {
+        byResidenceId: async (val: string, opts?: any) => {
+          return eventsDocs
+            .filter((e) => e.residenceId === val)
+            .map((e) => {
+              if (opts?.select) {
+                const sel: any = {};
+                for (const k of opts.select) sel[k] = (e as any)[k];
+                return sel;
+              }
+              return e;
+            });
+        },
+      },
+    };
+
+    const relationalKeys = {
+      events: {
+        repo: "events",
+        key: "residenceId",
+        type: "many",
+        sourceKey: "docId",
+      },
+    };
+
+    const allRepositories = {
+      events: eventsRepo,
+    };
+
+    const queryMethods = createQueryMethods(
+      residencesQuery,
+      ["docId"],
+      relationalKeys as any,
+      allRepositories,
+    );
+
+    const result: any = await queryMethods.paginate({
+      pageSize: 10,
+      include: [{ relation: "events", select: ["docId", "name"] }],
+    });
+
+    expect(result.data.length).toBe(1);
+    expect(result.data[0].populated).toBeDefined();
+    expect(result.data[0].populated.events).toHaveLength(2);
+    expect(result.data[0].populated.events[0]).toEqual({
+      docId: "event-1",
+      name: "Party",
+    });
+  });
+});
+
