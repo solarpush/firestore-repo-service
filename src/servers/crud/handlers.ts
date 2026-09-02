@@ -17,6 +17,7 @@ import {
   getDateHandling,
   maybeNormalize,
 } from "../../shared/date-config";
+import { getArrayElementType } from "../../shared/zod-compat";
 import { toQueryError, type QueryErrorContext } from "../admin/index-url";
 import type {
   ApiResponse,
@@ -345,7 +346,7 @@ function validateData(
 // Filter parsing
 // ---------------------------------------------------------------------------
 
-type WhereOp =
+export type WhereOp =
   | "=="
   | "!="
   | "<"
@@ -356,6 +357,44 @@ type WhereOp =
   | "not-in"
   | "array-contains"
   | "array-contains-any";
+
+const OP_MAP: Record<string, WhereOp> = {
+  eq: "==",
+  "==": "==",
+  ne: "!=",
+  "!=": "!=",
+  lt: "<",
+  "<": "<",
+  lte: "<=",
+  "<=": "<=",
+  gt: ">",
+  ">": ">",
+  gte: ">=",
+  ">=": ">=",
+  in: "in",
+  nin: "not-in",
+  "not-in": "not-in",
+  not_in: "not-in",
+  contains: "array-contains",
+  "array-contains": "array-contains",
+  array_contains: "array-contains",
+  arrayContains: "array-contains",
+  containsAny: "array-contains-any",
+  "array-contains-any": "array-contains-any",
+  array_contains_any: "array-contains-any",
+  arrayContainsAny: "array-contains-any",
+};
+
+/**
+ * Normalize any operator string (e.g. contains, array-contains, eq, nin) to a canonical WhereOp.
+ */
+export function normalizeWhereOp(op: string): WhereOp {
+  return OP_MAP[op] ?? (op as WhereOp);
+}
+
+function isValidOp(op: string): boolean {
+  return op in OP_MAP;
+}
 
 interface ParsedFilter {
   field: string;
@@ -368,32 +407,89 @@ interface ParsedFilter {
  * If safeParse succeeds, returns the parsed data.
  * If safeParse fails on a single value but value is an Array, attempts to safeParse each item.
  */
-function parseFieldValue(
+export function parseFieldValue(
   entrySchema: unknown,
   field: string,
   val: unknown,
+  op?: WhereOp | string,
 ): { success: true; data: unknown } | { success: false; error: string } {
-  const fieldSchema = (entrySchema as any)?.shape?.[field];
+  const fieldSchema = resolveFieldPathSchema(entrySchema, field);
   if (!fieldSchema || typeof fieldSchema.safeParse !== "function") {
     return { success: true, data: val };
   }
 
+  const normalizedOp = op ? normalizeWhereOp(op) : undefined;
+  const unwrapped = unwrapZodType(fieldSchema);
+  const elemSchema = getArrayElementType(unwrapped);
+
+  // If the operator is array-contains, validate against the element schema
+  if (normalizedOp === "array-contains") {
+    const targetSchema = elemSchema ?? fieldSchema;
+    if (typeof targetSchema.safeParse === "function") {
+      const parsed = targetSchema.safeParse(val);
+      if (parsed.success) {
+        return { success: true, data: parsed.data };
+      }
+      const messages = parsed.error.issues
+        .map((e: any) => e.message)
+        .join(", ");
+      return { success: false, error: messages };
+    }
+    return { success: true, data: val };
+  }
+
+  // If the operator is array-contains-any, validate each element
+  if (normalizedOp === "array-contains-any") {
+    if (!Array.isArray(val)) {
+      return {
+        success: false,
+        error: "Expected array value for array-contains-any",
+      };
+    }
+    const targetSchema = elemSchema ?? fieldSchema;
+    const parsedArray: unknown[] = [];
+    for (const item of val) {
+      if (typeof targetSchema.safeParse === "function") {
+        const itemParsed = targetSchema.safeParse(item);
+        if (itemParsed.success) {
+          parsedArray.push(itemParsed.data);
+        } else {
+          const errorMessage = itemParsed.error.issues
+            .map((e: any) => e.message)
+            .join(", ");
+          return { success: false, error: errorMessage };
+        }
+      } else {
+        parsedArray.push(item);
+      }
+    }
+    return { success: true, data: parsedArray };
+  }
+
+  // Standard safeParse for the field
   const parsed = fieldSchema.safeParse(val);
   if (parsed.success) {
     return { success: true, data: parsed.data };
   }
 
+  // If safeParse failed and val is an Array (e.g. for in / not-in on scalar field),
+  // try parsing each item with targetSchema
   if (Array.isArray(val)) {
+    const targetSchema = elemSchema ?? fieldSchema;
     const parsedArray: unknown[] = [];
     for (const item of val) {
-      const itemParsed = fieldSchema.safeParse(item);
-      if (itemParsed.success) {
-        parsedArray.push(itemParsed.data);
+      if (typeof targetSchema.safeParse === "function") {
+        const itemParsed = targetSchema.safeParse(item);
+        if (itemParsed.success) {
+          parsedArray.push(itemParsed.data);
+        } else {
+          const errorMessage = itemParsed.error.issues
+            .map((e: any) => e.message)
+            .join(", ");
+          return { success: false, error: errorMessage };
+        }
       } else {
-        const errorMessage = itemParsed.error.issues
-          .map((e: any) => e.message)
-          .join(", ");
-        return { success: false, error: errorMessage };
+        parsedArray.push(item);
       }
     }
     return { success: true, data: parsedArray };
@@ -419,19 +515,6 @@ export function parseFilters(
   const filters: ParsedFilter[] = [];
   const allowedFields = filterableFields ? new Set(filterableFields) : null;
 
-  const opMap: Record<string, WhereOp> = {
-    eq: "==",
-    ne: "!=",
-    lt: "<",
-    lte: "<=",
-    gt: ">",
-    gte: ">=",
-    in: "in",
-    nin: "not-in",
-    contains: "array-contains",
-    containsAny: "array-contains-any",
-  };
-
   for (const [key, rawVal] of Object.entries(query)) {
     if (rawVal === undefined) continue;
 
@@ -455,22 +538,22 @@ export function parseFilters(
     if (val === undefined || val === "") continue;
 
     // Parse field__op format
-    const match = key.match(/^(\w+)__(\w+)$/);
+    const lastDoubleUnderscore = key.lastIndexOf("__");
     let field: string;
     let op: WhereOp = "==";
 
-    if (match && match[1] && match[2]) {
-      field = match[1];
-      const opKey = match[2];
-      if (opMap[opKey]) {
-        op = opMap[opKey];
+    if (lastDoubleUnderscore !== -1) {
+      const fieldCandidate = key.slice(0, lastDoubleUnderscore);
+      const opKey = key.slice(lastDoubleUnderscore + 2);
+      if (isValidOp(opKey)) {
+        field = fieldCandidate;
+        op = normalizeWhereOp(opKey);
       } else {
-        continue; // Unknown operator, skip
+        field = key;
+        op = "==";
       }
-    } else if (!match) {
-      field = key;
     } else {
-      continue; // Invalid match
+      field = key;
     }
 
     // Check if field is filterable
@@ -479,7 +562,7 @@ export function parseFilters(
     // Parse value
     let parsedVal: unknown = val;
 
-    // Handle "in" and "not-in" operators (comma-separated)
+    // Handle "in", "not-in", and "array-contains-any" operators (comma-separated)
     if (op === "in" || op === "not-in" || op === "array-contains-any") {
       parsedVal = val.split(",").map((v) => parseValue(v.trim()));
     } else {
@@ -826,7 +909,7 @@ export function createCrudHandlers(
       if (filters.length > 0) {
         queryOptions.where = [];
         for (const f of filters) {
-          const parsedRes = parseFieldValue(entry.schema, f.field, f.value);
+          const parsedRes = parseFieldValue(entry.schema, f.field, f.value, f.op);
           if (!parsedRes.success) {
             return sendError(
               c,
@@ -1000,7 +1083,8 @@ export function createCrudHandlers(
         }
         const parsedWhere: [string, any, any][] = [];
         for (const w of body.where) {
-          const parsedRes = parseFieldValue(entry.schema, w[0], w[2]);
+          const normalizedOp = normalizeWhereOp(w[1]);
+          const parsedRes = parseFieldValue(entry.schema, w[0], w[2], normalizedOp);
           if (!parsedRes.success) {
             sendError(
               c,
@@ -1009,7 +1093,7 @@ export function createCrudHandlers(
             );
             return;
           }
-          parsedWhere.push([w[0], w[1], parsedRes.data]);
+          parsedWhere.push([w[0], normalizedOp, parsedRes.data]);
         }
         queryOptions.where = parsedWhere;
       }
@@ -1030,7 +1114,8 @@ export function createCrudHandlers(
         }
         const parsedOrWhere: [string, any, any][] = [];
         for (const w of body.orWhere) {
-          const parsedRes = parseFieldValue(entry.schema, w[0], w[2]);
+          const normalizedOp = normalizeWhereOp(w[1]);
+          const parsedRes = parseFieldValue(entry.schema, w[0], w[2], normalizedOp);
           if (!parsedRes.success) {
             sendError(
               c,
@@ -1039,7 +1124,7 @@ export function createCrudHandlers(
             );
             return;
           }
-          parsedOrWhere.push([w[0], w[1], parsedRes.data]);
+          parsedOrWhere.push([w[0], normalizedOp, parsedRes.data]);
         }
         queryOptions.orWhere = parsedOrWhere;
       }
@@ -1064,7 +1149,8 @@ export function createCrudHandlers(
         for (const group of body.orWhereGroups) {
           const parsedGroup: [string, any, any][] = [];
           for (const w of group) {
-            const parsedRes = parseFieldValue(entry.schema, w[0], w[2]);
+            const normalizedOp = normalizeWhereOp(w[1]);
+            const parsedRes = parseFieldValue(entry.schema, w[0], w[2], normalizedOp);
             if (!parsedRes.success) {
               sendError(
                 c,
@@ -1073,7 +1159,7 @@ export function createCrudHandlers(
               );
               return;
             }
-            parsedGroup.push([w[0], w[1], parsedRes.data]);
+            parsedGroup.push([w[0], normalizedOp, parsedRes.data]);
           }
           parsedOrWhereGroups.push(parsedGroup);
         }

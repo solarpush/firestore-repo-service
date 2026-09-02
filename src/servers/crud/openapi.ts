@@ -376,6 +376,20 @@ function filterParams(entry: CrudRepoEntry): Record<string, unknown>[] {
   const params: Record<string, unknown>[] = [];
   for (const { path: field, zodSchema } of leafFields) {
     const valSchema = zodTypeToJsonValueSchema(zodSchema);
+    const unwrapped = unwrapZodType(zodSchema);
+
+    const isArrayType =
+      (unwrapped as any)?._zod?.def?.type === "array" ||
+      (unwrapped as any)?._def?.typeName === "ZodArray" ||
+      (unwrapped as any)?._def?.type === "array";
+
+    const elemSchema = isArrayType
+      ? zodTypeToJsonValueSchema(
+          (unwrapped as any)?._zod?.def?.element ??
+            (unwrapped as any)?._def?.type ??
+            (unwrapped as any)?._def?.element,
+        )
+      : valSchema;
 
     // Direct equality filter: ?field=value
     params.push({
@@ -388,12 +402,15 @@ function filterParams(entry: CrudRepoEntry): Record<string, unknown>[] {
     for (const op of ops) {
       const descDetail = opDescriptions[op] ? ` (${opDescriptions[op]})` : "";
       const isListOp = op === "in" || op === "nin" || op === "containsAny";
+      const isElemOp = op === "contains";
       params.push({
         name: `${field}__${op}`,
         in: "query",
         schema: isListOp
           ? { type: "string", description: "Comma-separated list of values" }
-          : valSchema,
+          : isElemOp
+            ? elemSchema
+            : valSchema,
         description: `Filter ${field} with operator ${op}${descDetail}`,
       });
     }
