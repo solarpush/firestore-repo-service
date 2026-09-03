@@ -7,15 +7,14 @@
  */
 
 import type {
-  onDocumentCreated,
-  onDocumentDeleted,
-  onDocumentUpdated,
+  onDocumentWritten,
 } from "firebase-functions/v2/firestore";
 import type { HttpsOptions, onRequest } from "firebase-functions/v2/https";
 import type {
   PubSubOptions,
   onMessagePublished,
 } from "firebase-functions/v2/pubsub";
+import type { z } from "zod";
 
 /**
  * Cloud Functions v2 options forwarded to `onMessagePublished()` for every
@@ -36,6 +35,84 @@ export type AdminHttpsOptions = HttpsOptions;
 
 /** A value that can be provided directly or as a lazy factory function. */
 export type OrFactory<T> = T | (() => T);
+
+// ---------------------------------------------------------------------------
+// Sync Adapter & Health Types
+// ---------------------------------------------------------------------------
+
+/** Result returned by an adapter's healthCheck method. */
+export interface SyncHealthResult {
+  /** Overall health status for this target */
+  healthy: boolean;
+  /** Target table or index name */
+  targetName: string;
+  /** Whether the target table/index exists */
+  targetExists: boolean;
+  /** Error message if unhealthy */
+  error?: string | null;
+  /** Adapter-specific health details (e.g. column mismatch for SQL, doc counts for Search) */
+  details?: Record<string, unknown>;
+}
+
+/**
+ * Universal adapter interface that the sync worker and admin dashboard call.
+ * Implementations exist for BigQuery, Meilisearch, and can be written for
+ * PostgreSQL, Elasticsearch, Typesense, etc.
+ */
+export interface SyncAdapter {
+  /** Unique adapter identifier, e.g. "bigquery", "meilisearch", "postgres" */
+  readonly name: string;
+
+  /** Check whether the target storage (table, index, etc.) exists */
+  targetExists(targetName: string): Promise<boolean>;
+
+  /**
+   * Upsert rows/documents into target storage.
+   * @param targetName - SQL table name or Search index UID
+   * @param items - Serialized rows / documents
+   * @param primaryKey - Column or field name used as primary key
+   */
+  upsert(
+    targetName: string,
+    items: Record<string, unknown>[],
+    primaryKey: string,
+  ): Promise<void>;
+
+  /**
+   * Delete rows/documents by primary key IDs.
+   * @param targetName - SQL table name or Search index UID
+   * @param primaryKey - Column or field name used as primary key
+   * @param ids - Array of document / row IDs to delete
+   */
+  delete(
+    targetName: string,
+    primaryKey: string,
+    ids: string[],
+  ): Promise<void>;
+
+  /**
+   * Optional: prepare/migrate target schema or create target if missing.
+   * For SQL: creates table and adds missing columns.
+   * For Meilisearch: creates index and configures filterable/sortable attributes.
+   */
+  ensureTarget?(options: {
+    targetName: string;
+    primaryKey: string;
+    schema?: z.ZodObject<any>;
+    exclude?: string[];
+    columnMap?: Record<string, string>;
+  }): Promise<void>;
+
+  /**
+   * Optional: custom health check for the admin dashboard.
+   */
+  healthCheck?(options: {
+    targetName: string;
+    primaryKey: string;
+    schema?: z.ZodObject<any>;
+    repoConfig?: RepoSyncConfig<string>;
+  }): Promise<SyncHealthResult>;
+}
 
 // ---------------------------------------------------------------------------
 // SQL column / dialect
@@ -93,7 +170,7 @@ export type LogicalType =
 // Sync events
 // ---------------------------------------------------------------------------
 
-/** Operations that can be synced to SQL. */
+/** Operations that can be synced to target storage. */
 export type SyncOperation = "INSERT" | "UPSERT" | "DELETE";
 
 /** A single sync event produced by a Firestore trigger and consumed by the worker. */
@@ -129,20 +206,18 @@ export interface SyncEvent {
 }
 
 // ---------------------------------------------------------------------------
-// SQL adapter
+// SQL adapter (extends SyncAdapter)
 // ---------------------------------------------------------------------------
 
 /**
  * Abstract SQL adapter that the sync worker calls.
- * Each target database provides a concrete implementation.
+ * Extends the universal {@link SyncAdapter}.
  */
-export interface SqlAdapter {
+export interface SqlAdapter extends SyncAdapter {
   /** The SQL dialect used by this adapter */
   readonly dialect: SqlDialect;
 
-  /**
-   * Check whether a table exists.
-   */
+  /** Check whether a table exists. */
   tableExists(tableName: string): Promise<boolean>;
 
   /**
@@ -157,21 +232,17 @@ export interface SqlAdapter {
    * `number` to `string`) and fail fast with an explicit error rather than
    * letting MERGE/Storage Write fail silently on every event.
    *
-   * Optional for backwards-compat: if the adapter does not implement it,
+   * Optional: if the adapter does not implement it,
    * the worker skips type-drift detection but still adds new columns.
    */
   getTableColumnsWithTypes?(
     tableName: string,
   ): Promise<Map<string, string>>;
 
-  /**
-   * Create a table. Should be idempotent (IF NOT EXISTS).
-   */
+  /** Create a table. Should be idempotent (IF NOT EXISTS). */
   createTable(table: SqlTableDef): Promise<void>;
 
-  /**
-   * Insert rows (append-only, no dedup).
-   */
+  /** Insert rows (append-only, no dedup). */
   insertRows(tableName: string, rows: Record<string, unknown>[]): Promise<void>;
 
   /**
@@ -184,9 +255,7 @@ export interface SqlAdapter {
     primaryKey: string,
   ): Promise<void>;
 
-  /**
-   * Delete rows by primary-key values.
-   */
+  /** Delete rows by primary-key values. */
   deleteRows(
     tableName: string,
     primaryKey: string,
@@ -221,11 +290,11 @@ export interface SqlAdapter {
 
 /** Per-repository sync options, typed to the repo's field names. */
 export interface RepoSyncConfig<F extends string = string> {
-  /** Override the SQL table name (default: repo name) */
+  /** Override the SQL table name or Search index UID (default: repo name) */
   tableName?: string;
-  /** Fields to exclude from the SQL table */
+  /** Fields to exclude from the synced document */
   exclude?: F[];
-  /** Field name overrides: Zod field → SQL column name */
+  /** Field name overrides: Zod field → Target column/field name */
   columnMap?: Partial<Record<F, string>>;
   /**
    * Explicit Firestore document path pattern for triggers.
@@ -234,6 +303,11 @@ export interface RepoSyncConfig<F extends string = string> {
    * @example "posts/{postId}/comments/{docId}"
    */
   triggerPath?: string;
+  /**
+   * Optional list of target adapter names for this repo (e.g. `["bigquery", "meilisearch"]`).
+   * When omitted or empty, the repo is synced to all configured adapters.
+   */
+  adapters?: string[];
 }
 
 /**
@@ -276,9 +350,7 @@ export type TypedRepoSyncConfigs<M> = {
 
 /** Firestore trigger constructors from `firebase-functions/v2/firestore`. */
 export interface FirestoreTriggersDep {
-  onDocumentCreated: typeof onDocumentCreated;
-  onDocumentUpdated: typeof onDocumentUpdated;
-  onDocumentDeleted: typeof onDocumentDeleted;
+  onDocumentWritten: typeof onDocumentWritten;
 }
 
 /** PubSub handler from `firebase-functions/v2/pubsub`. */
@@ -323,13 +395,20 @@ export interface SyncTriggersConfig<M = Record<string, any>> {
 export interface SyncWorkerConfig<M = Record<string, any>> {
   /** External dependencies — PubSub handler + client */
   deps: Pick<SyncDeps, "pubsubHandler" | "pubsub">;
-  /** SQL adapter to flush data to */
-  adapter: SqlAdapter;
+  /**
+   * Adapter(s) to flush data to. Accepts a single adapter, an array of adapters,
+   * or a lazy factory returning one or more adapters.
+   */
+  adapter?: OrFactory<SyncAdapter | SyncAdapter[]>;
+  /**
+   * Explicit array of adapters to flush data to.
+   */
+  adapters?: OrFactory<SyncAdapter>[];
   /** Max rows per flush batch (default: 100) */
   batchSize?: number;
   /** Flush interval in ms (default: 5000) */
   flushIntervalMs?: number;
-  /** Auto-create/migrate tables on first event (default: false) */
+  /** Auto-create/migrate tables or indexes on first event (default: false) */
   autoMigrate?: boolean;
   /** PubSub topic prefix (default: "firestore-sync") */
   topicPrefix?: string;
@@ -343,11 +422,6 @@ export interface SyncWorkerConfig<M = Record<string, any>> {
    * Cloud Functions v2 options forwarded to `onMessagePublished()` for every
    * worker handler. Use to tune `concurrency`, `maxInstances`, `minInstances`,
    * `memory`, `timeoutSeconds`, `region`, `cpu`, etc.
-   *
-   * Example:
-   * ```ts
-   * workerOptions: { concurrency: 10, maxInstances: 10, memory: "512MiB" }
-   * ```
    */
   workerOptions?: SyncWorkerOptions;
   /** Per-repo overrides */
@@ -381,9 +455,9 @@ export interface adminsyncBasicAuth {
 export interface adminsyncFeaturesFlag {
   /** Allow force-syncing an entire collection (default: false) */
   manualSync?: boolean;
-  /** Schema health check: expected vs actual SQL columns (default: false) */
+  /** Schema health check: expected vs actual storage structure (default: false) */
   healthCheck?: boolean;
-  /** GCP config check: verify APIs, topics, tables, and IAM (default: false) */
+  /** GCP / target config check: verify APIs, topics, targets, and IAM (default: false) */
   configCheck?: boolean;
 }
 
@@ -434,18 +508,21 @@ export interface FirestoreSyncConfig<M = Record<string, any>> {
    */
   deps: Omit<SyncDeps, "pubsub"> & { pubsub: OrFactory<PubSubClientDep> };
   /**
-   * SQL adapter to flush data to.
-   * Can be a factory `() => adapter` for lazy initialization
-   * (avoids connecting to BigQuery / SQL at module-load time).
+   * Sync adapter(s) to flush data to (e.g. BigQueryAdapter, MeilisearchAdapter).
+   * Can be a single adapter, an array of adapters, or a lazy factory.
    */
-  adapter: OrFactory<SqlAdapter>;
+  adapter?: OrFactory<SyncAdapter | SyncAdapter[]>;
+  /**
+   * Explicit array of adapters to flush data to.
+   */
+  adapters?: OrFactory<SyncAdapter>[];
   /** PubSub topic name prefix (topics will be `{prefix}-{repoName}`) */
   topicPrefix?: string;
   /** Max rows per flush batch (default: 100) */
   batchSize?: number;
   /** Flush interval in ms (default: 5000) */
   flushIntervalMs?: number;
-  /** Auto-create/migrate tables on first event (default: false) */
+  /** Auto-create/migrate tables or indexes on first event (default: false) */
   autoMigrate?: boolean;
   /**
    * Cloud Functions v2 options forwarded to `onMessagePublished()` for every
@@ -454,7 +531,7 @@ export interface FirestoreSyncConfig<M = Record<string, any>> {
    */
   workerOptions?: SyncWorkerOptions;
   /**
-   * Optional sync admin endpoint. When provided, a `adminsync` handler is
+   * Optional sync admin endpoint. When provided, an `adminsync` handler is
    * added to `sync.functions` exposing health-check, force-sync, and queue
    * inspection endpoints behind authentication.
    */

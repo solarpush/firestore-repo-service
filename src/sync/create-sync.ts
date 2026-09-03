@@ -1,15 +1,15 @@
 /**
- * Unified wrapper — combines triggers + worker into a single call.
+ * Unified wrapper — combines triggers + worker + admin into a single call.
  *
  * @example
  * ```typescript
- * import * as firestoreTriggers from "firebase-functions/v2/firestore";
+ * import { onDocumentWritten } from "firebase-functions/v2/firestore";
  * import * as pubsubHandler from "firebase-functions/v2/pubsub";
  * import { PubSub } from "@google-cloud/pubsub";
  *
  * const sync = createFirestoreSync(repos, {
- *   deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
- *   adapter,
+ *   deps: { firestoreTriggers: { onDocumentWritten }, pubsubHandler, pubsub: new PubSub() },
+ *   adapters: [bigqueryAdapter, meilisearchAdapter],
  *   topicPrefix: "firestore-sync",
  *   autoMigrate: true,
  *   admin: {
@@ -23,20 +23,23 @@
  * });
  *
  * // Triggers + PubSub handlers
- * export const { users_onCreate, users_onUpdate, users_onDelete, sync_users } = sync.functions;
+ * export const { users_onSync, posts_onSync, sync_users, sync_posts } = sync.functions;
  *
- * // Admin endpoint — wrap with onRequest yourself
+ * // Admin endpoint — wrap with onRequest yourself or pass onRequest in config
  * export const adminsync = onRequest(sync.adminHandler!);
- *
- * // Or pass onRequest in admin config to auto-add to sync.functions:
- * // admin: { onRequest, ... } → export const { adminsync } = sync.functions;
  * ```
  */
 
 import { createadminsyncServer } from "./admin";
 import type { SyncQueue } from "./queue";
 import { createSyncTriggers } from "./triggers";
-import type { FirestoreSyncConfig, OrFactory, RepoSyncConfig, SyncEvent } from "./types";
+import type {
+  FirestoreSyncConfig,
+  OrFactory,
+  RepoSyncConfig,
+  SyncAdapter,
+  SyncEvent,
+} from "./types";
 import { createSyncWorker } from "./worker";
 
 const DEFAULT_TOPIC_PREFIX = "firestore-sync";
@@ -69,6 +72,7 @@ export function createFirestoreSync<M extends Record<string, any>>(
   const {
     deps,
     adapter: rawAdapter,
+    adapters: rawAdaptersList,
     topicPrefix = DEFAULT_TOPIC_PREFIX,
     batchSize,
     flushIntervalMs,
@@ -78,10 +82,18 @@ export function createFirestoreSync<M extends Record<string, any>>(
     repos: repoConfigs,
   } = config;
 
-  // Resolve lazy deps — instances are returned as-is, factories are wrapped
-  // in a proxy that defers construction until the first property access.
+  // Resolve lazy deps
   const pubsub = lazyProxy(deps.pubsub);
-  const adapter = lazyProxy(rawAdapter);
+
+  const rawAdapters = rawAdaptersList
+    ? rawAdaptersList
+    : Array.isArray(rawAdapter)
+      ? rawAdapter
+      : rawAdapter
+        ? [rawAdapter]
+        : [];
+
+  const adapters: SyncAdapter[] = rawAdapters.map((a) => lazyProxy(a as any));
 
   // Create triggers (Firestore → PubSub)
   const triggers = createSyncTriggers(repoMapping, {
@@ -90,10 +102,10 @@ export function createFirestoreSync<M extends Record<string, any>>(
     repos: repoConfigs,
   });
 
-  // Create worker (PubSub → SQL)
+  // Create worker (PubSub → Target Adapters)
   const worker = createSyncWorker(repoMapping, {
     deps: { pubsubHandler: deps.pubsubHandler, pubsub },
-    adapter,
+    adapters,
     batchSize,
     flushIntervalMs,
     autoMigrate,
@@ -115,7 +127,7 @@ export function createFirestoreSync<M extends Record<string, any>>(
   if (adminConfig) {
     adminHandler = createadminsyncServer(
       repoMapping,
-      adapter,
+      adapters,
       worker.queues as Map<string, SyncQueue>,
       worker.handleMessage as (event: SyncEvent) => Promise<void>,
       adminConfig,

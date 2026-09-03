@@ -143,6 +143,7 @@ Send complex filter conditions including `where` (AND), `orWhere` (simple OR), a
 | `basePath` | `string` | Base path prefix (e.g., `"/api/v1"`) |
 | `middlewares` | `MiddlewareHandler[]` | Custom Hono middleware array |
 | `repos` | `Record<string, CrudRepoConfig>` | Per-repository configuration mapping |
+| `indexesError` | `(err: { repoName, error, indexUrl, c }) => void` | Callback triggered when a Firestore missing-index error occurs |
 | `openapi` | `OpenAPISpecOptions` | OpenAPI 3.1 documentation settings |
 | `verbose` | `boolean` | Include detailed error messages in HTTP 500 responses |
 
@@ -157,4 +158,60 @@ Send complex filter conditions including `where` (AND), `orWhere` (simple OR), a
 | `orderableFields` | `string[]` | List of allowed fields for ordering |
 | `allowedIncludes` | `string[]` | List of relation keys allowed in `includes` |
 | `allowDelete` | `boolean` | Whether `DELETE /:id` is enabled |
+| `rules` | `CrudRule[]` | Before rules & diff engine for mutation validation |
 | `pageSize` | `number` | Default page size for list requests |
+
+---
+
+## Before Rules & Diff Engine (`rules`)
+
+You can define validation rules executed before document mutation (`PUT`, `PATCH`, and `POST /:repoName/batch`). The rule receives the existing document state (`before`), the simulated document state (`after`), the dictionary of modified fields (`changes`), operation type (`op`), document ID, and the Hono context (`c`).
+
+```typescript
+repos: {
+  events: {
+    path: "events",
+    rules: [
+      {
+        description: "Cannot cancel an event once invoiced",
+        run: ({ before, changes }) => {
+          if (changes.status === "cancelled" && before.isInvoiced) {
+            return false; // Rejects with 403 and the rule description
+          }
+          return true;
+        },
+      },
+      {
+        description: "Only admins can change event ownership",
+        run: ({ changes, c }) => {
+          if (changes.organizerId) {
+            const user = c.get("user");
+            if (user?.role !== "admin") return "Forbidden: admin role required";
+          }
+          return true;
+        },
+      },
+    ],
+  },
+}
+```
+
+If a rule returns `false` or a string error message, the mutation is rejected with `HTTP 403 Forbidden` without writing to Firestore.
+
+---
+
+## Missing Index Detection (`indexesError` & HTTP 424)
+
+When a complex filter or compound query requires a composite index that has not yet been built in Firestore, the CRUD server automatically catches the Firestore `FAILED_PRECONDITION` error:
+
+1. **Invokes `indexesError` callback**: Passes `{ repoName, error, indexUrl, c }` for error tracking, alerting, or Sentry logging.
+2. **Returns `HTTP 424 Failed Dependency`**: Includes the direct link to the Firebase Console index creator in the JSON response:
+
+```json
+{
+  "success": false,
+  "error": "The query requires a composite index.",
+  "indexUrl": "https://console.firebase.google.com/v1/r/project/my-project/firestore/indexes?create_composite=..."
+}
+```
+

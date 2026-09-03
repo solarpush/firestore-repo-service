@@ -434,9 +434,10 @@ A single unified factory binds all servers to your repository registry. Per-repo
 import { createServers } from "@lpdjs/firestore-repo-service";
 import { onRequest } from "firebase-functions/v2/https";
 import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
+import { MeilisearchAdapter } from "@lpdjs/firestore-repo-service/sync/meilisearch";
 import { BigQuery } from "@google-cloud/bigquery";
 import { PubSub } from "@google-cloud/pubsub";
-import * as firestoreTriggers from "firebase-functions/v2/firestore";
+import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as pubsubHandler from "firebase-functions/v2/pubsub";
 
 const servers = createServers(repos, {
@@ -458,7 +459,7 @@ export const admin = servers.admin({
   },
 });
 
-// CRUD REST API (Hono-based)
+// CRUD REST API (Hono-based) with Before Rules & Missing Index detection
 export const api = servers.crud({
   basePath: "/api",
   middlewares: [
@@ -468,25 +469,45 @@ export const api = servers.crud({
     }
   ],
   repos: {
-    posts: { path: "posts", allowDelete: true },
+    posts: {
+      path: "posts",
+      allowDelete: true,
+      rules: [
+        {
+          description: "Cannot cancel a paid post",
+          run: ({ before, changes }) => !(changes.status === "cancelled" && before.isPaid),
+        },
+      ],
+    },
     users: { path: "users" },
+  },
+  indexesError: ({ repoName, indexUrl }) => {
+    console.warn(`[Index Required] ${repoName}: ${indexUrl}`);
   },
   openapi: { 
     title: "My API", 
     version: "1.0.0",
-    // Optional: Protect /docs and /openapi.json using firebaseDocsAuth or custom middleware
   },
 });
 
-// Firestore → BigQuery sync (triggers + worker + admin Cloud Functions)
+// Firestore → Storage Sync (BigQuery & Meilisearch multi-adapter fan-out)
 export const { functions } = servers.sync({
-  deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
-  adapter: new BigQueryAdapter({
-    bigquery: new BigQuery({ projectId: "my-project" }),
-    projectId: "my-project",
-    datasetId: "firestore_sync",
-    maxStaleness: "INTERVAL 15 MINUTE",
-  }),
+  deps: { firestoreTriggers: { onDocumentWritten }, pubsubHandler, pubsub: new PubSub() },
+  adapters: [
+    new BigQueryAdapter({
+      bigquery: new BigQuery({ projectId: "my-project" }),
+      projectId: "my-project",
+      datasetId: "firestore_sync",
+      maxStaleness: "INTERVAL 15 MINUTE",
+    }),
+    new MeilisearchAdapter({
+      host: "http://localhost:7700",
+      apiKey: "masterKey",
+      indexesSettings: {
+        users: { searchableAttributes: ["name", "email"], filterableAttributes: ["role"] },
+      },
+    }),
+  ],
   topicPrefix: "firestore-sync",
   autoMigrate: true,
   admin: {
@@ -494,25 +515,19 @@ export const { functions } = servers.sync({
     featuresFlag: { healthCheck: true, manualSync: true, configCheck: true },
   },
   repos: {
-    users: { tableName: "users", columnMap: { docId: "user_id" } },
+    users: { tableName: "users", columnMap: { docId: "user_id" }, adapters: ["bigquery", "meilisearch"] },
     posts: { columnMap: { docId: "post_id" } },
     comments: { triggerPath: "posts/{postId}/comments/{docId}" },
   },
 });
 
-// Spread Cloud Functions into your exports
+// Spread Cloud Functions into your exports (1 onSync trigger per repo + 1 worker per repo)
 export const {
-  users_onCreate,
-  users_onUpdate,
-  users_onDelete,
+  users_onSync,
   sync_users,
-  posts_onCreate,
-  posts_onUpdate,
-  posts_onDelete,
+  posts_onSync,
   sync_posts,
-  comments_onCreate,
-  comments_onUpdate,
-  comments_onDelete,
+  comments_onSync,
   sync_comments,
   adminsync,
 } = functions;
@@ -522,13 +537,16 @@ When `onRequest` is passed to `createServers`, `servers.admin()` and `servers.cr
 
 The sync admin endpoint (`/`) exposes a UI for health checks, force-sync, queue inspection, and GCP config verification.
 
-For a custom SQL backend, implement the `SqlAdapter` interface:
+For custom storage or search backends, implement the universal `SyncAdapter` interface:
 
 ```typescript
-import type { SqlAdapter } from "@lpdjs/firestore-repo-service/sync";
+import type { SyncAdapter } from "@lpdjs/firestore-repo-service/sync";
 
-class MyAdapter implements SqlAdapter {
-  // tableExists, getTableColumns, createTable, upsertRows, deleteRows, executeRaw
+class MyCustomAdapter implements SyncAdapter {
+  readonly name = "custom";
+  async targetExists(targetName: string): Promise<boolean> { /* ... */ }
+  async upsert(targetName: string, items: Record<string, unknown>[], primaryKey: string): Promise<void> { /* ... */ }
+  async delete(targetName: string, primaryKey: string, ids: string[]): Promise<void> { /* ... */ }
 }
 ```
 

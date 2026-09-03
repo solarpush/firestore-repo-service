@@ -143,6 +143,7 @@ Envoyez des conditions de filtrage complexes incluant `where` (ET), `orWhere` (O
 | `basePath` | `string` | Préfixe du chemin d'accès (ex. `"/api/v1"`) |
 | `middlewares` | `MiddlewareHandler[]` | Tableau de middlewares Hono personnalisés |
 | `repos` | `Record<string, CrudRepoConfig>` | Configuration par repository |
+| `indexesError` | `(err: { repoName, error, indexUrl, c }) => void` | Callback déclenché lors d'une erreur d'index manquant Firestore |
 | `openapi` | `OpenAPISpecOptions` | Paramètres de documentation OpenAPI 3.1 |
 | `verbose` | `boolean` | Afficher les détails des erreurs serveur lors d'un code HTTP 500 |
 
@@ -157,4 +158,60 @@ Envoyez des conditions de filtrage complexes incluant `where` (ET), `orWhere` (O
 | `orderableFields` | `string[]` | Liste des champs autorisés pour le tri |
 | `allowedIncludes` | `string[]` | Liste des clés de relation autorisées dans `includes` |
 | `allowDelete` | `boolean` | Activer ou non l'endpoint `DELETE /:id` |
+| `rules` | `CrudRule[]` | Règles de validation préalables (Before Rules & Moteur de diff) |
 | `pageSize` | `number` | Taille de page par défaut |
+
+---
+
+## Règles préalables & Moteur de diff (`rules`)
+
+Vous pouvez définir des règles de validation métier exécutées avant toute mutation de document (`PUT`, `PATCH`, et `POST /:repoName/batch`). Chaque règle reçoit l'état du document avant mutation (`before`), l'état simulé après mutation (`after`), le dictionnaire des champs modifiés (`changes`), le type d'opération (`op`), l'ID du document ainsi que le contexte Hono (`c`).
+
+```typescript
+repos: {
+  events: {
+    path: "events",
+    rules: [
+      {
+        description: "Impossible d'annuler un événement déjà facturé",
+        run: ({ before, changes }) => {
+          if (changes.status === "cancelled" && before.isInvoiced) {
+            return false; // Rejette avec HTTP 403 et la description de la règle
+          }
+          return true;
+        },
+      },
+      {
+        description: "Seuls les administrateurs peuvent réassigner un événement",
+        run: ({ changes, c }) => {
+          if (changes.organizerId) {
+            const user = c.get("user");
+            if (user?.role !== "admin") return "Forbidden: Rôle admin requis";
+          }
+          return true;
+        },
+      },
+    ],
+  },
+}
+```
+
+Si une règle retourne `false` ou un message d'erreur textuel, la mutation est bloquée et l'API répond avec une erreur `HTTP 403 Forbidden` sans écrire dans Firestore.
+
+---
+
+## Détection automatique d'index manquant (`indexesError` & HTTP 424)
+
+Lorsqu'une requête filtrée ou complexe nécessite un index composite non créé dans Firestore, le serveur CRUD intercepte automatiquement l'erreur `FAILED_PRECONDITION` de Firestore :
+
+1. **Appel du callback `indexesError`** : Transmet `{ repoName, error, indexUrl, c }` pour le logging, vos alertes ou Sentry.
+2. **Réponse `HTTP 424 Failed Dependency`** : Inclut le lien direct vers la console Firebase pour créer l'index composite en un clic :
+
+```json
+{
+  "success": false,
+  "error": "The query requires a composite index.",
+  "indexUrl": "https://console.firebase.google.com/v1/r/project/mon-projet/firestore/indexes?create_composite=..."
+}
+```
+

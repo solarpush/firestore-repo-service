@@ -1,123 +1,74 @@
 /**
  * PubSub worker — creates a Cloud Function that receives {@link SyncEvent}
- * messages from PubSub, routes them to per-repo {@link SyncQueue}s, and
- * flushes batches to the configured {@link SqlAdapter}.
+ * messages from PubSub, routes them to per-repo / per-adapter {@link SyncQueue}s, and
+ * flushes batches to the configured {@link SyncAdapter}s.
  *
  * Dependencies (`firebase-functions`, `@google-cloud/pubsub`) are injected
  * via the `deps` config property.
  */
 
 import { z } from "zod";
-import { isBigQueryTypeCompatible } from "./adapters/bigquery-types";
+import { SchemaTypeMismatchError } from "./adapters/bigquery";
 import { SYNC_VERSION_COLUMN } from "./constants";
 import { SyncQueue } from "./queue";
 import { zodSchemaToColumns } from "./schema-mapper";
 import type {
   RepoSyncConfig,
-  SqlAdapter,
+  SyncAdapter,
   SyncEvent,
   SyncWorkerConfig,
 } from "./types";
+
+export { SchemaTypeMismatchError };
 
 // ---------------------------------------------------------------------------
 // Migration tracking
 // ---------------------------------------------------------------------------
 
-/** Set of repo names that have already been migrated in this process lifetime. */
-const migratedRepos = new Set<string>();
+/** Set of `${repoName}:${adapter.name}` pairs that have already been migrated. */
+const migratedTargets = new Set<string>();
 
-/**
- * Thrown by {@link ensureMigrated} when an existing column has a SQL type
- * that is not compatible with what the current Zod schema would produce.
- *
- * BigQuery (and Storage Write CDC in particular) cannot silently coerce
- * incompatible types. We fail fast so the user fixes the schema explicitly
- * (rename the column, recreate the table, or add a transform) instead of
- * losing events to an infinite DLQ loop.
- */
-export class SchemaTypeMismatchError extends Error {
-  constructor(
-    readonly tableName: string,
-    readonly column: string,
-    readonly existingType: string,
-    readonly desiredType: string,
-  ) {
-    super(
-      `Schema drift detected on \`${tableName}\`: column \`${column}\` has ` +
-        `type ${existingType} in BigQuery but the current Zod schema maps ` +
-        `it to ${desiredType}. BigQuery cannot safely convert between these ` +
-        `types — to resolve, either (a) keep the BigQuery type and add a ` +
-        `transform in your repo to coerce values, (b) rename the field in ` +
-        `your Zod schema (creates a new column), or (c) drop & recreate ` +
-        `the table.`,
-    );
-    this.name = "SchemaTypeMismatchError";
-  }
-}
-
-async function ensureMigrated(
+async function ensureMigratedTarget(
   repoName: string,
-  adapter: SqlAdapter,
+  adapter: SyncAdapter,
   schema: z.ZodObject<any>,
   tableName: string,
   primaryKey: string,
   exclude?: string[],
   columnMap?: Record<string, string>,
 ): Promise<void> {
-  if (migratedRepos.has(repoName)) return;
+  const migrationKey = `${repoName}:${adapter.name}`;
+  if (migratedTargets.has(migrationKey)) return;
 
-  const columns = zodSchemaToColumns(schema, adapter.dialect, {
-    primaryKey,
-    exclude,
-    columnMap,
-  });
-
-  const exists = await adapter.tableExists(tableName);
-  if (!exists) {
-    await adapter.createTable({ tableName, columns });
-  } else {
-    // Prefer typed lookup when the adapter supports it: this lets us detect
-    // type drift (e.g. number → string) and fail fast with an explicit
-    // error, instead of every flush failing inside BigQuery with a cryptic
-    // cast error and looping forever via the DLQ.
-    if (adapter.getTableColumnsWithTypes) {
-      const existing = await adapter.getTableColumnsWithTypes(tableName);
-      const missing: typeof columns = [];
-      for (const col of columns) {
-        const existingType = existing.get(col.name);
-        if (existingType === undefined) {
-          missing.push(col);
-          continue;
-        }
-        // Only meaningful for BigQuery dialects; other dialects can opt-in
-        // by implementing getTableColumnsWithTypes with their own tokens.
-        if (
-          adapter.dialect.name === "bigquery" &&
-          !isBigQueryTypeCompatible(existingType, col.sqlType)
-        ) {
-          throw new SchemaTypeMismatchError(
-            tableName,
-            col.name,
-            existingType,
-            col.sqlType,
-          );
-        }
-      }
-      if (missing.length > 0) {
-        await adapter.addColumns(tableName, missing);
-        await adapter.onSchemaChange?.(tableName);
-      }
+  if (typeof adapter.ensureTarget === "function") {
+    await adapter.ensureTarget({
+      targetName: tableName,
+      primaryKey,
+      schema,
+      exclude,
+      columnMap,
+    });
+  } else if ("dialect" in adapter && typeof (adapter as any).createTable === "function") {
+    const sqlAdapter = adapter as any;
+    const columns = zodSchemaToColumns(schema, sqlAdapter.dialect, {
+      primaryKey,
+      exclude,
+      columnMap,
+    });
+    const exists = await sqlAdapter.tableExists(tableName);
+    if (!exists) {
+      await sqlAdapter.createTable({ tableName, columns });
     } else {
-      const existing = new Set(await adapter.getTableColumns(tableName));
-      const newCols = columns.filter((c) => !existing.has(c.name));
+      const existing = new Set(await sqlAdapter.getTableColumns(tableName));
+      const newCols = columns.filter((c: any) => !existing.has(c.name));
       if (newCols.length > 0) {
-        await adapter.addColumns(tableName, newCols);
-        await adapter.onSchemaChange?.(tableName);
+        await sqlAdapter.addColumns(tableName, newCols);
+        await sqlAdapter.onSchemaChange?.(tableName);
       }
     }
   }
 
-  migratedRepos.add(repoName);
+  migratedTargets.add(migrationKey);
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +77,7 @@ async function ensureMigrated(
 
 /**
  * Create a PubSub-triggered Cloud Function that syncs Firestore changes
- * to a SQL database.
+ * to target storage adapters.
  *
  * Returns an object with:
  * - `createHandler` — creates a Cloud Function for a PubSub topic
@@ -140,7 +91,8 @@ export function createSyncWorker<M extends Record<string, any>>(
 ) {
   const {
     deps,
-    adapter,
+    adapter: rawAdapter,
+    adapters: rawAdaptersList,
     batchSize = 100,
     flushIntervalMs = 5_000,
     autoMigrate = false,
@@ -153,30 +105,55 @@ export function createSyncWorker<M extends Record<string, any>>(
     >,
   } = config;
 
-  // Build per-repo queues lazily
+  // Normalize adapters list
+  const normalizedRawAdapters: any[] = rawAdaptersList
+    ? rawAdaptersList
+    : Array.isArray(rawAdapter)
+      ? rawAdapter
+      : rawAdapter
+        ? [rawAdapter]
+        : [];
+
+  const adapters: SyncAdapter[] = normalizedRawAdapters.map((a) =>
+    typeof a === "function" ? a() : a,
+  );
+
+  function getAdaptersForRepo(repoName: string): SyncAdapter[] {
+    const repoCfg = repoConfigs[repoName];
+    if (repoCfg?.adapters && repoCfg.adapters.length > 0) {
+      const allowed = new Set(repoCfg.adapters);
+      return adapters.filter((a) => allowed.has(a.name));
+    }
+    return adapters;
+  }
+
+  // Build per-repo/per-adapter queues lazily
   const queues = new Map<string, SyncQueue>();
 
-  function getQueue(repoName: string, primaryKey: string): SyncQueue {
-    let q = queues.get(repoName);
+  function getQueue(
+    repoName: string,
+    adapter: SyncAdapter,
+    primaryKey: string,
+  ): SyncQueue {
+    const queueKey = `${repoName}:${adapter.name}`;
+    let q = queues.get(queueKey);
     if (q) return q;
 
     const repoCfg = repoConfigs[repoName];
     const tableName = repoCfg?.tableName ?? repoName;
 
-    // On flush failure → log error + re-publish to PubSub dead-letter.
-    // If the DLQ publish also fails, re-throw so the Cloud Function does NOT
-    // ack the PubSub message and PubSub retries it automatically.
-    const dlTopicName = `${topicPrefix}-${repoName}-dlq`;
+    // Per-adapter DLQ topic for isolated failure recovery
+    const dlTopicName = `${topicPrefix}-${repoName}-${adapter.name}-dlq`;
     const dlTopic = deps.pubsub.topic(dlTopicName);
     let dlTopicEnsured = false;
 
-    // Create the DLQ topic at most once, tolerating the race where two
-    // concurrent failures both try to create it (gRPC ALREADY_EXISTS = 6).
     const ensureDlTopic = async (): Promise<void> => {
       if (dlTopicEnsured) return;
       try {
         await dlTopic.create();
-        console.info(`[SyncWorker] Created DLQ topic "${dlTopicName}"`);
+        console.info(
+          `[SyncWorker:${adapter.name}] Created DLQ topic "${dlTopicName}"`,
+        );
       } catch (e: unknown) {
         if ((e as { code?: number })?.code !== 6) throw e; // 6 = ALREADY_EXISTS
       }
@@ -188,20 +165,17 @@ export function createSyncWorker<M extends Record<string, any>>(
       error: unknown,
     ): Promise<void> => {
       console.error(
-        `[SyncWorker] Flush failed for "${repoName}" (${events.length} events):`,
+        `[SyncWorker:${adapter.name}] Flush failed for "${repoName}" (${events.length} events):`,
         error,
       );
       await ensureDlTopic();
 
-      // Publish in parallel (a sequential await-loop over 100 events can blow
-      // the Cloud Function timeout) and cap retries so a poison message can't
-      // be re-queued forever (issue #09).
       await Promise.all(
         events.map((evt) => {
           const attempts = (evt.attempts ?? 0) + 1;
           if (maxDlqAttempts > 0 && attempts > maxDlqAttempts) {
             console.error(
-              `[SyncWorker] Dropping event for "${repoName}" after ${attempts - 1} DLQ attempts:`,
+              `[SyncWorker:${adapter.name}] Dropping event for "${repoName}" after ${attempts - 1} DLQ attempts:`,
               { docId: evt.docId, operation: evt.operation },
             );
             return Promise.resolve();
@@ -224,7 +198,11 @@ export function createSyncWorker<M extends Record<string, any>>(
       flushIntervalMs,
       onFlushError,
     });
-    queues.set(repoName, q);
+    queues.set(queueKey, q);
+    // Also alias by repoName for single-adapter convenience
+    if (!queues.has(repoName)) {
+      queues.set(repoName, q);
+    }
     return q;
   }
 
@@ -242,39 +220,37 @@ export function createSyncWorker<M extends Record<string, any>>(
 
     const repoCfg = repoConfigs[repoName];
     const columnMap = repoCfg?.columnMap as Record<string, string> | undefined;
-    // The primaryKey for BigQuery must use the mapped column name (e.g. docId → user_id)
     const primaryKey = columnMap?.[documentKey] ?? documentKey;
 
-    if (autoMigrate) {
-      const schema: z.ZodObject<any> | undefined =
-        (repo as any).schema ?? undefined;
-      if (schema) {
-        const tableName = repoCfg?.tableName ?? repoName;
-        await ensureMigrated(
-          repoName,
-          adapter,
-          schema,
-          tableName,
-          documentKey,
-          repoCfg?.exclude,
-          columnMap,
-        );
-      }
-    }
-
-    const queue = getQueue(repoName, primaryKey);
-
-    // Stamp the row with the publish version so the SQL adapter can skip
-    // stale (out-of-order) updates. Force-sync events without a version
-    // fall back to the wall clock — still monotonic per-process.
     if (syncEvent.data) {
       syncEvent.data[SYNC_VERSION_COLUMN] = syncEvent.version ?? Date.now();
     }
 
-    queue.enqueue(syncEvent);
+    const targetAdapters = getAdaptersForRepo(repoName);
+    for (const adapter of targetAdapters) {
+      if (autoMigrate) {
+        const schema: z.ZodObject<any> | undefined =
+          (repo as any).schema ?? undefined;
+        if (schema) {
+          const tableName = repoCfg?.tableName ?? repoName;
+          await ensureMigratedTarget(
+            repoName,
+            adapter,
+            schema,
+            tableName,
+            primaryKey,
+            repoCfg?.exclude,
+            columnMap,
+          );
+        }
+      }
+
+      const queue = getQueue(repoName, adapter, primaryKey);
+      queue.enqueue(syncEvent);
+    }
   }
 
-  // Cloud Function v2 PubSub handler (sync — deps are already available)
+  // Cloud Function v2 PubSub handler
   function createHandler(topicName: string) {
     const handlerFn = async (event: any) => {
       const data: SyncEvent = event.data?.message?.json ?? event.data?.json;
@@ -283,13 +259,14 @@ export function createSyncWorker<M extends Record<string, any>>(
         return;
       }
       await handleMessage(data);
-      // Flush so data is persisted before the Cloud Function container shuts down.
-      // SyncQueue.flush() coalesces concurrent callers so when `concurrency > 1`
-      // every parallel handler awaits the same in-flight MERGE — guaranteeing
-      // each PubSub message is only acked once its event reached BigQuery.
-      // Force-sync (admin) handles its own flush after the batch loop.
-      const q = queues.get(data.repoName);
-      if (q) await q.flush();
+
+      // Flush all queues associated with this repo
+      const targetAdapters = getAdaptersForRepo(data.repoName);
+      for (const adapter of targetAdapters) {
+        const queueKey = `${data.repoName}:${adapter.name}`;
+        const q = queues.get(queueKey);
+        if (q) await q.flush();
+      }
     };
 
     if (workerOptions) {
@@ -311,8 +288,12 @@ export function createSyncWorker<M extends Record<string, any>>(
     /** Flush all queues and stop timers. */
     async shutdown(): Promise<void> {
       const promises: Promise<void>[] = [];
+      const visited = new Set<SyncQueue>();
       for (const q of queues.values()) {
-        promises.push(q.shutdown());
+        if (!visited.has(q)) {
+          visited.add(q);
+          promises.push(q.shutdown());
+        }
       }
       await Promise.all(promises);
     },

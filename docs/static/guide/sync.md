@@ -1,39 +1,49 @@
-# Firestore → SQL Sync
+# Firestore → Storage & Search Sync
 
-Automatically replicate Firestore collections to a SQL database (BigQuery, etc.) via Cloud Pub/Sub.
+Automatically replicate Firestore collections to SQL databases (BigQuery, etc.) and search engines (Meilisearch, etc.) via Cloud Pub/Sub.
 
 ## Architecture
 
 ```
-Firestore Triggers → Cloud Pub/Sub → Worker → SQL Database
-      (onCreate/onUpdate/onDelete)           (BigQuery, etc.)
+Firestore Triggers (onDocumentWritten) → Cloud Pub/Sub → Worker → Target Adapters
+             (users_onSync)                                      (BigQuery, Meilisearch...)
 ```
 
-Each document change in Firestore publishes a message to a per-repo Pub/Sub topic.
-A worker subscribes to these topics, batches the changes, and flushes them to SQL.
+Each document change in Firestore triggers a single `onDocumentWritten` Cloud Function (`${repoName}_onSync`) that publishes an event (`INSERT`, `UPSERT`, or `DELETE`) to a per-repo Pub/Sub topic.
+A worker subscribes to these topics, batches the changes, and flushes them to one or more configured **Sync Adapters** concurrently.
 
 ## Quick Start
 
 ```typescript
 import { createServers } from "@lpdjs/firestore-repo-service";
 import { BigQueryAdapter } from "@lpdjs/firestore-repo-service/sync/bigquery";
+import { MeilisearchAdapter } from "@lpdjs/firestore-repo-service/sync/meilisearch";
 import { BigQuery } from "@google-cloud/bigquery";
 import { PubSub } from "@google-cloud/pubsub";
-import * as firestoreTriggers from "firebase-functions/v2/firestore";
+import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as pubsubHandler from "firebase-functions/v2/pubsub";
 import { onRequest } from "firebase-functions/v2/https";
 
 const servers = createServers(repos, { onRequest });
 
 const sync = servers.sync({
-  deps: { firestoreTriggers, pubsubHandler, pubsub: new PubSub() },
-  adapter: new BigQueryAdapter({
-    bigquery: new BigQuery({
-      projectId: "my-project",
-      location: "us-central1",
+  deps: { firestoreTriggers: { onDocumentWritten }, pubsubHandler, pubsub: new PubSub() },
+  adapters: [
+    new BigQueryAdapter({
+      bigquery: new BigQuery({
+        projectId: "my-project",
+        location: "us-central1",
+      }),
+      datasetId: "firestore_sync",
     }),
-    datasetId: "firestore_sync",
-  }),
+    new MeilisearchAdapter({
+      host: "http://localhost:7700",
+      apiKey: "masterKey",
+      indexesSettings: {
+        users: { searchableAttributes: ["name", "email"], filterableAttributes: ["role"] },
+      },
+    }),
+  ],
   topicPrefix: "firestore-sync",
   autoMigrate: true,
   admin: {
@@ -50,6 +60,7 @@ const sync = servers.sync({
       exclude: ["sensitiveField"],
       columnMap: { docId: "user_id" },
       tableName: "users",
+      adapters: ["bigquery", "meilisearch"], // Fan-out to both
     },
     posts: { columnMap: { docId: "post_id" } },
   },
@@ -57,13 +68,9 @@ const sync = servers.sync({
 
 // Export triggers + PubSub handlers
 export const {
-  users_onCreate,
-  users_onUpdate,
-  users_onDelete,
+  users_onSync,
   sync_users,
-  posts_onCreate,
-  posts_onUpdate,
-  posts_onDelete,
+  posts_onSync,
   sync_posts,
   adminsync,
 } = sync.functions;
@@ -77,17 +84,18 @@ export const {
 
 The unified wrapper that creates triggers, workers, and the optional admin server (using the repository registry already bound to `createServers`).
 
-| Option            | Type                   | Default            | Description                                                     |
-| ----------------- | ---------------------- | ------------------ | --------------------------------------------------------------- |
-| `deps`            | `SyncDeps`             | required           | Firebase Functions + PubSub dependencies                        |
-| `adapter`         | `SqlAdapter`           | required           | SQL adapter (e.g. `BigQueryAdapter`)                            |
-| `topicPrefix`     | `string`               | `"firestore-sync"` | Pub/Sub topic name prefix                                       |
-| `batchSize`       | `number`               | `100`              | Max rows per flush batch                                        |
-| `flushIntervalMs` | `number`               | `5000`             | Flush interval in ms                                            |
-| `autoMigrate`     | `boolean`              | `false`            | Auto-create/migrate tables on first event                       |
-| `workerOptions`   | `SyncWorkerOptions`    | —                  | CF v2 options for the worker (`concurrency`, `maxInstances`, …) |
-| `admin`           | `adminsyncConfig`      | —                  | Optional admin endpoint config                                  |
-| `repos`           | `TypedRepoSyncConfigs` | —                  | Per-repo overrides                                              |
+| Option            | Type                                | Default            | Description                                                     |
+| ----------------- | ----------------------------------- | ------------------ | --------------------------------------------------------------- |
+| `deps`            | `SyncDeps`                          | required           | Firebase Functions (`onDocumentWritten`) + PubSub dependencies  |
+| `adapters`        | `SyncAdapter[]`                     | —                  | List of sync adapters (e.g. `[bigquery, meilisearch]`)          |
+| `adapter`         | `SyncAdapter`                       | —                  | Single sync adapter (convenience alias for `adapters: [...]`)    |
+| `topicPrefix`     | `string`                            | `"firestore-sync"` | Pub/Sub topic name prefix                                       |
+| `batchSize`       | `number`                            | `100`              | Max rows per flush batch                                        |
+| `flushIntervalMs` | `number`                            | `5000`             | Flush interval in ms                                            |
+| `autoMigrate`     | `boolean`                           | `false`            | Auto-create/migrate tables and indexes on first event           |
+| `workerOptions`   | `SyncWorkerOptions`                 | —                  | CF v2 options for the worker (`concurrency`, `maxInstances`, …) |
+| `admin`           | `adminsyncConfig`                   | —                  | Optional admin endpoint config                                  |
+| `repos`           | `TypedRepoSyncConfigs`              | —                  | Per-repo overrides                                              |
 
 ### Dependencies (`deps`)
 
@@ -95,20 +103,23 @@ All Firebase/GCP modules are injected — the library never imports them directl
 
 ```typescript
 deps: {
-  firestoreTriggers, // firebase-functions/v2/firestore
-  pubsubHandler,     // firebase-functions/v2/pubsub
+  firestoreTriggers: { onDocumentWritten }, // firebase-functions/v2/firestore
+  pubsubHandler,                            // firebase-functions/v2/pubsub
   pubsub: new PubSub({ projectId: "my-project" }),
 }
 ```
 
 ::: tip Lazy initialization
-`deps.pubsub` and `adapter` both accept a factory function `() => T` for lazy initialization.
+`deps.pubsub` and `adapters` both accept a factory function `() => T` for lazy initialization.
 This avoids creating gRPC channels or BigQuery connections at module-load time for Cloud Functions
 that don't need them (e.g. HTTP-only functions sharing the same deploy).
 
 ```typescript
-deps: { firestoreTriggers, pubsubHandler, pubsub: () => new PubSub() },
-adapter: () => new BigQueryAdapter({ bigquery: new BigQuery(), datasetId: "sync" }),
+deps: { firestoreTriggers: { onDocumentWritten }, pubsubHandler, pubsub: () => new PubSub() },
+adapters: [
+  () => new BigQueryAdapter({ bigquery: new BigQuery(), datasetId: "sync" }),
+  () => new MeilisearchAdapter({ host: "http://localhost:7700", apiKey: "masterKey" }),
+],
 ```
 
 :::
@@ -117,9 +128,10 @@ adapter: () => new BigQueryAdapter({ bigquery: new BigQuery(), datasetId: "sync"
 
 | Option        | Type                     | Description                                                         |
 | ------------- | ------------------------ | ------------------------------------------------------------------- |
-| `tableName`   | `string`                 | SQL table name (defaults to repo name)                              |
-| `exclude`     | `string[]`               | Fields to exclude from SQL                                          |
-| `columnMap`   | `Record<string, string>` | Rename fields → SQL columns                                         |
+| `tableName`   | `string`                 | SQL table / Search index name (defaults to repo name)               |
+| `adapters`    | `string[]`               | Filter target adapters for this repo (e.g. `["bigquery"]`)          |
+| `exclude`     | `string[]`               | Fields to exclude from sync                                         |
+| `columnMap`   | `Record<string, string>` | Rename fields → SQL columns / document properties                  |
 | `triggerPath` | `string`                 | **Required for collection groups** — the full document path pattern |
 
 ### Collection Groups (`triggerPath`)
@@ -142,8 +154,7 @@ This tells Firebase where to listen for document changes since collection groups
 Pub/Sub does **not** guarantee message order, and Cloud Functions v2 deliberately
 exposes no way to enable `enableMessageOrdering` on the auto-created push subscription
 behind `onMessagePublished`. For Firestore sync this means rapid successive writes to
-the same document (e.g. `create` then `update`) could otherwise be flushed to SQL out
-of order, leaving stale data.
+the same document (e.g. `create` then `update`) could otherwise be flushed out of order, leaving stale data.
 
 The library handles this **at the application level**:
 
@@ -187,8 +198,8 @@ application-level tombstone column.
 You don't need to pre-create anything. On first deploy:
 
 - Cloud Functions v2 creates the trigger topic (`{topicPrefix}-{repoName}`) via Eventarc.
-- The worker creates the dead-letter topic (`{topicPrefix}-{repoName}-dlq`) the first
-  time a flush fails.
+- The worker creates the dead-letter topic (`{topicPrefix}-{repoName}-{adapterName}-dlq`) the first
+  time a flush fails for that adapter.
 
 ::: info Why the library doesn't pre-create subscriptions
 A previous version exposed an `ensureSyncInfra` helper that created pull subscriptions
@@ -203,18 +214,18 @@ Three knobs let you trade latency, throughput and BigQuery quota pressure:
 
 | Option            | Where            | Default | What it controls                                                            |
 | ----------------- | ---------------- | ------- | --------------------------------------------------------------------------- |
-| `batchSize`       | top-level config | `100`   | Max rows merged per BigQuery `MERGE` statement                              |
+| `batchSize`       | top-level config | `100`   | Max rows merged per flush batch                                             |
 | `flushIntervalMs` | top-level config | `5000`  | Max time a row sits in the in-memory queue before being flushed             |
 | `workerOptions`   | top-level config | —       | Cloud Functions v2 options for every worker handler (concurrency, scaling…) |
 
 ```typescript
 createServers(repos).sync({
   // ...
-  batchSize: 500, // bigger batches → fewer DML statements → less quota pressure
+  batchSize: 500, // bigger batches → fewer write requests → less quota pressure
   flushIntervalMs: 10_000, // wait longer to fill batches (higher latency, higher throughput)
   workerOptions: {
     concurrency: 5, // process up to 5 messages in parallel per instance
-    maxInstances: 1, // ⚠️ keep at 1 per repo to avoid BigQuery serialize-access errors
+    maxInstances: 1, // ⚠️ keep at 1 per repo when using SQL without CDC
     minInstances: 0, // set to 1 to avoid cold starts (costs ~$5-15/mo)
     memory: "512MiB",
     timeoutSeconds: 120,
@@ -230,20 +241,20 @@ field is accepted (`cpu`, `vpcConnector`, `serviceAccount`, `secrets`, etc.).
 
 ### Concurrency & PubSub ack semantics
 
-Each repo gets its own `SyncQueue` shared across all in-instance invocations
+Each repo and target adapter pair gets its own `SyncQueue` shared across all in-instance invocations
 (it lives in the worker's module closure). When `concurrency > 1`, several
 PubSub messages are handled in parallel **inside the same Node.js process**
-and all enqueue into the same buffer.
+and all enqueue into the appropriate buffer.
 
 `SyncQueue.flush()` coalesces concurrent callers: every parallel handler
 awaits the same in-flight write and only resolves once its event has
 actually been persisted. This is what makes `await q.flush()` at the end
-of the handler safe — PubSub only acks after BigQuery confirmed the write,
+of the handler safe — PubSub only acks after target adapters confirmed the write,
 so an instance crash before flush never loses an event.
 
 ::: tip Dead-letter & infinite retry protection
 
-`onFlushError` re-publishes failed events to `{topicPrefix}-{repoName}-dlq`
+`onFlushError` re-publishes failed events to `{topicPrefix}-{repoName}-{adapterName}-dlq`
 and re-throws if that publish itself fails — PubSub then redelivers the
 original message instead of acking. To avoid an infinite redelivery loop on
 a poison message, configure a **dead-letter policy on the PubSub
@@ -259,21 +270,36 @@ subscription** (Cloud Functions v2 / Eventarc subscription) with e.g.
 - Medium (10-100 writes/s/repo): `batchSize: 500`, `flushIntervalMs: 10_000`,
   `concurrency: 20`, `maxInstances: 3`.
 - High (> 100 writes/s/repo): `batchSize: 500–1000`, `flushIntervalMs: 10_000`,
-  `concurrency: 40`, `maxInstances: 5+` — the Storage Write API has no
+  `concurrency: 40`, `maxInstances: 5+` — the Storage Write API and Meilisearch batching have no
   per-table concurrency cap, so scale horizontally as needed.
-  :::
+:::
+
+## Multi-Adapter Fan-Out & Fault Isolation
+
+You can sync Firestore changes to multiple destinations concurrently (e.g. BigQuery for analytics and Meilisearch for full-text search) by passing an array of adapters:
+
+```typescript
+adapters: [bigQueryAdapter, meilisearchAdapter],
+repos: {
+  users: {
+    adapters: ["bigquery", "meilisearch"], // Fans out to both
+  },
+  logs: {
+    adapters: ["bigquery"], // Only sent to BigQuery
+  },
+}
+```
+
+### Complete Fault Isolation
+
+Each destination operates with its own isolated `SyncQueue` and dedicated dead-letter topic (`firestore-sync-users-meilisearch-dlq`). If Meilisearch is temporarily unreachable or experiences an outage, its failed batches are directed to its own DLQ, while BigQuery continues inserting and merging events seamlessly without delay or interruption.
 
 ## BigQuery Adapter
 
-The library ships a single BigQuery adapter that streams rows through the
-**BigQuery Storage Write API** in **CDC mode** (Change Data Capture).
-Multiple Cloud Function instances can write in parallel with no
-concurrency cap, it is ~50% cheaper than legacy streaming inserts, and
-out-of-order events are deduplicated by `_CHANGE_SEQUENCE_NUMBER` derived
-from each event's `__sync_version`.
+The BigQuery adapter streams rows through the **BigQuery Storage Write API** in **CDC mode** (Change Data Capture).
+Multiple Cloud Function instances can write in parallel with no concurrency cap, it is ~50% cheaper than legacy streaming inserts, and out-of-order events are deduplicated by `_CHANGE_SEQUENCE_NUMBER` derived from each event's `__sync_version`.
 
-The Storage Write client is an **optional peer dependency** — install it
-in your functions project:
+The Storage Write client is an **optional peer dependency** — install it in your functions project:
 
 ```bash
 npm install @google-cloud/bigquery-storage @google-cloud/bigquery
@@ -294,63 +320,67 @@ const adapter = new BigQueryAdapter({
 
 The adapter handles:
 
-- Table creation via DDL with `PRIMARY KEY ... NOT ENFORCED` and clustering
-  on the PK (required by CDC mode)
-- Streaming UPSERTs and DELETEs through the default stream (at-least-once,
-  no stream finalization needed)
+- Table creation via DDL with `PRIMARY KEY ... NOT ENFORCED` and clustering on the PK (required by CDC mode)
+- Streaming UPSERTs and DELETEs through the default stream (at-least-once, no stream finalization needed)
 - Schema introspection (for health checks)
 - Automatic column migration (`addColumns`) with type-drift detection
-- ISO 8601 strings and `Date` instances in `TIMESTAMP` columns are encoded
-  as epoch microseconds (the wire format the Storage Write API expects)
+- ISO 8601 strings and `Date` instances in `TIMESTAMP` columns are encoded as epoch microseconds (the wire format the Storage Write API expects)
 
 ### Authentication
 
 - **Production (Cloud Run / Cloud Functions)**: credentials are automatic via ADC — just pass `projectId`
 - **Local development**: run `gcloud auth application-default login`
-- The service account needs `bigquery.tables.updateData` (granted by
-  `roles/bigquery.dataEditor`)
+- The service account needs `bigquery.tables.updateData` (granted by `roles/bigquery.dataEditor`)
 
 ### About `maxStaleness`
 
-CDC writes land in BigQuery's **change buffer**; rows only become visible
-in the base table once an asynchronous **MERGE** applies the buffer.
-`max_staleness` is the SLO for that merge:
+CDC writes land in BigQuery's **change buffer**; rows only become visible in the base table once an asynchronous **MERGE** applies the buffer. `max_staleness` is the SLO for that merge:
 
-- **`INTERVAL 0`** (BigQuery's silent default if you omit the option) —
-  every `SELECT` triggers a synchronous merge of the entire buffer before
-  returning results. Cheap-looking, but it makes reads slow and expensive
-  on busy tables and defeats the point of CDC.
-- **`INTERVAL N MINUTE`** — BigQuery runs the MERGE in the background at
-  most every N minutes (free, doesn't block reads). Reads against the
-  table see data up to N minutes stale. The library defaults to
-  **15 minutes** — a good production tradeoff between cost and freshness.
-- For development you can set `INTERVAL 1 MINUTE` if you need to see your
-  writes quickly in the BigQuery UI.
+- **`INTERVAL 0`** (BigQuery's silent default if you omit the option) — every `SELECT` triggers a synchronous merge of the entire buffer before returning results. Cheap-looking, but it makes reads slow and expensive on busy tables and defeats the point of CDC.
+- **`INTERVAL N MINUTE`** — BigQuery runs the MERGE in the background at most every N minutes (free, doesn't block reads). Reads against the table see data up to N minutes stale. The library defaults to **15 minutes** — a good production tradeoff between cost and freshness.
+- For development you can set `INTERVAL 1 MINUTE` if you need to see your writes quickly in the BigQuery UI.
 
-### Migrating tables created by older versions of this library
+## Meilisearch Adapter
 
-Tables originally created by the legacy MERGE-based adapter (≤ 2.3.x) do
-not have a PK constraint. Before deploying, run once per table:
+The Meilisearch adapter streams Firestore documents into [Meilisearch](https://www.meilisearch.com/) indexes for fast, typo-tolerant full-text search.
 
-```sql
-ALTER TABLE `dataset.posts`
-  ADD PRIMARY KEY (post_id) NOT ENFORCED,
-  SET OPTIONS (max_staleness = INTERVAL 15 MINUTE);
+The `meilisearch` JavaScript SDK is an **optional peer dependency**:
+
+```bash
+npm install meilisearch
 ```
 
-(Clustering can only be set at table creation; if your table is not
-clustered on the PK, recreate it with `CREATE TABLE … AS SELECT …` or
-accept the read-time penalty — Storage Write CDC still works.)
+```typescript
+import { MeilisearchAdapter } from "@lpdjs/firestore-repo-service/sync/meilisearch";
+
+const meilisearchAdapter = new MeilisearchAdapter({
+  host: "http://localhost:7700",
+  apiKey: "masterKey",
+  indexesSettings: {
+    users: {
+      searchableAttributes: ["name", "email", "bio"],
+      filterableAttributes: ["role", "status", "createdAt"],
+      sortableAttributes: ["createdAt", "name"],
+    },
+    posts: {
+      searchableAttributes: ["title", "content"],
+      filterableAttributes: ["status", "userId"],
+    },
+  },
+});
+```
+
+The adapter handles:
+- Automatic index creation on first event with primary key configuration.
+- Syncing index settings (`indexesSettings`) like searchable, filterable, and sortable attributes.
+- High-throughput document batching (`addDocuments`) and document deletions (`deleteDocuments`).
+- Index statistics and health inspection via `/health` and `/config-check`.
 
 ## Schema Evolution
 
-`autoMigrate` adds columns when your Zod schema gains fields. It **never**
-changes the type of an existing column — BigQuery itself only allows narrow
-widenings (`INT64 → NUMERIC → BIGNUMERIC`, `DATE → DATETIME → TIMESTAMP`),
-and a wrong implicit conversion would silently corrupt data.
+`autoMigrate` adds columns when your Zod schema gains fields. It **never** changes the type of an existing column — BigQuery itself only allows narrow widenings (`INT64 → NUMERIC → BIGNUMERIC`, `DATE → DATETIME → TIMESTAMP`), and a wrong implicit conversion would silently corrupt data.
 
-Starting with v2.3.x the worker therefore detects type drift and throws
-`SchemaTypeMismatchError` on the first event:
+Starting with v2.3.x the worker detects type drift and throws `SchemaTypeMismatchError` on the first event:
 
 ```
 Schema drift detected on `posts`: column `view_count` has type STRING in
@@ -361,23 +391,13 @@ BigQuery type and add a transform in your repo to coerce values,
 (c) drop & recreate the table.
 ```
 
-This is a **fail-fast** by design: the alternative is every flush failing
-with a cryptic cast error, the dead-letter queue filling up, and PubSub
-retrying forever.
-
 ### Recommended workflow
 
-Treat Firestore document schemas as **append-only**. When you must change
-the type of a field:
+Treat Firestore document schemas as **append-only**. When you must change the type of a field:
 
-1. **Rename the field in Zod** (`view_count` → `view_count_v2`). The next
-   migration adds the new column; old rows keep `NULL` until backfilled.
+1. **Rename the field in Zod** (`view_count` → `view_count_v2`). The next migration adds the new column; old rows keep `NULL` until backfilled.
 2. **Backfill** with a one-off SQL job: `UPDATE … SET view_count_v2 = CAST(view_count AS INT64)`.
 3. **Drop the old column** once writes have moved over.
-
-If you really need to mutate a column in-place, do it manually before
-deploying the new code (`ALTER TABLE x ALTER COLUMN y SET DATA TYPE …` —
-allowed only for the widenings BigQuery accepts).
 
 ## Sync Admin
 
@@ -387,9 +407,9 @@ The optional admin endpoint provides a web UI for monitoring and managing the sy
 
 | Feature          | Flag          | Description                                                           |
 | ---------------- | ------------- | --------------------------------------------------------------------- |
-| **Health Check** | `healthCheck` | Compare expected schema (from Zod) vs actual SQL columns              |
-| **Force Sync**   | `manualSync`  | Re-sync all documents from a Firestore collection                     |
-| **Config Check** | `configCheck` | Verify GCP APIs, topics, tables, and IAM — with `gcloud` fix commands |
+| **Health Check** | `healthCheck` | Compare expected schema vs actual SQL columns & Search index stats    |
+| **Force Sync**   | `manualSync`  | Re-sync all documents from a Firestore collection to all targets      |
+| **Config Check** | `configCheck` | Verify GCP APIs, Meilisearch, topics, tables, and IAM permissions     |
 
 ### Configuration
 
@@ -410,105 +430,19 @@ admin: {
 }
 ```
 
-### Authentication
-
-Same as the Admin Server — supports HTTP Basic Auth, a Firebase `AuthExtension`,
-or a custom middleware function:
-
-```typescript
-// Custom middleware
-admin: {
-  auth: async (req, res, next) => {
-    const token = req.headers["x-api-key"];
-    if (token !== process.env.API_KEY) {
-      res.status(401).send("Unauthorized");
-      return;
-    }
-    next();
-  },
-}
-```
-
-#### Firebase Auth (unified with admin UI)
-
-The `auth` field also accepts the `AuthExtension` returned by
-`firebaseAuth({ ... })` — the same one used by `servers.admin()`.
-The inline login page, session cookies and `allow()`
-callback work identically:
-
-```typescript
-import { firebaseAuth } from "@lpdjs/firestore-repo-service/servers/auth";
-import { getAuth } from "firebase-admin/auth";
-
-admin: {
-  auth: firebaseAuth({
-    getAuth: () => getAuth(),
-    mode: "cookie",
-    apiKey: process.env.FIREBASE_WEB_API_KEY!,
-    authDomain: process.env.FIREBASE_AUTH_DOMAIN!,
-    allow: ({ claims }) =>
-      claims.role === "superAdmin" ? { role: "superAdmin" } : null,
-  }),
-  featuresFlag: { healthCheck: true, configCheck: true },
-}
-```
-
 ### Config Check
 
-The `/config-check` endpoint verifies your GCP setup:
+The `/config-check` endpoint verifies your GCP and Search engine setup:
 
-- **BigQuery API** — is it enabled and accessible?
-- **BigQuery tables** — does each repo table exist?
+- **BigQuery API & Tables** — is it reachable and do the repo tables exist?
+- **Meilisearch API & Indexes** — is the server reachable and are indexes initialized?
 - **Pub/Sub topics** — does each `{topicPrefix}-{repoName}` topic exist?
 
-For each issue, it shows:
-
-- A `gcloud` command to fix it
-- A direct link to the GCP Console
-
-Supports `Accept: application/json` for programmatic use.
-
-### Deploying the Admin
-
-The admin handler is auto-wrapped when `onRequest` is provided in the config.
-Pass `httpsOptions` to configure the Cloud Function (invoker, memory, region, etc.):
-
-```typescript
-admin: {
-  onRequest,
-  httpsOptions: { invoker: "public", memory: "512MiB" },
-  auth: { type: "basic", username: "admin", password: "secret" },
-  featuresFlag: { healthCheck: true, configCheck: true },
-}
-```
-
-The handler is then available in `sync.functions.adminsync` — already wrapped as a Cloud Function.
-
-If you omit `onRequest`, the raw handler is exposed and you wrap it manually:
-
-```typescript
-import { onRequest } from "firebase-functions/v2/https";
-
-export const adminsync = onRequest({ invoker: "public" }, sync.adminHandler!);
-```
+For each issue, it shows a `gcloud` command or hint to fix it.
 
 ### Force Sync
 
-Triggered from the admin dashboard or via `POST /force-sync/{repo}` (HTML or
-`Accept: application/json`). It re-reads every document of a Firestore collection and
-republishes it through the sync pipeline.
-
-The response includes:
-
-| Field          | Description                                         |
-| -------------- | --------------------------------------------------- |
-| `processed`    | Total documents read from Firestore                 |
-| `published`    | Successful Pub/Sub publishes                        |
-| `errors`       | Number of documents that failed to publish          |
-| `errorSamples` | First 5 errors (`{ docId, message }`) for diagnosis |
-
-Errors are also logged via `console.error('[ForceSync:{repo}] doc={docId} failed:', e)`
-so they appear in Cloud Logging.
+Triggered from the admin dashboard or via `POST /force-sync/{repo}` (HTML or `Accept: application/json`). It re-reads every document of a Firestore collection and pushes it through all active target adapters for that repository.
 
 ## Generated Functions
 
@@ -516,10 +450,8 @@ so they appear in Cloud Logging.
 
 | Function          | Type              | Purpose                               |
 | ----------------- | ----------------- | ------------------------------------- |
-| `{repo}_onCreate` | Firestore trigger | Publish UPSERT on document create     |
-| `{repo}_onUpdate` | Firestore trigger | Publish UPSERT on document update     |
-| `{repo}_onDelete` | Firestore trigger | Publish DELETE on document delete     |
-| `sync_{repo}`     | PubSub handler    | Process messages and flush to SQL     |
+| `{repo}_onSync`   | Firestore trigger | Single `onDocumentWritten` trigger    |
+| `sync_{repo}`     | PubSub handler    | Process messages and flush to targets |
 | `adminsync`       | HTTP handler      | Admin UI (if `admin` config provided) |
 
 ## Schema Mapping
@@ -537,12 +469,7 @@ Zod schemas are automatically mapped to SQL types:
 
 ## Date Handling (`setDateHandling`)
 
-Firestore returns dates as `Timestamp` objects. By default the library leaves them as
-`Timestamp` (mode `"preserve"`), which keeps full nanosecond precision but means
-consumers must call `.toDate()` themselves and Zod `z.date()` schemas will reject them.
-
-Switch to `"normalize"` once at app startup to convert every `Timestamp` (including
-nested ones inside objects/arrays) to a JavaScript `Date` on read:
+Firestore returns dates as `Timestamp` objects. Switch to `"normalize"` once at app startup to convert every `Timestamp` to a JavaScript `Date` on read:
 
 ```typescript
 import { setDateHandling } from "@lpdjs/firestore-repo-service";
@@ -550,67 +477,59 @@ import { setDateHandling } from "@lpdjs/firestore-repo-service";
 setDateHandling("normalize");
 ```
 
-| Mode          | Behavior                                                        |
-| ------------- | --------------------------------------------------------------- |
-| `"preserve"`  | (default) Firestore `Timestamp` instances are returned as-is    |
-| `"normalize"` | Recursively convert `Timestamp` → `Date` on every document read |
+## Custom Sync Adapter
 
-This is recommended when using the BigQuery sync (Zod `z.date()` → `TIMESTAMP`) so the
-schema validation and SQL serialization both see proper `Date` instances.
-
-Helpers `coerceToDate(value)` and `normalizeTimestamps(value)` are also exported for
-manual conversion (e.g. inside custom mappers).
-
-## Custom SQL Adapter
-
-Implement the `SqlAdapter` interface for other databases:
+Implement the universal `SyncAdapter` interface for other storage or search engines:
 
 ```typescript
-import type {
-  SqlAdapter,
-  SqlDialect,
-  SqlColumn,
-  SqlTableDef,
-} from "@lpdjs/firestore-repo-service/sync";
+import type { SyncAdapter, SyncHealthResult } from "@lpdjs/firestore-repo-service/sync";
 
-class MyAdapter implements SqlAdapter {
-  get dialect(): SqlDialect {
-    /* ... */
+class MyCustomAdapter implements SyncAdapter {
+  readonly name = "elasticsearch"; // Identifier used in repoConfigs.adapters
+
+  async targetExists(targetName: string): Promise<boolean> {
+    // Check if index/table exists
+    return true;
   }
-  async tableExists(tableName: string): Promise<boolean> {
-    /* ... */
-  }
-  async getTableColumns(tableName: string): Promise<string[]> {
-    /* ... */
-  }
-  async createTable(table: SqlTableDef): Promise<void> {
-    /* ... */
-  }
-  async addColumns(tableName: string, columns: SqlColumn[]): Promise<void> {
-    /* ... */
-  }
-  async insertRows(
-    tableName: string,
-    rows: Record<string, unknown>[],
-  ): Promise<void> {
-    /* ... */
-  }
-  async upsertRows(
-    tableName: string,
-    rows: Record<string, unknown>[],
+
+  async upsert(
+    targetName: string,
+    items: Record<string, unknown>[],
     primaryKey: string,
   ): Promise<void> {
-    /* ... */
+    // Bulk upsert documents
   }
-  async deleteRows(
-    tableName: string,
+
+  async delete(
+    targetName: string,
     primaryKey: string,
     ids: string[],
   ): Promise<void> {
-    /* ... */
+    // Bulk delete documents by IDs
   }
-  async executeRaw(sql: string): Promise<void> {
-    /* ... */
+
+  async ensureTarget(options: {
+    targetName: string;
+    primaryKey: string;
+    schema?: any;
+    exclude?: string[];
+    columnMap?: Record<string, string>;
+  }): Promise<void> {
+    // Auto-create table/index if not exists
+  }
+
+  async healthCheck(options: {
+    targetName: string;
+    primaryKey: string;
+    schema?: any;
+    repoConfig?: any;
+  }): Promise<SyncHealthResult> {
+    return {
+      healthy: true,
+      targetName: options.targetName,
+      targetExists: true,
+      error: null,
+    };
   }
 }
 ```

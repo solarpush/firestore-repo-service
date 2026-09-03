@@ -59,18 +59,32 @@ export type {
   RouteHandler,
 } from "./admin/index";
 
-// ── CRUD API (types only — use `createServers().crud()` to build) ───────────
+// ── CRUD API (types and rules — use `createServers().crud()` to build) ───────────
+export {
+  applyRules,
+  computeDeepDiff,
+  createBeforeRules,
+  createRules,
+} from "./crud/index";
 export type {
   ApiResponse,
   CrudRepoConfig,
   CrudRepoEntry,
   CrudRepoRegistry,
+  CrudRules,
   CrudServerOptions,
+  CrudUpdateRuleContext,
+  DeepDiffReturn,
   FieldRole,
+  IndexErrorCallback,
+  IndexErrorContext,
   ListResponseData,
   QueryRequestBody,
   RepoFieldPath,
   RepoRelationKeys,
+  Rule,
+  RuleResult,
+  RulesMap,
   UserFieldPath,
 } from "./crud/index";
 

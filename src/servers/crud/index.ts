@@ -100,7 +100,8 @@ export function createCrudServer<
     registry[name] = entry;
   }
 
-  const handlers = createCrudHandlers(registry, base, verbose);
+  const indexesErrorCb = options.indexesError ?? options.onIndexError;
+  const handlers = createCrudHandlers(registry, base, verbose, indexesErrorCb);
 
   const openapi = options.openapi;
   const openapiOpts = openapi && typeof openapi === "object" ? openapi : {};
@@ -234,16 +235,30 @@ export function createCrudServer<
 
 export { generateOpenAPISpec } from "./openapi";
 export type { OpenAPIDocument, OpenAPISpecOptions } from "./openapi";
+export {
+  applyRules,
+  computeDeepDiff,
+  createBeforeRules,
+  createRules,
+} from "./rules";
 export type {
   ApiResponse,
   CrudRepoConfig,
   CrudRepoEntry,
   CrudRepoRegistry,
+  CrudRules,
   CrudServerOptions,
+  CrudUpdateRuleContext,
+  DeepDiffReturn,
   FieldRole,
+  IndexErrorCallback,
+  IndexErrorContext,
   ListResponseData,
   QueryRequestBody,
   RepoFieldPath,
   RepoRelationKeys,
+  Rule,
+  RuleResult,
+  RulesMap,
   UserFieldPath,
 } from "./types";

@@ -264,6 +264,47 @@ export interface CrudRepoConfig<
   rules?: CrudRules<TRepo>;
 }
 
+/** Return type of a diff computation comparing before and after states. */
+export interface DeepDiffReturn<T> {
+  /** Complete state before modification */
+  before: T;
+  /** Projected state after applying changes */
+  after: T;
+  /** Subset of keys whose value actually changed */
+  changes: Partial<T>;
+}
+
+/**
+ * Result returned by an authorization or before-rule.
+ * - `boolean`: `true` allows the operation, `false` rejects with HTTP 403 "Forbidden".
+ * - `string`: rejects with HTTP 403 and the given error reason.
+ * - `{ allowed: boolean; reason?: string }`: `allowed === true` permits, `allowed === false` rejects with HTTP 403 and `reason`.
+ */
+export type RuleResult =
+  | boolean
+  | string
+  | { allowed: boolean; reason?: string }
+  | void;
+
+/**
+ * A business rule attached to a specific field of model `T`.
+ */
+export interface Rule<T> {
+  description: string;
+  rule: (args: {
+    diff: DeepDiffReturn<T>;
+    key: keyof T;
+    user?: import("../auth").AuthUser;
+    /** Alias for `user` for backwards compatibility with legacy rules */
+    authenticatedUser?: import("../auth").AuthUser;
+  }) => boolean | void | Promise<boolean | void>;
+}
+
+/**
+ * Map of rules per field for model `T`.
+ */
+export type RulesMap<T> = Partial<Record<keyof T, Rule<T>[]>>;
+
 /** Context passed to {@link CrudRules.list}. */
 export interface CrudListRuleContext {
   user: import("../auth").AuthUser;
@@ -291,6 +332,8 @@ export interface CrudUpdateRuleContext<T = Record<string, unknown>> {
   doc: T;
   body: Partial<T>;
   params: Record<string, string>;
+  /** Computed diff between existing document (before) and submitted changes (after) */
+  diff: DeepDiffReturn<T>;
 }
 
 /** Context passed to {@link CrudRules.delete}. */
@@ -314,19 +357,19 @@ export interface CrudFilterRuleContext<T = Record<string, unknown>> {
 export interface CrudRules<
   TRepo extends ConfiguredRepository<any> = ConfiguredRepository<any>,
 > {
-  list?: (ctx: CrudListRuleContext) => boolean | Promise<boolean>;
+  list?: (ctx: CrudListRuleContext) => RuleResult | Promise<RuleResult>;
   get?: (
     ctx: CrudGetRuleContext<RepoModelType<TRepo>>,
-  ) => boolean | Promise<boolean>;
+  ) => RuleResult | Promise<RuleResult>;
   create?: (
     ctx: CrudCreateRuleContext<RepoModelType<TRepo>>,
-  ) => boolean | Promise<boolean>;
+  ) => RuleResult | Promise<RuleResult>;
   update?: (
     ctx: CrudUpdateRuleContext<RepoModelType<TRepo>>,
-  ) => boolean | Promise<boolean>;
+  ) => RuleResult | Promise<RuleResult>;
   delete?: (
     ctx: CrudDeleteRuleContext<RepoModelType<TRepo>>,
-  ) => boolean | Promise<boolean>;
+  ) => RuleResult | Promise<RuleResult>;
   /** Row-level filter applied to every doc returned by `list` / `query` / `get`. */
   filter?: (
     ctx: CrudFilterRuleContext<RepoModelType<TRepo>>,
@@ -454,7 +497,58 @@ export interface CrudServerOptions<
    * ```
    */
   httpsOptions?: HttpsOptions;
+
+  /**
+   * Callback invoked whenever a missing Firestore composite index error is detected.
+   * Useful for logging or writing the missing index URL into a Firestore collection for alerting / auto-provisioning.
+   *
+   * @example
+   * ```ts
+   * createCrudServer({
+   *   indexesError: async ({ indexUrl, repoName, path }) => {
+   *     await db.collection("missing_indexes").add({ indexUrl, repoName, path, createdAt: new Date() });
+   *   },
+   *   repos: { ... },
+   * })
+   * ```
+   */
+  indexesError?: IndexErrorCallback;
+
+  /**
+   * Alias for {@link indexesError}.
+   */
+  onIndexError?: IndexErrorCallback;
 }
+
+/**
+ * Context provided to the `indexesError` callback when a Firestore query fails due to a missing composite index.
+ */
+export interface IndexErrorContext {
+  /** The generated or extracted Firebase Console URL to create the required index */
+  indexUrl: string;
+  /** Name of the repository where the index error occurred */
+  repoName: string;
+  /** Firestore collection path */
+  path: string;
+  /** Whether the query was on a collection-group */
+  isGroup: boolean;
+  /** Active query filters when the error occurred */
+  filters: import("../admin/components/types").FilterState[];
+  /** Active sort / orderBy when the error occurred */
+  sort?: import("../admin/components/types").SortState;
+  /** Original raw error object thrown by Firestore */
+  error: unknown;
+  /** Hono Context (provides access to req, headers, auth user, etc.) */
+  c?: any;
+}
+
+/**
+ * Callback invoked when a missing Firestore index error occurs.
+ * Can be asynchronous (e.g. to write the index link into a Firestore collection).
+ */
+export type IndexErrorCallback = (
+  ctx: IndexErrorContext,
+) => void | Promise<void>;
 
 // ---------------------------------------------------------------------------
 // Response types

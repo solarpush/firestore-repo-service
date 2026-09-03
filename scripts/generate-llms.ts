@@ -166,8 +166,11 @@ const ENTRY_POINT_DESCRIPTIONS: Record<string, string> = {
     "firebaseAuth: login page + session cookie guard for the admin/crud UIs.",
   "./servers/hono":
     "Hono file-based API server: useCaseRoute, createApiRegistry, BaseErrorHandler, BaseLogger, firebaseDocsAuth, and the `frs` CLI.",
-  "./sync": "Firestore → SQL sync pipeline (triggers + worker + admin).",
-  "./sync/bigquery": "BigQuery adapter for the sync pipeline.",
+  "./sync":
+    "Firestore → Storage & Search sync pipeline (triggers + worker + admin).",
+  "./sync/bigquery": "BigQuery CDC adapter for the sync pipeline.",
+  "./sync/meilisearch":
+    "Meilisearch adapter for full-text search sync pipeline.",
   "./history": "Change-history triggers and read API (createHistoryTriggers).",
 };
 

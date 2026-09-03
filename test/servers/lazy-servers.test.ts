@@ -87,24 +87,18 @@ describe("lazy servers — no Firestore resolution at definition time", () => {
     const triggers = createSyncTriggers(repos as any, {
       deps: {
         firestoreTriggers: {
-          onDocumentCreated: mkTrigger,
-          onDocumentUpdated: mkTrigger,
-          onDocumentDeleted: mkTrigger,
+          onDocumentWritten: mkTrigger,
         },
         pubsub: { topic: () => ({ publishMessage: async () => {} }) },
       } as any,
     });
 
-    // 3 triggers (create/update/delete) at the config-derived path.
+    // 1 trigger (onDocumentWritten) at the config-derived path.
     expect(registered.map((r) => r.path)).toEqual([
-      "residences/{docId}",
-      "residences/{docId}",
       "residences/{docId}",
     ]);
     expect(Object.keys(triggers).sort()).toEqual([
-      "residences_onCreate",
-      "residences_onDelete",
-      "residences_onUpdate",
+      "residences_onSync",
     ]);
   });
 });

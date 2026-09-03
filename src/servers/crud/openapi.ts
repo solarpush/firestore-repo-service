@@ -738,6 +738,7 @@ function buildPathsForEntry(
       responses: {
         "201": successResponse("Document created", schemaRef(modelSchemaName)),
         "400": errorResponse("Validation error"),
+        "403": errorResponse("Forbidden"),
         "500": errorResponse("Internal server error"),
       },
     },
@@ -760,6 +761,8 @@ function buildPathsForEntry(
       responses: {
         "200": listResponse(schemaRef(modelSchemaName)),
         "400": errorResponse("Invalid query"),
+        "403": errorResponse("Forbidden"),
+        "424": errorResponse("Missing composite index (includes indexUrl in response)"),
         "500": errorResponse("Internal server error"),
       },
     },
@@ -814,7 +817,10 @@ function buildPathsForEntry(
     parameters: [idParam],
     responses: {
       "200": successResponse("Document found", schemaRef(modelSchemaName)),
+      "400": errorResponse("Document ID required"),
+      "403": errorResponse("Forbidden"),
       "404": errorResponse("Document not found"),
+      "424": errorResponse("Missing composite index (includes indexUrl in response)"),
       "500": errorResponse("Internal server error"),
     },
   };
@@ -836,6 +842,7 @@ function buildPathsForEntry(
     responses: {
       "200": successResponse("Document updated", schemaRef(modelSchemaName)),
       "400": errorResponse("Validation error"),
+      "403": errorResponse("Forbidden"),
       "404": errorResponse("Document not found"),
       "500": errorResponse("Internal server error"),
     },
@@ -861,6 +868,7 @@ function buildPathsForEntry(
     responses: {
       "200": successResponse("Document patched", schemaRef(modelSchemaName)),
       "400": errorResponse("Validation error"),
+      "403": errorResponse("Forbidden"),
       "404": errorResponse("Document not found"),
       "500": errorResponse("Internal server error"),
     },
@@ -878,6 +886,8 @@ function buildPathsForEntry(
           type: "object",
           properties: { id: { type: "string" } },
         }),
+        "400": errorResponse("Document ID required"),
+        "403": errorResponse("Forbidden"),
         "404": errorResponse("Document not found"),
         "500": errorResponse("Internal server error"),
       },
@@ -940,7 +950,17 @@ export function generateOpenAPISpec(
     type: "object",
     properties: {
       success: { type: "boolean", enum: [false] },
-      error: { type: "string" },
+      error: { type: "string", description: "Human-readable error description" },
+      errorType: {
+        type: "string",
+        enum: ["index"],
+        description: "Error category discriminator. Set to 'index' when a Firestore composite index is missing.",
+      },
+      indexUrl: {
+        type: "string",
+        format: "uri",
+        description: "Direct Firebase Console URL to create the required composite index (when errorType is 'index').",
+      },
     },
     required: ["success", "error"],
   };

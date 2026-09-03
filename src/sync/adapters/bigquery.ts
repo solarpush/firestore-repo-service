@@ -41,15 +41,22 @@
  */
 
 import type { BigQuery } from "@google-cloud/bigquery";
+import type { z } from "zod";
 import { SYNC_VERSION_COLUMN } from "../constants";
+import { zodSchemaToColumns } from "../schema-mapper";
 import type {
   LogicalType,
+  RepoSyncConfig,
   SqlAdapter,
   SqlColumn,
   SqlDialect,
   SqlTableDef,
+  SyncHealthResult,
 } from "../types";
-import { normalizeBigQueryType } from "./bigquery-types";
+import {
+  isBigQueryTypeCompatible,
+  normalizeBigQueryType,
+} from "./bigquery-types";
 
 // ---------------------------------------------------------------------------
 // Dialect
@@ -261,11 +268,32 @@ export interface BigQueryAdapterOptions {
   maxStaleness?: string | null;
 }
 
+export class SchemaTypeMismatchError extends Error {
+  constructor(
+    readonly tableName: string,
+    readonly column: string,
+    readonly existingType: string,
+    readonly desiredType: string,
+  ) {
+    super(
+      `Schema drift detected on \`${tableName}\`: column \`${column}\` has ` +
+        `type ${existingType} in BigQuery but the current Zod schema maps ` +
+        `it to ${desiredType}. BigQuery cannot safely convert between these ` +
+        `types — to resolve, either (a) keep the BigQuery type and add a ` +
+        `transform in your repo to coerce values, (b) rename the field in ` +
+        `your Zod schema (creates a new column), or (c) drop & recreate ` +
+        `the table.`,
+    );
+    this.name = "SchemaTypeMismatchError";
+  }
+}
+
 /**
  * BigQuery implementation of {@link SqlAdapter} using the Storage Write API
  * in CDC mode. See module-level docstring for the rationale.
  */
 export class BigQueryAdapter implements SqlAdapter {
+  readonly name = "bigquery";
   private readonly bigquery: BigQueryLike;
   private readonly projectId: string;
   private readonly datasetId: string;
@@ -290,6 +318,138 @@ export class BigQueryAdapter implements SqlAdapter {
 
   get dialect(): SqlDialect {
     return bigqueryDialect;
+  }
+
+  // -------- SyncAdapter implementation ------------------------------------
+
+  async targetExists(targetName: string): Promise<boolean> {
+    return this.tableExists(targetName);
+  }
+
+  async upsert(
+    targetName: string,
+    items: Record<string, unknown>[],
+    primaryKey: string,
+  ): Promise<void> {
+    return this.upsertRows(targetName, items, primaryKey);
+  }
+
+  async delete(
+    targetName: string,
+    primaryKey: string,
+    ids: string[],
+  ): Promise<void> {
+    return this.deleteRows(targetName, primaryKey, ids);
+  }
+
+  async ensureTarget(options: {
+    targetName: string;
+    primaryKey: string;
+    schema?: z.ZodObject<any>;
+    exclude?: string[];
+    columnMap?: Record<string, string>;
+  }): Promise<void> {
+    if (!options.schema) return;
+    const { targetName, primaryKey, schema, exclude, columnMap } = options;
+    const columns = zodSchemaToColumns(schema, this.dialect, {
+      primaryKey,
+      exclude,
+      columnMap,
+    });
+    const exists = await this.tableExists(targetName);
+    if (!exists) {
+      await this.createTable({ tableName: targetName, columns });
+    } else {
+      const existing = await this.getTableColumnsWithTypes(targetName);
+      const missing: typeof columns = [];
+      for (const col of columns) {
+        const existingType = existing.get(col.name);
+        if (existingType === undefined) {
+          missing.push(col);
+          continue;
+        }
+        if (!isBigQueryTypeCompatible(existingType, col.sqlType)) {
+          throw new SchemaTypeMismatchError(
+            targetName,
+            col.name,
+            existingType,
+            col.sqlType,
+          );
+        }
+      }
+      if (missing.length > 0) {
+        await this.addColumns(targetName, missing);
+        await this.onSchemaChange?.(targetName);
+      }
+    }
+  }
+
+  async healthCheck(options: {
+    targetName: string;
+    primaryKey: string;
+    schema?: z.ZodObject<any>;
+    repoConfig?: RepoSyncConfig<string>;
+  }): Promise<SyncHealthResult> {
+    const { targetName, primaryKey, schema, repoConfig } = options;
+    if (!schema) {
+      return {
+        healthy: false,
+        targetName,
+        targetExists: false,
+        error: "No Zod schema attached to repository",
+      };
+    }
+    try {
+      const exists = await this.tableExists(targetName);
+      if (!exists) {
+        return {
+          healthy: false,
+          targetName,
+          targetExists: false,
+          error: `Table \`${targetName}\` does not exist`,
+        };
+      }
+      const actualCols = await this.getTableColumns(targetName);
+      const expectedCols = zodSchemaToColumns(schema, this.dialect, {
+        primaryKey,
+        exclude: repoConfig?.exclude,
+        columnMap: repoConfig?.columnMap as Record<string, string> | undefined,
+      });
+      const actualSet = new Set(actualCols);
+      const expectedSet = new Set(expectedCols.map((c) => c.name));
+      const missing = expectedCols.filter((c) => !actualSet.has(c.name));
+      const extra = actualCols.filter((c) => !expectedSet.has(c));
+      const matched = expectedCols.filter((c) => actualSet.has(c.name));
+      const healthy = missing.length === 0;
+
+      return {
+        healthy,
+        targetName,
+        targetExists: true,
+        error: healthy
+          ? null
+          : `Missing columns: ${missing.map((c) => c.name).join(", ")}`,
+        details: {
+          expected: expectedCols.map((c) => ({
+            name: c.name,
+            type: c.sqlType,
+            nullable: c.nullable,
+            isPrimaryKey: c.isPrimaryKey,
+          })),
+          actual: actualCols,
+          matched: matched.map((c) => c.name),
+          missing: missing.map((c) => ({ name: c.name, type: c.sqlType })),
+          extra,
+        },
+      };
+    } catch (e: any) {
+      return {
+        healthy: false,
+        targetName,
+        targetExists: false,
+        error: e?.message ?? String(e),
+      };
+    }
   }
 
   // -------- DDL (delegated to @google-cloud/bigquery) ----------------------

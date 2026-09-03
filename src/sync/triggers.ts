@@ -96,8 +96,7 @@ export function createSyncTriggers<M extends Record<string, any>>(
   repoMapping: M,
   config: SyncTriggersConfig<NoInfer<M>>,
 ): Record<string, any> {
-  const { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } =
-    config.deps.firestoreTriggers;
+  const { onDocumentWritten } = config.deps.firestoreTriggers;
   const pubsub = config.deps.pubsub;
 
   const topicPrefix = config?.topicPrefix ?? DEFAULT_TOPIC_PREFIX;
@@ -163,81 +162,75 @@ export function createSyncTriggers<M extends Record<string, any>>(
     const documentKey: string = meta.documentKey;
     const topicName = `${topicPrefix}-${repoName}`;
 
-    triggers[`${repoName}_onCreate`] = onDocumentCreated(
+    triggers[`${repoName}_onSync`] = onDocumentWritten(
       documentPath,
       async (event: any) => {
-        const snap = event.data;
-        if (!snap) return;
+        const before = event.data?.before;
+        const after = event.data?.after;
 
-        const data = snap.data() as Record<string, unknown> | undefined;
-        if (!data) return;
+        if (!before && !after) return;
 
-        const docId = String(data[documentKey] ?? snap.id);
-        const serialized = serializeDocument(data, {
-          exclude: repoCfg?.exclude,
-          columnMap: repoCfg?.columnMap,
-        });
+        const beforeExists = !!before?.exists;
+        const afterExists = !!after?.exists;
 
-        const syncEvent: SyncEvent = {
-          operation: "INSERT",
-          repoName,
-          docId,
-          data: serialized,
-          timestamp: new Date().toISOString(),
-          version: Date.now(),
-        };
+        if (!beforeExists && afterExists) {
+          // CREATE -> INSERT
+          const data = after.data() as Record<string, unknown> | undefined;
+          if (!data) return;
 
-        await publish(topicName, syncEvent);
-      },
-    );
+          const docId = String(data[documentKey] ?? after.id);
+          const serialized = serializeDocument(data, {
+            exclude: repoCfg?.exclude,
+            columnMap: repoCfg?.columnMap,
+          });
 
-    triggers[`${repoName}_onUpdate`] = onDocumentUpdated(
-      documentPath,
-      async (event: any) => {
-        const snap = event.data?.after;
-        if (!snap) return;
+          const syncEvent: SyncEvent = {
+            operation: "INSERT",
+            repoName,
+            docId,
+            data: serialized,
+            timestamp: new Date().toISOString(),
+            version: Date.now(),
+          };
 
-        const data = snap.data() as Record<string, unknown> | undefined;
-        if (!data) return;
+          await publish(topicName, syncEvent);
+        } else if (beforeExists && afterExists) {
+          // UPDATE -> UPSERT
+          const data = after.data() as Record<string, unknown> | undefined;
+          if (!data) return;
 
-        const docId = String(data[documentKey] ?? snap.id);
-        const serialized = serializeDocument(data, {
-          exclude: repoCfg?.exclude,
-          columnMap: repoCfg?.columnMap,
-        });
+          const docId = String(data[documentKey] ?? after.id);
+          const serialized = serializeDocument(data, {
+            exclude: repoCfg?.exclude,
+            columnMap: repoCfg?.columnMap,
+          });
 
-        const syncEvent: SyncEvent = {
-          operation: "UPSERT",
-          repoName,
-          docId,
-          data: serialized,
-          timestamp: new Date().toISOString(),
-          version: Date.now(),
-        };
+          const syncEvent: SyncEvent = {
+            operation: "UPSERT",
+            repoName,
+            docId,
+            data: serialized,
+            timestamp: new Date().toISOString(),
+            version: Date.now(),
+          };
 
-        await publish(topicName, syncEvent);
-      },
-    );
+          await publish(topicName, syncEvent);
+        } else if (beforeExists && !afterExists) {
+          // DELETE
+          const data = before.data() as Record<string, unknown> | undefined;
+          const docId = String(data?.[documentKey] ?? before.id);
 
-    triggers[`${repoName}_onDelete`] = onDocumentDeleted(
-      documentPath,
-      async (event: any) => {
-        const snap = event.data;
-        if (!snap) return;
+          const syncEvent: SyncEvent = {
+            operation: "DELETE",
+            repoName,
+            docId,
+            data: null,
+            timestamp: new Date().toISOString(),
+            version: Date.now(),
+          };
 
-        const data = snap.data() as Record<string, unknown> | undefined;
-        const docId = String(data?.[documentKey] ?? snap.id);
-
-        const syncEvent: SyncEvent = {
-          operation: "DELETE",
-          repoName,
-          docId,
-          data: null,
-          timestamp: new Date().toISOString(),
-          version: Date.now(),
-        };
-
-        await publish(topicName, syncEvent);
+          await publish(topicName, syncEvent);
+        }
       },
     );
   }

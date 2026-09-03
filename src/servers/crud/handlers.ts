@@ -19,12 +19,15 @@ import {
 } from "../../shared/date-config";
 import { getArrayElementType } from "../../shared/zod-compat";
 import { toQueryError, type QueryErrorContext } from "../admin/index-url";
+import { computeDeepDiff } from "./rules";
 import type {
   ApiResponse,
   CrudRepoEntry,
   CrudRepoRegistry,
+  IndexErrorCallback,
   ListResponseData,
   QueryRequestBody,
+  RuleResult,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -55,12 +58,13 @@ function sendError(c: any, error: string, status = 400) {
  * and an `indexUrl` pointing to the Firebase Console index-creation wizard —
  * crucial for collection-group queries where the SDK omits the link.
  */
-function sendQueryError(
+async function sendQueryError(
   c: any,
   err: unknown,
-  ctx: QueryErrorContext,
+  ctx: QueryErrorContext & { repoName?: string },
   fallbackMessage: string,
   verbose: boolean,
+  onIndexError?: IndexErrorCallback,
 ) {
   const qe = toQueryError(err, ctx);
   const isIndex = qe.type === "index";
@@ -73,7 +77,31 @@ function sendQueryError(
   const payload: ApiResponse = { success: false, error: message };
   if (isIndex) {
     payload.errorType = "index";
-    if (qe.indexUrl) payload.indexUrl = qe.indexUrl;
+    if (qe.indexUrl) {
+      payload.indexUrl = qe.indexUrl;
+      if (onIndexError) {
+        try {
+          const res = onIndexError({
+            indexUrl: qe.indexUrl,
+            repoName: ctx.repoName ?? "",
+            path: ctx.path,
+            isGroup: ctx.isGroup,
+            filters: ctx.filters,
+            sort: ctx.sort,
+            error: err,
+            c,
+          });
+          if (res instanceof Promise) {
+            await res;
+          }
+        } catch (cbErr) {
+          if (verbose) {
+            // eslint-disable-next-line no-console
+            console.error("[crudServer] Error in indexesError callback:", cbErr);
+          }
+        }
+      }
+    }
   }
   return sendJson(c, payload, status);
 }
@@ -676,6 +704,7 @@ export function createCrudHandlers(
   registry: CrudRepoRegistry,
   basePath: string,
   verbose: boolean,
+  onIndexError?: IndexErrorCallback,
 ) {
   // ── Authorization helpers ───────────────────────────────────────────────
   /**
@@ -688,27 +717,49 @@ export function createCrudHandlers(
     entry: CrudRepoEntry,
     op: keyof NonNullable<CrudRepoEntry["rules"]>,
     ctx: TCtx,
-  ): Promise<boolean> {
-    if (!entry.rules) return true;
+  ): Promise<{ allowed: boolean; errorResponse?: any }> {
+    if (!entry.rules) return { allowed: true };
     const rule = entry.rules?.[op] as
-      | ((c: TCtx) => boolean | Promise<boolean>)
+      | ((c: TCtx) => RuleResult | Promise<RuleResult>)
       | undefined;
     if (!rule) {
-      sendError(c, `Operation "${op}" is not allowed for this repository`, 403);
-      return false;
+      return {
+        allowed: false,
+        errorResponse: sendError(
+          c,
+          `Operation "${op}" is not allowed for this repository`,
+          403,
+        ),
+      };
     }
     try {
-      const ok = await rule(ctx);
-      if (!ok) {
-        return sendError(c, "Forbidden", 403);
-        return false;
+      const res = await rule(ctx);
+      if (res === false) {
+        return {
+          allowed: false,
+          errorResponse: sendError(c, "Forbidden", 403),
+        };
       }
-      return true;
+      if (typeof res === "string") {
+        return {
+          allowed: false,
+          errorResponse: sendError(c, res, 403),
+        };
+      }
+      if (typeof res === "object" && res !== null && !res.allowed) {
+        return {
+          allowed: false,
+          errorResponse: sendError(c, res.reason || "Forbidden", 403),
+        };
+      }
+      return { allowed: true };
     } catch (err) {
       const message =
         verbose && err instanceof Error ? err.message : "Forbidden";
-      return sendError(c, message, 403);
-      return false;
+      return {
+        allowed: false,
+        errorResponse: sendError(c, message, 403),
+      };
     }
   }
 
@@ -819,14 +870,12 @@ export function createCrudHandlers(
     if (!entry) return sendError(c, `Repository not found`, 404);
 
     const user = userOf(c);
-    if (
-      !(await assertRule(c, entry, "list", {
-        user,
-        query: c.req.query(),
-        params,
-      }))
-    )
-      return;
+    const ruleCheck = await assertRule(c, entry, "list", {
+      user,
+      query: c.req.query(),
+      params,
+    });
+    if (!ruleCheck.allowed) return ruleCheck.errorResponse;
 
     // Captured for error handling (so the catch can build an index URL)
     let ctxFilters: { field: string; op: any; value: string }[] = [];
@@ -963,10 +1012,11 @@ export function createCrudHandlers(
           : {}),
       });
     } catch (err) {
-      sendQueryError(
+      return await sendQueryError(
         c,
         err,
         {
+          repoName: params.repoName || entry.name,
           ref: entry.repo.ref,
           path: entry.path,
           isGroup: !!entry.isGroup,
@@ -975,6 +1025,7 @@ export function createCrudHandlers(
         },
         "Failed to fetch documents",
         verbose,
+        onIndexError,
       );
     }
   }
@@ -989,14 +1040,12 @@ export function createCrudHandlers(
     if (!entry) return sendError(c, `Repository not found`, 404);
 
     const user = userOf(c);
-    if (
-      !(await assertRule(c, entry, "list", {
-        user,
-        query: ctx.input || {},
-        params,
-      }))
-    )
-      return;
+    const ruleCheck = await assertRule(c, entry, "list", {
+      user,
+      query: ctx.input || {},
+      params,
+    });
+    if (!ruleCheck.allowed) return ruleCheck.errorResponse;
 
     // Captured for error handling (so the catch can build an index URL)
     let ctxFilters: { field: string; op: any; value: string }[] = [];
@@ -1222,10 +1271,11 @@ export function createCrudHandlers(
           : {}),
       });
     } catch (err) {
-      sendQueryError(
+      return await sendQueryError(
         c,
         err,
         {
+          repoName: params.repoName || entry.name,
           ref: entry.repo.ref,
           path: entry.path,
           isGroup: !!entry.isGroup,
@@ -1234,6 +1284,7 @@ export function createCrudHandlers(
         },
         "Failed to query documents",
         verbose,
+        onIndexError,
       );
     }
   }
@@ -1259,14 +1310,12 @@ export function createCrudHandlers(
       }
 
       const user = userOf(c);
-      if (
-        !(await assertRule(c, entry, "get", {
-          user,
-          doc: doc as any,
-          params,
-        }))
-      )
-        return;
+      const getRuleCheck = await assertRule(c, entry, "get", {
+        user,
+        doc: doc as any,
+        params,
+      });
+      if (!getRuleCheck.allowed) return getRuleCheck.errorResponse;
 
       // Apply row-level filter (404 if rejected, to avoid existence leakage)
       if (entry.rules?.filter) {
@@ -1286,10 +1335,11 @@ export function createCrudHandlers(
 
       return sendSuccess(c, doc);
     } catch (err) {
-      sendQueryError(
+      return await sendQueryError(
         c,
         err,
         {
+          repoName: params.repoName || entry.name,
           ref: entry.repo.ref,
           path: entry.path,
           isGroup: !!entry.isGroup,
@@ -1297,6 +1347,7 @@ export function createCrudHandlers(
         },
         "Failed to fetch document",
         verbose,
+        onIndexError,
       );
     }
   }
@@ -1313,14 +1364,12 @@ export function createCrudHandlers(
       const body = ctx.input || {};
 
       const user = userOf(c);
-      if (
-        !(await assertRule(c, entry, "create", {
-          user,
-          body,
-          params,
-        }))
-      )
-        return;
+      const createRuleCheck = await assertRule(c, entry, "create", {
+        user,
+        body,
+        params,
+      });
+      if (!createRuleCheck.allowed) return createRuleCheck.errorResponse;
 
       // Validate against schema
       const validation = validateData(
@@ -1398,17 +1447,6 @@ export function createCrudHandlers(
         return sendError(c, "Document not found", 404);
       }
 
-      const user = userOf(c);
-      if (
-        !(await assertRule(c, entry, "update", {
-          user,
-          doc: existingDoc as any,
-          body,
-          params,
-        }))
-      )
-        return;
-
       // Validate against schema
       const validation = validateData(
         entry.schema,
@@ -1428,6 +1466,19 @@ export function createCrudHandlers(
           return sendError(c, customError, 400);
         }
       }
+
+      // Compute diff between existing doc and sanitized changes
+      const diff = computeDeepDiff(existingDoc as any, validation.data);
+
+      const user = userOf(c);
+      const updateRuleCheck = await assertRule(c, entry, "update", {
+        user,
+        doc: existingDoc as any,
+        body: validation.data,
+        diff,
+        params,
+      });
+      if (!updateRuleCheck.allowed) return updateRuleCheck.errorResponse;
 
       // Update document — derive path args for subcollections
       const pathArgs = extractPathArgs(existingDoc, entry.pathKey) ?? [id];
@@ -1471,14 +1522,12 @@ export function createCrudHandlers(
       }
 
       const user = userOf(c);
-      if (
-        !(await assertRule(c, entry, "delete", {
-          user,
-          doc: doc as any,
-          params,
-        }))
-      )
-        return;
+      const deleteRuleCheck = await assertRule(c, entry, "delete", {
+        user,
+        doc: doc as any,
+        params,
+      });
+      if (!deleteRuleCheck.allowed) return deleteRuleCheck.errorResponse;
 
       const pathArgs = extractPathArgs(doc, entry.pathKey) ?? [id];
       await entry.repo.delete(...pathArgs);
@@ -1526,14 +1575,13 @@ export function createCrudHandlers(
         }
 
         if (op.type === "create") {
-          if (
-            !(await assertRule(c, entry, "create", {
-              user,
-              body: op.data,
-              params,
-            }))
-          )
-            return;
+          const createRuleCheck = await assertRule(c, entry, "create", {
+            user,
+            body: op.data,
+            params,
+          });
+          if (!createRuleCheck.allowed) return createRuleCheck.errorResponse;
+
           const validation = validateData(
             entry.schema,
             op.data,
@@ -1564,16 +1612,6 @@ export function createCrudHandlers(
           if (!existingDoc)
             return sendError(c, `Document ${op.id} not found`, 404);
 
-          if (
-            !(await assertRule(c, entry, "update", {
-              user,
-              doc: existingDoc as any,
-              body: op.data,
-              params,
-            }))
-          )
-            return;
-
           const validation = validateData(
             entry.schema,
             op.data,
@@ -1583,6 +1621,24 @@ export function createCrudHandlers(
           );
           if (!validation.success)
             return sendError(c, (validation as any).error, 400);
+
+          if (entry.validate) {
+            const customError = await entry.validate(validation.data, "update");
+            if (customError) {
+              return sendError(c, customError, 400);
+            }
+          }
+
+          const diff = computeDeepDiff(existingDoc as any, validation.data);
+
+          const updateRuleCheck = await assertRule(c, entry, "update", {
+            user,
+            doc: existingDoc as any,
+            body: validation.data,
+            diff,
+            params,
+          });
+          if (!updateRuleCheck.allowed) return updateRuleCheck.errorResponse;
 
           const pathArgs = extractPathArgs(existingDoc, entry.pathKey) ?? [
             op.id,
@@ -1596,14 +1652,12 @@ export function createCrudHandlers(
 
           const doc = await fetchDocById(entry, op.id);
           if (!doc) return sendError(c, `Document ${op.id} not found`, 404);
-          if (
-            !(await assertRule(c, entry, "delete", {
-              user,
-              doc: doc as any,
-              params,
-            }))
-          )
-            return;
+          const deleteRuleCheck = await assertRule(c, entry, "delete", {
+            user,
+            doc: doc as any,
+            params,
+          });
+          if (!deleteRuleCheck.allowed) return deleteRuleCheck.errorResponse;
 
           const pathArgs = extractPathArgs(doc, entry.pathKey) ?? [op.id];
           batch.delete(...pathArgs);

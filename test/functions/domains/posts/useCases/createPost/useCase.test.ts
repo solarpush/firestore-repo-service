@@ -14,13 +14,17 @@ describe("CreatePostUseCase", () => {
       repository: {
         db: {
           comments: { get: { byDocId: () => ({ id: "1234" }) } },
+          posts: {
+            query: { by: async () => [] },
+            get: { byDocId: async () => ({ id: "1234" }) },
+          },
         },
       },
       hubspot: { hello: () => "hubspot-mock" },
     } as unknown as Services;
 
     const uc = new CreatePostUseCase(services);
-    const result = await uc.execute({ example: "hello" });
+    const result = await uc.execute({ id: "p1", example: "hello" });
     expect(result).toMatchObject({ id: expect.any(String) });
   });
 });
