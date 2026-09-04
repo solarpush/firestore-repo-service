@@ -237,4 +237,34 @@ describe("MeilisearchAdapter type-safety and dot-notation autocompletion", () =>
     expect(adapter.indexesSettings?.adminUsers?.searchableAttributes).toContain("baseUser.email");
     expect(adapter.indexesSettings?.residences?.searchableAttributes).toContain("address.city");
   });
+
+  test("supports displayedAttributes and retrievableAttributes with strict field typing", async () => {
+    let updatedSettings: any = null;
+    const mockIndex = {
+      updateSettings: async (settings: any) => {
+        updatedSettings = settings;
+      },
+    };
+
+    const adapter = new MeilisearchAdapter<typeof repos>({
+      client: {
+        index: () => mockIndex,
+        getIndex: async () => ({}),
+      } as any,
+      indexesSettings: {
+        adminUsers: {
+          retrievableAttributes: ["docId", "baseUser.email", "baseUser.firstName"],
+          displayedAttributes: ["docId", "baseUser.email", "createdByName"],
+        },
+      },
+    });
+
+    await adapter.ensureTarget({ targetName: "adminUsers", primaryKey: "docId" });
+    expect(updatedSettings).toBeDefined();
+    expect(updatedSettings.displayedAttributes).toEqual([
+      "docId",
+      "baseUser.email",
+      "createdByName",
+    ]);
+  });
 });

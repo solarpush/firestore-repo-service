@@ -48,13 +48,78 @@ export interface MeilisearchLike {
 }
 
 export interface MeilisearchIndexSettings<Fields extends string = string> {
+  /**
+   * Fields displayed in the returned documents. Defaults to `["*"]`.
+   */
+  displayedAttributes?: (Fields | "*")[];
+  /**
+   * Alias for `displayedAttributes` (Algolia-style naming).
+   */
+  retrievableAttributes?: (Fields | "*")[];
+  /**
+   * Alias for `displayedAttributes`.
+   */
+  attributesToRetrieve?: (Fields | "*")[];
+  /**
+   * Fields that are searched for query words. Defaults to `["*"]`.
+   */
+  searchableAttributes?: (Fields | "*")[];
+  /**
+   * Fields that can be filtered using the `filter` search parameter.
+   */
   filterableAttributes?: Fields[];
+  /**
+   * Fields that can be sorted using the `sort` search parameter.
+   */
   sortableAttributes?: Fields[];
-  searchableAttributes?: Fields[];
+  /**
+   * Custom ranking rules for search result scoring.
+   */
   rankingRules?: string[];
+  /**
+   * List of words ignored during search queries.
+   */
   stopWords?: string[];
+  /**
+   * Custom synonyms map.
+   */
   synonyms?: Record<string, string[]>;
-  distinctAttribute?: Fields;
+  /**
+   * Field used to deduplicate search results.
+   */
+  distinctAttribute?: Fields | null;
+  /**
+   * Typo tolerance settings.
+   */
+  typoTolerance?: Record<string, any>;
+  /**
+   * Faceting settings.
+   */
+  faceting?: Record<string, any>;
+  /**
+   * Pagination limits (e.g. `maxTotalHits`).
+   */
+  pagination?: { maxTotalHits?: number; [key: string]: any };
+  /**
+   * Custom separator tokens.
+   */
+  separatorTokens?: string[];
+  /**
+   * Custom non-separator tokens.
+   */
+  nonSeparatorTokens?: string[];
+  /**
+   * Custom dictionary words.
+   */
+  dictionary?: string[];
+  /**
+   * Proximity precision mode ("byWord" or "byAttribute").
+   */
+  proximityPrecision?: "byWord" | "byAttribute";
+  /**
+   * Maximum search duration before timeout in ms.
+   */
+  searchCutoffMs?: number;
   [key: string]: any;
 }
 
@@ -124,6 +189,26 @@ function loadMeilisearchClient(options: MeilisearchAdapterOptions<any>): Meilise
         `Original error: ${err?.message ?? String(err)}`,
     );
   }
+}
+
+function areMeiliSettingsEqual(current: any, desired: any): boolean {
+  if (!current || !desired) return false;
+  for (const [key, value] of Object.entries(desired)) {
+    if (value === undefined) continue;
+    const curVal = current[key];
+    if (Array.isArray(value)) {
+      if (!Array.isArray(curVal)) return false;
+      if (value.length !== curVal.length) return false;
+      for (let i = 0; i < value.length; i++) {
+        if (value[i] !== curVal[i]) return false;
+      }
+    } else if (typeof value === "object" && value !== null) {
+      if (JSON.stringify(value) !== JSON.stringify(curVal)) return false;
+    } else {
+      if (value !== curVal) return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -222,9 +307,30 @@ export class MeilisearchAdapter<
       await this.client.createIndex(targetName, { primaryKey });
     }
 
-    const settings = this.options.indexesSettings?.[targetName];
-    if (settings) {
+    const rawSettings = this.options.indexesSettings?.[targetName];
+    if (rawSettings) {
+      const { retrievableAttributes, attributesToRetrieve, ...rest } = rawSettings;
+      const settings = {
+        ...rest,
+        displayedAttributes:
+          rest.displayedAttributes ?? retrievableAttributes ?? attributesToRetrieve,
+      };
+      if (settings.displayedAttributes === undefined) {
+        delete (settings as any).displayedAttributes;
+      }
+
       const index = this.client.index(targetName);
+      if (typeof index.getSettings === "function") {
+        try {
+          const current = await index.getSettings();
+          if (areMeiliSettingsEqual(current, settings)) {
+            return;
+          }
+        } catch {
+          // If reading current settings fails, fallback to updating
+        }
+      }
+
       await index.updateSettings(settings);
     }
   }
