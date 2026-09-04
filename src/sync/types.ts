@@ -328,11 +328,15 @@ import type { FieldPath } from "../shared/types";
  */
 export type ExtractRepoModel<R> = R extends { _modelType: infer Model }
   ? Model
-  : R extends { schema: { shape: infer S } }
-    ? { [K in keyof S]: z.infer<S[K]> }
-    : R extends { type: infer T }
-      ? T
-      : Record<string, unknown>;
+  : R extends { type: infer T }
+    ? T
+    : R extends { schema: { _output: infer O } }
+      ? O
+      : R extends { schema: { shape: infer S } }
+        ? { [K in keyof S]: z.infer<S[K]> }
+        : R extends { _output: infer O }
+          ? O
+          : Record<string, unknown>;
 
 /**
  * Extract field names from a repo value.

@@ -48,13 +48,13 @@ export interface MeilisearchLike {
 }
 
 export interface MeilisearchIndexSettings<Fields extends string = string> {
-  filterableAttributes?: (Fields | (string & {}))[];
-  sortableAttributes?: (Fields | (string & {}))[];
-  searchableAttributes?: (Fields | (string & {}))[];
+  filterableAttributes?: Fields[];
+  sortableAttributes?: Fields[];
+  searchableAttributes?: Fields[];
   rankingRules?: string[];
   stopWords?: string[];
   synonyms?: Record<string, string[]>;
-  distinctAttribute?: Fields | (string & {});
+  distinctAttribute?: Fields;
   [key: string]: any;
 }
 
@@ -141,6 +141,11 @@ export class MeilisearchAdapter<
     if (options.client) {
       this._client = options.client;
     }
+  }
+
+  /** Configured index settings */
+  get indexesSettings(): MeilisearchAdapterOptions<M>["indexesSettings"] {
+    return this.options.indexesSettings;
   }
 
   /** Resolved Meilisearch client instance. */
@@ -292,4 +297,26 @@ export class MeilisearchAdapter<
       return { healthy: false, error: e?.message ?? String(e) };
     }
   }
+}
+
+/**
+ * Type-safe factory helper for creating a Meilisearch adapter bound to a repository mapping `M`.
+ * Provides full autocompletion and strict type checking on repository names and nested field paths.
+ *
+ * @example
+ * ```ts
+ * const adapter = defineMeilisearchAdapter<typeof repos>({
+ *   client: createMeilisearchClient(),
+ *   indexesSettings: {
+ *     adminUsers: {
+ *       searchableAttributes: ["docId", "baseUser.email"],
+ *     },
+ *   },
+ * });
+ * ```
+ */
+export function defineMeilisearchAdapter<
+  M extends Record<string, any> = Record<string, any>,
+>(options: MeilisearchAdapterOptions<M>): () => MeilisearchAdapter<M> {
+  return () => new MeilisearchAdapter<M>(options);
 }

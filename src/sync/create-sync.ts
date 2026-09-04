@@ -114,9 +114,28 @@ export function createFirestoreSync<M extends Record<string, any>>(
     repos: repoConfigs,
   });
 
-  // Auto-create a PubSub handler per repo
+  // Auto-create a PubSub handler per active repo
   const handlers: Record<string, any> = {};
-  for (const repoName of Object.keys(repoMapping)) {
+  const repoConfigsMap = repoConfigs as
+    | Record<string, RepoSyncConfig<string> | undefined>
+    | undefined;
+  const rawMapping = (repoMapping as any)?.rawMapping;
+  const configuredKeys = Object.keys(repoConfigsMap ?? {});
+  const hasExplicitRepos = configuredKeys.length > 0;
+  const allKeys = rawMapping ? Object.keys(rawMapping) : Object.keys(repoMapping);
+  const activeRepoNames = hasExplicitRepos
+    ? configuredKeys.filter((name) => allKeys.includes(name) || name in repoMapping)
+    : allKeys;
+
+  for (const repoName of activeRepoNames) {
+    const rawMapping = (repoMapping as any)?.rawMapping;
+    const isGroup = rawMapping
+      ? !!rawMapping[repoName]?.isGroup
+      : !!(repoMapping[repoName] as any)?._isGroup;
+    if (!hasExplicitRepos && isGroup && !repoConfigsMap?.[repoName]?.triggerPath) {
+      continue;
+    }
+
     handlers[`sync_${repoName}`] = worker.createHandler(
       `${topicPrefix}-${repoName}`,
     );

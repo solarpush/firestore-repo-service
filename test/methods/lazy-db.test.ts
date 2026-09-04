@@ -89,4 +89,17 @@ describe("createRepositoryMapping lazy db resolution", () => {
     void repos.users;
     expect(calls).toBe(1);
   });
+
+  test("supports 'in' operator correctly without invoking the db factory", () => {
+    let calls = 0;
+    const repos = createRepositoryMapping(() => {
+      calls++;
+      return makeFakeFirestore();
+    }, buildMapping());
+
+    expect("users" in repos).toBe(true);
+    expect("posts" in repos).toBe(false);
+    expect("unknown" in repos).toBe(false);
+    expect(calls).toBe(0);
+  });
 });

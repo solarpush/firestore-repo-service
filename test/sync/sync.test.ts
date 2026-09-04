@@ -632,4 +632,108 @@ describe("BigQueryAdapter normalizeRow (Storage Write CDC)", () => {
     };
     expect(configWithGroup.comments?.triggerPath).toBe("posts/{postId}/comments/{docId}");
   });
+
+  test("createadminsyncServer uses configured region in httpsOptions for links", async () => {
+    const { createadminsyncServer } = require("../../src/sync/admin");
+    const origEmulator = process.env["FUNCTIONS_EMULATOR"];
+    const origProject = process.env["GCLOUD_PROJECT"];
+    const origTarget = process.env["FUNCTION_TARGET"];
+
+    process.env["FUNCTIONS_EMULATOR"] = "true";
+    process.env["GCLOUD_PROJECT"] = "neosilver-back-dev";
+    process.env["FUNCTION_TARGET"] = "syncServer-adminsync";
+
+    try {
+      const mapping = {
+        users: { _modelType: { docId: "1" }, _isGroup: false, schema: null },
+      };
+      const mockAdapter = {
+        name: "meilisearch",
+        targetExists: async () => true,
+        upsert: async () => {},
+        delete: async () => {},
+      };
+
+      const handler = createadminsyncServer(
+        mapping,
+        mockAdapter,
+        new Map(),
+        async () => {},
+        {
+          httpsOptions: {
+            region: "europe-west1",
+          },
+          featuresFlag: { healthCheck: true },
+        },
+        {},
+      );
+
+      let htmlOutput = "";
+      const fakeReq = { method: "GET", url: "/", headers: {} };
+      const fakeRes = {
+        status: () => fakeRes,
+        set: () => fakeRes,
+        send: (html: string) => {
+          htmlOutput = html;
+        },
+      };
+
+      await handler(fakeReq, fakeRes);
+      expect(htmlOutput).toContain("/neosilver-back-dev/europe-west1/syncServer-adminsync/users/health");
+      expect(htmlOutput).not.toContain("us-central1");
+    } finally {
+      if (origEmulator !== undefined) process.env["FUNCTIONS_EMULATOR"] = origEmulator;
+      else delete process.env["FUNCTIONS_EMULATOR"];
+      if (origProject !== undefined) process.env["GCLOUD_PROJECT"] = origProject;
+      else delete process.env["GCLOUD_PROJECT"];
+      if (origTarget !== undefined) process.env["FUNCTION_TARGET"] = origTarget;
+      else delete process.env["FUNCTION_TARGET"];
+    }
+  });
+
+  test("createadminsyncServer only displays configured repos when repos object is provided", async () => {
+    const { createadminsyncServer } = require("../../src/sync/admin");
+    const mapping = {
+      users: { _modelType: { docId: "1" }, _isGroup: false, schema: null },
+      posts: { _modelType: { docId: "1" }, _isGroup: false, schema: null },
+      unconfigured_group: { _modelType: { docId: "1" }, _isGroup: true, schema: null },
+      other_unused: { _modelType: { docId: "1" }, _isGroup: false, schema: null },
+    };
+    const mockAdapter = {
+      name: "meilisearch",
+      targetExists: async () => true,
+      upsert: async () => {},
+      delete: async () => {},
+    };
+
+    const handler = createadminsyncServer(
+      mapping,
+      mockAdapter,
+      new Map(),
+      async () => {},
+      {
+        featuresFlag: { healthCheck: true },
+      },
+      {
+        users: {},
+        posts: {},
+      },
+    );
+
+    let htmlOutput = "";
+    const fakeReq = { method: "GET", url: "/", headers: {} };
+    const fakeRes = {
+      status: () => fakeRes,
+      set: () => fakeRes,
+      send: (html: string) => {
+        htmlOutput = html;
+      },
+    };
+
+    await handler(fakeReq, fakeRes);
+    expect(htmlOutput).toContain("<strong>users</strong>");
+    expect(htmlOutput).toContain("<strong>posts</strong>");
+    expect(htmlOutput).not.toContain("<strong>unconfigured_group</strong>");
+    expect(htmlOutput).not.toContain("<strong>other_unused</strong>");
+  });
 });

@@ -47,6 +47,10 @@ import { makeLazyRepo } from "../repositories/factory";
 import type { FirestoreSyncConfig } from "../sync/types";
 import { createFirestoreSync } from "../sync/create-sync";
 import {
+  MeilisearchAdapter,
+  type MeilisearchAdapterOptions,
+} from "../sync/adapters/meilisearch";
+import {
   type AdminRepoConfig,
   type AdminServerOptions,
   createAdminServer,
@@ -254,6 +258,32 @@ export function createServers<
         };
       }
       return createFirestoreSync(repos, merged);
+    },
+
+    /**
+     * Create a Meilisearch adapter factory strongly typed against the bound repositories.
+     * Repositories and nested field paths in `indexesSettings` are automatically autocompleted
+     * and type-checked without needing to supply manual generic type arguments.
+     *
+     * @example
+     * ```ts
+     * export const syncServer = servers.sync({
+     *   deps: { ... },
+     *   adapters: [
+     *     servers.meilisearchAdapter({
+     *       client: createMeilisearchClient(),
+     *       indexesSettings: {
+     *         adminUsers: {
+     *           searchableAttributes: ["docId", "baseUser.email"],
+     *         },
+     *       },
+     *     }),
+     *   ],
+     * });
+     * ```
+     */
+    meilisearchAdapter(options: MeilisearchAdapterOptions<TRepos>) {
+      return () => new MeilisearchAdapter<TRepos>(options);
     },
 
     /**

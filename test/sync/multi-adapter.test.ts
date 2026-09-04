@@ -1,8 +1,22 @@
+import { plugin } from "bun";
 import { describe, expect, mock, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { createFirestoreSync } from "../../src/sync/create-sync";
 import type { SyncAdapter, SyncEvent } from "../../src/sync/types";
 import { createSyncWorker } from "../../src/sync/worker";
+
+plugin({
+  name: "raw-js-as-text-sync-test",
+  setup(build) {
+    build.onLoad({ filter: /\.raw\.js$/ }, (args) => ({
+      contents: `export default ${JSON.stringify(
+        readFileSync(args.path, "utf8"),
+      )};`,
+      loader: "js",
+    }));
+  },
+});
 
 function createMockSyncAdapter(name: string): SyncAdapter & {
   upsertCalls: Array<{ targetName: string; items: Record<string, unknown>[]; primaryKey: string }>;
@@ -229,5 +243,101 @@ describe("Multi-Adapter Fan-out", () => {
 
     // Admin handler
     expect(sync.adminHandler).toBeDefined();
+  });
+
+  test("createFirestoreSync with createRepositoryMapping only displays configured repos in admin dashboard", async () => {
+    const { createRepositoryConfig, createRepositoryMapping } = await import(
+      "../../src/index"
+    );
+
+    const repos = createRepositoryMapping(
+      () => ({
+        collection: () => ({ id: "ref" }),
+        collectionGroup: () => ({ id: "ref" }),
+        doc: () => ({ id: "ref" }),
+      }) as any,
+      {
+        adminUsers: createRepositoryConfig(userSchema)({
+          path: "admin_users",
+          isGroup: false,
+          foreignKeys: ["docId"] as const,
+          queryKeys: [] as const,
+          documentKey: "docId",
+          refCb: (db: any, docId: string) => db.collection("admin_users").doc(docId),
+        }),
+        residences: createRepositoryConfig(userSchema)({
+          path: "residences",
+          isGroup: false,
+          foreignKeys: ["docId"] as const,
+          queryKeys: [] as const,
+          documentKey: "docId",
+          refCb: (db: any, docId: string) => db.collection("residences").doc(docId),
+        }),
+        unconfiguredRepo: createRepositoryConfig(userSchema)({
+          path: "unconfigured",
+          isGroup: false,
+          foreignKeys: ["docId"] as const,
+          queryKeys: [] as const,
+          documentKey: "docId",
+          refCb: (db: any, docId: string) => db.collection("unconfigured").doc(docId),
+        }),
+      },
+    );
+
+    const meiliAdapter = createMockSyncAdapter("meilisearch");
+
+    const sync = createFirestoreSync(repos, {
+      deps: {
+        firestoreTriggers: {
+          onDocumentWritten: (path: string, handler: any) => handler ?? (() => {}),
+        } as any,
+        pubsubHandler: {
+          onMessagePublished: (topic: string, handler: any) => handler ?? (() => {}),
+        } as any,
+        pubsub: { topic: () => ({ publishMessage: async () => {}, create: async () => {} }) } as any,
+      },
+      adapters: [meiliAdapter],
+      admin: {
+        featuresFlag: { healthCheck: true, manualSync: true },
+      },
+      repos: {
+        adminUsers: { adapters: ["meilisearch"] },
+        residences: { adapters: ["meilisearch"] },
+      },
+    });
+
+    // Triggers and worker handlers only created for configured repos
+    expect(sync.functions.adminUsers_onSync).toBeDefined();
+    expect(sync.functions.residences_onSync).toBeDefined();
+    expect(sync.functions.unconfiguredRepo_onSync).toBeUndefined();
+
+    // Admin dashboard check
+    let responseHtml = "";
+    let statusCode = 200;
+    const req = {
+      url: "/",
+      path: "/",
+      method: "GET",
+      headers: { accept: "text/html" },
+      params: {},
+      query: {},
+    };
+    const res = {
+      status: (code: number) => {
+        statusCode = code;
+        return res;
+      },
+      set: () => res,
+      send: (body: string) => {
+        responseHtml = body;
+      },
+    };
+
+    await sync.adminHandler!(req, res);
+
+    expect(statusCode).toBe(200);
+    expect(responseHtml).toContain("adminUsers");
+    expect(responseHtml).toContain("residences");
+    expect(responseHtml).not.toContain("unconfiguredRepo");
   });
 });

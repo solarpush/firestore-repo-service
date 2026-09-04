@@ -474,6 +474,12 @@ export function createRepositoryMapping<T extends Record<string, any>>(
       }
       return (target as any)[prop];
     },
+    has(target, prop) {
+      if (typeof prop === "string" && prop in mapping) {
+        return true;
+      }
+      return prop in (target as object);
+    },
     ownKeys() {
       return mappingKeys;
     },

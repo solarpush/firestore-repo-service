@@ -136,10 +136,18 @@ export function createSyncTriggers<M extends Record<string, any>>(
         syncMetaFromRepo(repo),
       ]);
 
+  const repoConfigsMap = config?.repos as
+    | Record<string, RepoSyncConfig<string> | undefined>
+    | undefined;
+  const configuredKeys = Object.keys(repoConfigsMap ?? {});
+  const hasExplicitRepos = configuredKeys.length > 0;
+
   for (const [repoName, meta] of entries) {
-    const repoCfg = (
-      config?.repos as Record<string, RepoSyncConfig<string>> | undefined
-    )?.[repoName];
+    if (hasExplicitRepos && (!repoConfigsMap || !(repoName in repoConfigsMap))) {
+      continue;
+    }
+
+    const repoCfg = repoConfigsMap?.[repoName];
 
     let documentPath: string | null;
 

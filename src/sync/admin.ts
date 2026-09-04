@@ -25,7 +25,7 @@ import type { AnyReq, AnyRes, RouteParams } from "../servers/admin/router";
 import { MiniRouter } from "../servers/admin/router";
 import { isAuthExtension } from "../servers/auth";
 import { makeLazyRepo } from "../repositories/factory";
-import { getLinkBase } from "../servers/utils/link-base";
+import { getLinkBase, resolveRegion } from "../servers/utils/link-base";
 import type { SyncQueue } from "./queue";
 import { serializeDocument } from "./serializer";
 import type {
@@ -127,6 +127,7 @@ export function createadminsyncServer(
 ): (req: any, res: any) => Promise<void> {
   const basePath = (config.basePath ?? "/").replace(/\/$/, "") || "";
   const features = config.featuresFlag ?? {};
+  const region = resolveRegion(config.httpsOptions?.region);
 
   const adapters: SyncAdapter[] = Array.isArray(adapterOrAdapters)
     ? adapterOrAdapters
@@ -136,11 +137,23 @@ export function createadminsyncServer(
     ?.rawMapping;
   const repoInfos: RepoInfo[] = [];
 
-  for (const name of Object.keys(repoMapping)) {
+  const configuredKeys = Object.keys(repoConfigs ?? {});
+  const hasExplicitRepos = configuredKeys.length > 0;
+  const allKeys = rawMapping ? Object.keys(rawMapping) : Object.keys(repoMapping);
+  const repoNames = hasExplicitRepos
+    ? configuredKeys.filter((name) => allKeys.includes(name) || name in repoMapping)
+    : allKeys;
+
+  for (const name of repoNames) {
     const repoCfg = repoConfigs[name];
     const repo = rawMapping
       ? makeLazyRepo(rawMapping[name], () => (repoMapping as Record<string, any>)[name])
       : (repoMapping as Record<string, any>)[name];
+
+    const isGroup = !!(repo as any)._isGroup;
+    if (!hasExplicitRepos && isGroup && !repoCfg?.triggerPath) {
+      continue;
+    }
 
     const activeAdapters = repoCfg?.adapters && repoCfg.adapters.length > 0
       ? adapters.filter((a) => repoCfg.adapters!.includes(a.name))
@@ -152,7 +165,7 @@ export function createadminsyncServer(
       documentKey:
         (repo as any)._systemKeys?.[0] ?? (repo as any).documentKey ?? "docId",
       tableName: repoCfg?.tableName ?? name,
-      isGroup: !!(repo as any)._isGroup,
+      isGroup,
       repoCfg,
       repo,
       adapters: activeAdapters,
@@ -197,7 +210,7 @@ export function createadminsyncServer(
 
   // -- Dashboard ----------------------------------------------------------
   router.get(`${basePath}/`, (req, res) => {
-    const lb = getLinkBase(req, basePath);
+    const lb = getLinkBase(req, basePath, region);
     const rows = repoInfos
       .map((r) => {
         const links: string[] = [];
@@ -240,14 +253,14 @@ export function createadminsyncServer(
     sendHtml(res, html);
   });
   router.get(`${basePath}`, (req, res) => {
-    const lb = getLinkBase(req, basePath);
+    const lb = getLinkBase(req, basePath, region);
     res.status(302).set("Location", `${lb}/`).send("");
   });
 
   // -- Health Check -------------------------------------------------------
   if (features.healthCheck) {
     router.get(`${basePath}/:repoName/health`, async (req: Req, res) => {
-      const lb = getLinkBase(req, basePath);
+      const lb = getLinkBase(req, basePath, region);
       const info = repoInfos.find((r) => r.name === req.params.repoName);
       if (!info) {
         sendHtml(
@@ -381,7 +394,7 @@ export function createadminsyncServer(
   // -- Force Sync ---------------------------------------------------------
   if (features.manualSync) {
     router.get(`${basePath}/:repoName/force-sync`, (req: Req, res) => {
-      const lb = getLinkBase(req, basePath);
+      const lb = getLinkBase(req, basePath, region);
       const info = repoInfos.find((r) => r.name === req.params.repoName);
       if (!info) {
         sendHtml(
@@ -408,7 +421,7 @@ export function createadminsyncServer(
     });
 
     router.post(`${basePath}/:repoName/force-sync`, async (req: Req, res) => {
-      const lb = getLinkBase(req, basePath);
+      const lb = getLinkBase(req, basePath, region);
       const info = repoInfos.find((r) => r.name === req.params.repoName);
       if (!info) {
         sendJson(res, { error: `Unknown repo: ${req.params.repoName}` }, 404);
@@ -499,7 +512,7 @@ export function createadminsyncServer(
             </div>`,
           ),
           500,
-        );
+          );
         return;
       }
 
@@ -539,7 +552,7 @@ export function createadminsyncServer(
   // -- Config Check -------------------------------------------------------
   if (features.configCheck) {
     router.get(`${basePath}/config-check`, async (req, res) => {
-      const lb = getLinkBase(req, basePath);
+      const lb = getLinkBase(req, basePath, region);
       const project =
         process.env["GCLOUD_PROJECT"] ??
         process.env["GOOGLE_CLOUD_PROJECT"] ??

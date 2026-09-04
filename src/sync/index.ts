@@ -51,11 +51,12 @@ export { createSyncTriggers } from "./triggers";
 export { createSyncWorker, SchemaTypeMismatchError } from "./worker";
 export { BigQueryAdapter, bigqueryDialect } from "./adapters/bigquery";
 export type { BigQueryAdapterOptions } from "./adapters/bigquery";
-export { MeilisearchAdapter } from "./adapters/meilisearch";
+export { MeilisearchAdapter, defineMeilisearchAdapter } from "./adapters/meilisearch";
 export type {
   MeilisearchAdapterOptions,
   MeilisearchIndexSettings,
   MeilisearchLike,
   TypedMeilisearchIndexesSettings,
 } from "./adapters/meilisearch";
+
 
