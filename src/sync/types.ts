@@ -308,36 +308,63 @@ export interface RepoSyncConfig<F extends string = string> {
    * When omitted or empty, the repo is synced to all configured adapters.
    */
   adapters?: string[];
+  /**
+   * Whether to flatten nested objects and stringify arrays into SQL-compatible columns.
+   * - `true` (default): Flattens `{ address: { city: "Paris" } }` into `address__city: "Paris"` and stringifies arrays.
+   * - `false`: Preserves nested objects and native arrays (ideal for Meilisearch / NoSQL search engines).
+   */
+  flat?: boolean;
+  /**
+   * Optional custom document transformation function applied after serialization.
+   */
+  transformDoc?: (doc: Record<string, unknown>) => Record<string, unknown>;
 }
+
+import type { FieldPath } from "../shared/types";
+
+/**
+ * Extract the model type from a repo value.
+ * Works with ConfiguredRepository (_modelType), raw config (schema.shape), or fallback (type).
+ */
+export type ExtractRepoModel<R> = R extends { _modelType: infer Model }
+  ? Model
+  : R extends { schema: { shape: infer S } }
+    ? { [K in keyof S]: z.infer<S[K]> }
+    : R extends { type: infer T }
+      ? T
+      : Record<string, unknown>;
 
 /**
  * Extract field names from a repo value.
  * Works with ConfiguredRepository (_modelType), raw config (schema.shape), or fallback (type).
  */
-export type ExtractRepoFields<R> = R extends { _modelType: infer Model }
-  ? string & keyof Model
-  : R extends { schema: { shape: infer S } }
-    ? string & keyof S
-    : R extends { type: infer T }
-      ? string & keyof T
-      : string;
+export type ExtractRepoFields<R> = string & keyof ExtractRepoModel<R>;
 
-/** Keys of repos where `_isGroup` is `true`. */
-type GroupRepoKeys<M> = {
-  [K in string & keyof M]: M[K] extends { _isGroup: true } ? K : never;
+/**
+ * Extract all dot-notation field paths (including nested objects) from a repo value.
+ */
+export type ExtractRepoFieldPaths<R> = FieldPath<ExtractRepoModel<R>>;
+
+/** Keys of repos where `_isGroup` or `isGroup` is `true`. */
+export type GroupRepoKeys<M> = {
+  [K in string & keyof M]: M[K] extends { _isGroup: true }
+    ? K
+    : M[K] extends { isGroup: true }
+      ? K
+      : never;
 }[string & keyof M];
 
 /** Keys of repos where `_isGroup` is NOT `true`. */
-type NonGroupRepoKeys<M> = Exclude<string & keyof M, GroupRepoKeys<M>>;
+export type NonGroupRepoKeys<M> = Exclude<string & keyof M, GroupRepoKeys<M>>;
 
 /**
  * Typed per-repo sync config map.
- * - Collection-group repos (`isGroup: true`): entry is **required** and
- *   `triggerPath` is mandatory.
+ * - Collection-group repos (`isGroup: true`): entry is optional, but if provided,
+ *   `triggerPath` is mandatory (since collection groups span multiple paths).
  * - Regular repos: entry is optional, all fields optional.
  */
 export type TypedRepoSyncConfigs<M> = {
-  [K in GroupRepoKeys<M>]: RepoSyncConfig<ExtractRepoFields<M[K]>> & {
+  [K in GroupRepoKeys<M>]?: RepoSyncConfig<ExtractRepoFields<M[K]>> & {
     triggerPath: string;
   };
 } & {

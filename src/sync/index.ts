@@ -34,6 +34,8 @@ export type {
   adminsyncBasicAuth,
   adminsyncConfig,
   adminsyncFeaturesFlag,
+  ExtractRepoModel,
+  ExtractRepoFieldPaths,
 } from "./types";
 
 export { createFirestoreSync } from "./create-sync";
@@ -44,7 +46,7 @@ export type { MigrateResult } from "./migration";
 export { SyncQueue } from "./queue";
 export type { SyncQueueOptions } from "./queue";
 export { zodSchemaToColumns, zodTypeToLogical } from "./schema-mapper";
-export { serializeDocument, serializeValue } from "./serializer";
+export { serializeDocument, serializeValue, unflattenDocument } from "./serializer";
 export { createSyncTriggers } from "./triggers";
 export { createSyncWorker, SchemaTypeMismatchError } from "./worker";
 export { BigQueryAdapter, bigqueryDialect } from "./adapters/bigquery";
@@ -54,5 +56,6 @@ export type {
   MeilisearchAdapterOptions,
   MeilisearchIndexSettings,
   MeilisearchLike,
+  TypedMeilisearchIndexesSettings,
 } from "./adapters/meilisearch";
 

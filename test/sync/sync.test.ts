@@ -93,6 +93,93 @@ describe("serializeDocument", () => {
     });
     expect(result).toHaveProperty("full_key_name", "123 Main");
   });
+
+  test("flat: false preserves nested objects and native arrays", () => {
+    const fakeTimestamp = { toDate: () => new Date("2026-01-01T00:00:00.000Z") };
+    const doc = {
+      docId: "u1",
+      email: "a@b.com",
+      tags: ["admin", "dev"],
+      address: {
+        street: "123 Main",
+        city: "Paris",
+        geo: {
+          latitude: 48.85,
+          longitude: 2.35,
+        },
+      },
+      createdAt: fakeTimestamp,
+      password: "secret",
+    };
+
+    const result = serializeDocument(doc, {
+      flat: false,
+      exclude: ["password"],
+      columnMap: { docId: "id" } as any,
+    });
+
+    expect(result).toEqual({
+      id: "u1",
+      email: "a@b.com",
+      tags: ["admin", "dev"],
+      address: {
+        street: "123 Main",
+        city: "Paris",
+        geo: { lat: 48.85, lng: 2.35 },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(Array.isArray(result.tags)).toBe(true);
+    expect(result).not.toHaveProperty("password");
+  });
+
+  test("applies custom transformDoc after serialization", () => {
+    const doc = { id: "1", name: "Alice" };
+    const result = serializeDocument(doc, {
+      transformDoc: (d) => ({ ...d, customField: "hello" }),
+    });
+    expect(result).toEqual({ id: "1", name: "Alice", customField: "hello" });
+  });
+});
+
+describe("unflattenDocument", () => {
+  test("reconstructs nested structure from double-underscore keys and parses stringified arrays", () => {
+    const { unflattenDocument } = require("../../src/sync/serializer");
+    const flatDoc = {
+      id: "u1",
+      "address__street": "123 Main",
+      "address__geo__lat": 48.85,
+      "address__geo__lng": 2.35,
+      tags: '["admin","dev"]',
+      "__sync_version": 1725436800000,
+    };
+
+    const unflattened = unflattenDocument(flatDoc);
+    expect(unflattened).toEqual({
+      id: "u1",
+      address: {
+        street: "123 Main",
+        geo: {
+          lat: 48.85,
+          lng: 2.35,
+        },
+      },
+      tags: ["admin", "dev"],
+      __sync_version: 1725436800000,
+    });
+  });
+
+  test("handles already-nested documents gracefully without modifying them", () => {
+    const { unflattenDocument } = require("../../src/sync/serializer");
+    const nestedDoc = {
+      id: "u1",
+      address: { city: "Paris" },
+      tags: ["admin", "dev"],
+    };
+
+    const unflattened = unflattenDocument(nestedDoc);
+    expect(unflattened).toEqual(nestedDoc);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -523,5 +610,26 @@ describe("BigQueryAdapter normalizeRow (Storage Write CDC)", () => {
       expect(row["_CHANGE_TYPE"]).toBe("DELETE");
       expect(row["_CHANGE_SEQUENCE_NUMBER"]).toBe("ffffffffffffffff");
     }
+  });
+
+  test("TypedRepoSyncConfigs allows omitting subcollections / group repos", () => {
+    type TestMapping = {
+      users: { _modelType: { docId: string; email: string }; _isGroup: false };
+      posts: { _modelType: { docId: string; title: string }; _isGroup: false };
+      comments: { _modelType: { docId: string; text: string }; _isGroup: true };
+    };
+
+    // Should allow omitting 'comments' (group repo) completely
+    const configWithoutGroup: import("../../src/sync/types").TypedRepoSyncConfigs<TestMapping> = {
+      users: { tableName: "custom_users" },
+    };
+    expect(configWithoutGroup.users?.tableName).toBe("custom_users");
+
+    // When group repo is provided, triggerPath is required
+    const configWithGroup: import("../../src/sync/types").TypedRepoSyncConfigs<TestMapping> = {
+      users: { tableName: "custom_users" },
+      comments: { triggerPath: "posts/{postId}/comments/{docId}" },
+    };
+    expect(configWithGroup.comments?.triggerPath).toBe("posts/{postId}/comments/{docId}");
   });
 });

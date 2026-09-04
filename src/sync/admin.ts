@@ -445,6 +445,8 @@ export function createadminsyncServer(
             const serialized = serializeDocument(data, {
               exclude: info.repoCfg?.exclude,
               columnMap: info.repoCfg?.columnMap,
+              flat: info.repoCfg?.flat,
+              transformDoc: info.repoCfg?.transformDoc,
             });
 
             try {

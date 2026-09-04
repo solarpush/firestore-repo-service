@@ -20,7 +20,13 @@
  */
 
 import type { z } from "zod";
-import type { RepoSyncConfig, SyncAdapter, SyncHealthResult } from "../types";
+import { unflattenDocument } from "../serializer";
+import type {
+  ExtractRepoFieldPaths,
+  RepoSyncConfig,
+  SyncAdapter,
+  SyncHealthResult,
+} from "../types";
 
 /**
  * Minimal structural shape of a Meilisearch client.
@@ -41,18 +47,28 @@ export interface MeilisearchLike {
   getVersion?(): Promise<any>;
 }
 
-export interface MeilisearchIndexSettings {
-  filterableAttributes?: string[];
-  sortableAttributes?: string[];
-  searchableAttributes?: string[];
+export interface MeilisearchIndexSettings<Fields extends string = string> {
+  filterableAttributes?: (Fields | (string & {}))[];
+  sortableAttributes?: (Fields | (string & {}))[];
+  searchableAttributes?: (Fields | (string & {}))[];
   rankingRules?: string[];
   stopWords?: string[];
   synonyms?: Record<string, string[]>;
-  distinctAttribute?: string;
+  distinctAttribute?: Fields | (string & {});
   [key: string]: any;
 }
 
-export interface MeilisearchAdapterOptions {
+/**
+ * Typed index settings map constrained to the repos in repository mapping `M`.
+ * Field attributes autocomplete and check dot-notation nested paths.
+ */
+export type TypedMeilisearchIndexesSettings<M> = {
+  [K in string & keyof M]?: MeilisearchIndexSettings<ExtractRepoFieldPaths<M[K]>>;
+};
+
+export interface MeilisearchAdapterOptions<
+  M extends Record<string, any> = Record<string, any>,
+> {
   /**
    * Host URL of the Meilisearch instance (e.g. `http://localhost:7700` or `https://ms-xxxx.meilisearch.io`).
    * Required if `client` is not provided.
@@ -68,12 +84,26 @@ export interface MeilisearchAdapterOptions {
   client?: MeilisearchLike | any;
   /**
    * Custom index settings per target index name (e.g. filterableAttributes, sortableAttributes).
+   * When typed with repository mapping `M`, keys are constrained to repo names and attributes
+   * are typed with dot-notation field paths.
    */
-  indexesSettings?: Record<string, MeilisearchIndexSettings>;
+  indexesSettings?: string extends keyof M
+    ? Record<string, MeilisearchIndexSettings>
+    : TypedMeilisearchIndexesSettings<M>;
+  /**
+   * Whether to automatically unflatten double-underscore keys (`address__city` → `address.city`)
+   * and parse stringified JSON arrays back into native arrays.
+   * Default: `true`.
+   */
+  unflatten?: boolean;
+  /**
+   * Optional custom document transformation before indexing in Meilisearch.
+   */
+  transformDoc?: (doc: Record<string, unknown>) => Record<string, unknown>;
 }
 
 /** Lazy-loader for the optional `meilisearch` peer dependency. */
-function loadMeilisearchClient(options: MeilisearchAdapterOptions): MeilisearchLike {
+function loadMeilisearchClient(options: MeilisearchAdapterOptions<any>): MeilisearchLike {
   if (options.client) return options.client;
   if (!options.host) {
     throw new Error(
@@ -99,12 +129,14 @@ function loadMeilisearchClient(options: MeilisearchAdapterOptions): MeilisearchL
 /**
  * SyncAdapter implementation for Meilisearch.
  */
-export class MeilisearchAdapter implements SyncAdapter {
+export class MeilisearchAdapter<
+  M extends Record<string, any> = Record<string, any>,
+> implements SyncAdapter {
   readonly name = "meilisearch";
   private _client: MeilisearchLike | null = null;
-  private readonly options: MeilisearchAdapterOptions;
+  private readonly options: MeilisearchAdapterOptions<M>;
 
-  constructor(options: MeilisearchAdapterOptions) {
+  constructor(options: MeilisearchAdapterOptions<M>) {
     this.options = options;
     if (options.client) {
       this._client = options.client;
@@ -130,8 +162,13 @@ export class MeilisearchAdapter implements SyncAdapter {
     } catch (err: any) {
       if (
         err?.code === "index_not_found" ||
+        err?.cause?.code === "index_not_found" ||
         err?.statusCode === 404 ||
-        err?.status === 404
+        err?.status === 404 ||
+        err?.response?.status === 404 ||
+        err?.cause?.status === 404 ||
+        err?.cause?.statusCode === 404 ||
+        err?.cause?.response?.status === 404
       ) {
         return false;
       }
@@ -145,8 +182,16 @@ export class MeilisearchAdapter implements SyncAdapter {
     primaryKey: string,
   ): Promise<void> {
     if (items.length === 0) return;
+    const shouldUnflatten = this.options.unflatten !== false;
+    const docs = items.map((item) => {
+      let doc = shouldUnflatten ? unflattenDocument(item) : item;
+      if (typeof this.options.transformDoc === "function") {
+        doc = this.options.transformDoc(doc);
+      }
+      return doc;
+    });
     const index = this.client.index(targetName);
-    await index.addDocuments(items, { primaryKey });
+    await index.addDocuments(docs, { primaryKey });
   }
 
   async delete(

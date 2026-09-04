@@ -6,6 +6,24 @@ describe("MeilisearchAdapter", () => {
     const mockClient = {
       getIndex: mock(async (uid: string) => {
         if (uid === "existing_index") return { uid };
+        if (uid === "cause_code_not_found") {
+          const err: any = new Error("Index not found");
+          err.cause = { code: "index_not_found" };
+          throw err;
+        }
+        if (uid === "response_status_404") {
+          const err: any = new Error("Index not found");
+          err.response = { status: 404 };
+          throw err;
+        }
+        if (uid === "cause_status_404") {
+          const err: any = new Error("Index not found");
+          err.cause = { status: 404 };
+          throw err;
+        }
+        if (uid === "other_error") {
+          throw new Error("Unauthorized or connection refused");
+        }
         const err: any = new Error("Index not found");
         err.code = "index_not_found";
         throw err;
@@ -20,6 +38,14 @@ describe("MeilisearchAdapter", () => {
 
     const notExists = await adapter.targetExists("non_existing_index");
     expect(notExists).toBe(false);
+
+    expect(await adapter.targetExists("cause_code_not_found")).toBe(false);
+    expect(await adapter.targetExists("response_status_404")).toBe(false);
+    expect(await adapter.targetExists("cause_status_404")).toBe(false);
+
+    await expect(adapter.targetExists("other_error")).rejects.toThrow(
+      "Unauthorized or connection refused",
+    );
   });
 
   test("upsert calls index.addDocuments with primaryKey", async () => {
@@ -44,6 +70,83 @@ describe("MeilisearchAdapter", () => {
 
     expect(capturedDocs).toEqual(docs);
     expect(capturedOptions).toEqual({ primaryKey: "id" });
+  });
+
+  test("upsert automatically unflattens double-underscore keys and parses stringified arrays by default", async () => {
+    let capturedDocs: any[] = [];
+    const mockIndex = {
+      addDocuments: mock(async (docs: any[]) => {
+        capturedDocs = docs;
+      }),
+    };
+    const mockClient = {
+      index: mock((_uid: string) => mockIndex),
+    };
+
+    const adapter = new MeilisearchAdapter({ client: mockClient });
+    const flatDocs = [
+      {
+        id: "1",
+        name: "Alice",
+        "address__city": "Paris",
+        "address__zip": "75001",
+        tags: '["admin","dev"]',
+        "__sync_version": 123456,
+      },
+    ];
+
+    await adapter.upsert("users", flatDocs, "id");
+
+    expect(capturedDocs).toEqual([
+      {
+        id: "1",
+        name: "Alice",
+        address: {
+          city: "Paris",
+          zip: "75001",
+        },
+        tags: ["admin", "dev"],
+        __sync_version: 123456,
+      },
+    ]);
+  });
+
+  test("upsert respects unflatten: false and transformDoc options", async () => {
+    let capturedDocs: any[] = [];
+    const mockIndex = {
+      addDocuments: mock(async (docs: any[]) => {
+        capturedDocs = docs;
+      }),
+    };
+    const mockClient = {
+      index: mock((_uid: string) => mockIndex),
+    };
+
+    const adapter = new MeilisearchAdapter({
+      client: mockClient,
+      unflatten: false,
+      transformDoc: (doc) => ({
+        ...doc,
+        _transformed: true,
+      }),
+    });
+
+    const flatDocs = [
+      {
+        id: "1",
+        "address__city": "Paris",
+      },
+    ];
+
+    await adapter.upsert("users", flatDocs, "id");
+
+    expect(capturedDocs).toEqual([
+      {
+        id: "1",
+        "address__city": "Paris",
+        _transformed: true,
+      },
+    ]);
   });
 
   test("upsert does nothing if items array is empty", async () => {
@@ -170,5 +273,65 @@ describe("MeilisearchAdapter", () => {
 
     expect(res.healthy).toBe(true);
     expect(res.version).toBe("1.8.0");
+  });
+
+  test("supports typed indexesSettings with repo keys and nested dot-notation fields", async () => {
+    type TestRepoMapping = {
+      users: {
+        _modelType: {
+          id: string;
+          email: string;
+          profile: {
+            age: number;
+            address: {
+              city: string;
+              zip: string;
+            };
+          };
+          tags: string[];
+        };
+        _isGroup: false;
+      };
+      posts: {
+        _modelType: {
+          postId: string;
+          title: string;
+          author: {
+            name: string;
+          };
+        };
+        _isGroup: false;
+      };
+    };
+
+    const mockClient = {
+      index: mock((_uid: string) => ({
+        updateSettings: mock(async () => {}),
+      })),
+      getIndex: mock(async (_uid: string) => {
+        const err: any = new Error("Not found");
+        err.code = "index_not_found";
+        throw err;
+      }),
+      createIndex: mock(async () => {}),
+    };
+
+    const adapter = new MeilisearchAdapter<TestRepoMapping>({
+      client: mockClient,
+      indexesSettings: {
+        users: {
+          filterableAttributes: ["profile.address.city", "profile.age", "tags", "email"],
+          sortableAttributes: ["profile.age", "email"],
+          searchableAttributes: ["email", "profile.address.city"],
+          distinctAttribute: "email",
+        },
+        posts: {
+          filterableAttributes: ["author.name", "postId"],
+          searchableAttributes: ["title", "author.name"],
+        },
+      },
+    });
+
+    expect(adapter.name).toBe("meilisearch");
   });
 });

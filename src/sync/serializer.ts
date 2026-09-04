@@ -1,13 +1,18 @@
 import type { RepoSyncConfig } from "./types";
 
 /**
- * Convert a single Firestore value into a SQL-safe primitive.
+ * Convert a single Firestore value into a SQL-safe primitive or JSON-serializable value.
  *
- * Complex types (arrays, GeoPoints, binary) become JSON strings.
+ * Complex types (arrays, GeoPoints, binary) become JSON strings in flat mode.
+ * In non-flat mode (`stringifyArrays: false`), arrays and nested objects stay structured.
  * Primitives pass through unchanged.
- * Objects are NOT stringified here — they are flattened by serializeDocument.
  */
-export function serializeValue(value: unknown): unknown {
+export function serializeValue(
+  value: unknown,
+  options?: { stringifyArrays?: boolean },
+  seen: WeakSet<object> = new WeakSet(),
+  depth = 0,
+): unknown {
   if (value === null || value === undefined) return null;
 
   // Firestore Timestamp (duck-typed: has .toDate())
@@ -33,16 +38,37 @@ export function serializeValue(value: unknown): unknown {
     "longitude" in (value as object)
   ) {
     const geo = value as { latitude: number; longitude: number };
+    if (options?.stringifyArrays === false) {
+      return { lat: geo.latitude, lng: geo.longitude };
+    }
     return JSON.stringify({ lat: geo.latitude, lng: geo.longitude });
   }
 
-  // Arrays → JSON (native JSON column in BigQuery)
+  // Arrays
   if (Array.isArray(value)) {
-    return JSON.stringify(value.map(serializeValue));
+    const mapped = value.map((item) =>
+      serializeValue(item, options, seen, depth + 1),
+    );
+    return options?.stringifyArrays === false ? mapped : JSON.stringify(mapped);
+  }
+
+  // Plain objects (when inside nested serialization)
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    options?.stringifyArrays === false
+  ) {
+    return serializeNestedObject(
+      value as Record<string, unknown>,
+      new Set(),
+      {},
+      seen,
+      depth + 1,
+    );
   }
 
   // string | number | boolean — pass through
-  // Plain objects are handled by flattenObject in serializeDocument
+  // Plain objects in flat mode are handled by flattenObject in serializeDocument
   return value;
 }
 
@@ -114,37 +140,166 @@ function flattenObject(
 }
 
 /**
- * Serialize a full Firestore document into a flat object of SQL-safe values.
+ * Recursively serialize a nested object preserving object and array structures,
+ * while serializing leaf values (Timestamps, Dates, Buffers, GeoPoints).
+ */
+function serializeNestedObject(
+  obj: Record<string, unknown>,
+  exclude: Set<string>,
+  columnMap: Record<string, string>,
+  seen: WeakSet<object> = new WeakSet(),
+  depth = 0,
+): Record<string, unknown> {
+  if (depth > MAX_FLATTEN_DEPTH) {
+    return { __truncated: true };
+  }
+  if (seen.has(obj)) {
+    return { __cycle: true };
+  }
+  seen.add(obj);
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (exclude.has(key)) continue;
+    const mappedKey = columnMap[key] ?? key;
+
+    if (
+      value !== null &&
+      value !== undefined &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      !(value instanceof Date) &&
+      !Buffer.isBuffer(value) &&
+      !(value instanceof Uint8Array) &&
+      typeof (value as Record<string, unknown>).toDate !== "function" &&
+      !("latitude" in (value as object) && "longitude" in (value as object))
+    ) {
+      result[mappedKey] = serializeNestedObject(
+        value as Record<string, unknown>,
+        new Set(),
+        {},
+        seen,
+        depth + 1,
+      );
+    } else {
+      result[mappedKey] = serializeValue(
+        value,
+        { stringifyArrays: false },
+        seen,
+        depth + 1,
+      );
+    }
+  }
+
+  seen.delete(obj);
+  return result;
+}
+
+/**
+ * Reconstructs nested objects from flat double-underscore keys (`address__city` → `address.city`)
+ * and parses JSON-stringified arrays back into native arrays.
+ */
+export function unflattenDocument(
+  doc: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+
+  for (const [key, rawValue] of Object.entries(doc)) {
+    let value = rawValue;
+
+    // If array or object was stringified into JSON (e.g. from a flat SQL sync worker event)
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (
+        (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+        (trimmed.startsWith("{") && trimmed.endsWith("}"))
+      ) {
+        try {
+          value = JSON.parse(trimmed);
+        } catch {
+          // Keep as string if not valid JSON
+        }
+      }
+    }
+
+    if (key.startsWith("__") || !key.includes("__")) {
+      result[key] = value;
+      continue;
+    }
+
+    const parts = key.split("__").filter(Boolean);
+    let current: any = result;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const part = parts[i]!;
+      if (
+        !current[part] ||
+        typeof current[part] !== "object" ||
+        Array.isArray(current[part])
+      ) {
+        current[part] = {};
+      }
+      current = current[part];
+    }
+    current[parts[parts.length - 1]!] = value;
+  }
+
+  return result;
+}
+
+/**
+ * Serialize a full Firestore document.
  *
+ * When `flat` is `true` (default):
  * Nested objects are flattened into underscore-separated column names
  * (e.g. `address.street` → `address_street`). Arrays become JSON strings.
- * Applies optional field exclusions and column renames from `options`.
+ *
+ * When `flat` is `false`:
+ * Nested objects and native arrays are preserved with leaf types normalized
+ * (ideal for Meilisearch and document search engines).
+ *
+ * Applies optional field exclusions, column renames, and custom `transformDoc`.
  */
 export function serializeDocument(
   doc: Record<string, unknown>,
-  options?: Pick<RepoSyncConfig, "exclude" | "columnMap">,
+  options?: Pick<
+    RepoSyncConfig,
+    "exclude" | "columnMap" | "flat" | "transformDoc"
+  >,
 ): Record<string, unknown> {
-  const exclude = new Set(options?.exclude);
-  const columnMap = options?.columnMap ?? {};
+  const isFlat = options?.flat !== false;
+  let result: Record<string, unknown>;
 
-  // First flatten the document
-  const flat: Record<string, unknown> = {};
-  flattenObject(doc, "", flat);
+  if (isFlat) {
+    const exclude = new Set(options?.exclude);
+    const columnMap = options?.columnMap ?? {};
 
-  // Then apply excludes and column renames
-  const result: Record<string, unknown> = {};
-  for (const [flatKey, value] of Object.entries(flat)) {
-    if (exclude.has(flatKey)) continue;
-    // Also check top-level prefix for excludes (e.g. exclude "address" removes all address_* cols)
-    const topLevel = flatKey.split("__")[0]!;
-    if (topLevel !== flatKey && exclude.has(topLevel)) continue;
-    const column =
-      columnMap[flatKey] ??
-      (flatKey.includes("__")
-        ? columnMap[flatKey.split("__").pop()!]
-        : undefined) ??
-      flatKey;
-    result[column] = value;
+    // First flatten the document
+    const flat: Record<string, unknown> = {};
+    flattenObject(doc, "", flat);
+
+    // Then apply excludes and column renames
+    result = {};
+    for (const [flatKey, value] of Object.entries(flat)) {
+      if (exclude.has(flatKey)) continue;
+      // Also check top-level prefix for excludes (e.g. exclude "address" removes all address_* cols)
+      const topLevel = flatKey.split("__")[0]!;
+      if (topLevel !== flatKey && exclude.has(topLevel)) continue;
+      const column =
+        columnMap[flatKey] ??
+        (flatKey.includes("__")
+          ? columnMap[flatKey.split("__").pop()!]
+          : undefined) ??
+        flatKey;
+      result[column] = value;
+    }
+  } else {
+    const exclude = new Set(options?.exclude);
+    const columnMap = (options?.columnMap ?? {}) as Record<string, string>;
+    result = serializeNestedObject(doc, exclude, columnMap);
+  }
+
+  if (typeof options?.transformDoc === "function") {
+    result = options.transformDoc(result);
   }
 
   return result;

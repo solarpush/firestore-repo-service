@@ -182,6 +182,8 @@ export function createSyncTriggers<M extends Record<string, any>>(
           const serialized = serializeDocument(data, {
             exclude: repoCfg?.exclude,
             columnMap: repoCfg?.columnMap,
+            flat: repoCfg?.flat,
+            transformDoc: repoCfg?.transformDoc,
           });
 
           const syncEvent: SyncEvent = {
@@ -203,6 +205,8 @@ export function createSyncTriggers<M extends Record<string, any>>(
           const serialized = serializeDocument(data, {
             exclude: repoCfg?.exclude,
             columnMap: repoCfg?.columnMap,
+            flat: repoCfg?.flat,
+            transformDoc: repoCfg?.transformDoc,
           });
 
           const syncEvent: SyncEvent = {
