@@ -7,6 +7,7 @@
  */
 
 import type {
+  DocumentOptions,
   onDocumentWritten,
 } from "firebase-functions/v2/firestore";
 import type { HttpsOptions, onRequest } from "firebase-functions/v2/https";
@@ -15,6 +16,14 @@ import type {
   onMessagePublished,
 } from "firebase-functions/v2/pubsub";
 import type { z } from "zod";
+
+/**
+ * Cloud Functions v2 options forwarded to `onDocumentWritten()` for every
+ * sync trigger handler. The `document` field is omitted because the library sets
+ * it itself from `triggerPath` or the repository collection path.
+ */
+export type TriggerOptions = Omit<DocumentOptions, "document">;
+export type SyncTriggerOptions = TriggerOptions;
 
 /**
  * Cloud Functions v2 options forwarded to `onMessagePublished()` for every
@@ -318,6 +327,11 @@ export interface RepoSyncConfig<F extends string = string> {
    * Optional custom document transformation function applied after serialization.
    */
   transformDoc?: (doc: Record<string, unknown>) => Record<string, unknown>;
+  /**
+   * Cloud Functions v2 options forwarded to `onDocumentWritten()` for this
+   * repository's sync trigger. Overrides global `triggerOptions`.
+   */
+  triggerOptions?: SyncTriggerOptions;
 }
 
 import type { FieldPath } from "../shared/types";
@@ -418,6 +432,12 @@ export interface SyncTriggersConfig<M = Record<string, any>> {
   deps: Pick<SyncDeps, "firestoreTriggers" | "pubsub">;
   /** PubSub topic name prefix (topics will be `{prefix}-{repoName}`) */
   topicPrefix?: string;
+  /**
+   * Cloud Functions v2 options forwarded to `onDocumentWritten()` for every
+   * sync trigger handler. Use to configure `region`, `vpcConnector`,
+   * `memory`, `cpu`, `timeoutSeconds`, `maxInstances`, `secrets`, etc.
+   */
+  triggerOptions?: SyncTriggerOptions;
   /** Per-repo overrides */
   repos?: TypedRepoSyncConfigs<M>;
 }
@@ -561,6 +581,12 @@ export interface FirestoreSyncConfig<M = Record<string, any>> {
    * `memory`, `timeoutSeconds`, `region`, `cpu`, etc.
    */
   workerOptions?: SyncWorkerOptions;
+  /**
+   * Cloud Functions v2 options forwarded to `onDocumentWritten()` for every
+   * sync trigger handler. Use to tune `region`, `vpcConnector`, `memory`,
+   * `timeoutSeconds`, `maxInstances`, `secrets`, etc.
+   */
+  triggerOptions?: SyncTriggerOptions;
   /**
    * Optional sync admin endpoint. When provided, an `adminsync` handler is
    * added to `sync.functions` exposing health-check, force-sync, and queue

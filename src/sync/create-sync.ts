@@ -79,6 +79,7 @@ export function createFirestoreSync<M extends Record<string, any>>(
     autoMigrate,
     admin: adminConfig,
     workerOptions,
+    triggerOptions,
     repos: repoConfigs,
   } = config;
 
@@ -99,6 +100,7 @@ export function createFirestoreSync<M extends Record<string, any>>(
   const triggers = createSyncTriggers(repoMapping, {
     deps: { firestoreTriggers: deps.firestoreTriggers, pubsub },
     topicPrefix,
+    triggerOptions,
     repos: repoConfigs,
   });
 

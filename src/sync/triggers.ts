@@ -170,9 +170,13 @@ export function createSyncTriggers<M extends Record<string, any>>(
     const documentKey: string = meta.documentKey;
     const topicName = `${topicPrefix}-${repoName}`;
 
-    triggers[`${repoName}_onSync`] = onDocumentWritten(
-      documentPath,
-      async (event: any) => {
+    const effectiveTriggerOptions = {
+      ...config?.triggerOptions,
+      ...repoCfg?.triggerOptions,
+    };
+    const hasTriggerOptions = Object.keys(effectiveTriggerOptions).length > 0;
+
+    const triggerHandler = async (event: any) => {
         const before = event.data?.before;
         const after = event.data?.after;
 
@@ -243,8 +247,14 @@ export function createSyncTriggers<M extends Record<string, any>>(
 
           await publish(topicName, syncEvent);
         }
-      },
-    );
+      };
+
+    triggers[`${repoName}_onSync`] = hasTriggerOptions
+      ? onDocumentWritten(
+          { document: documentPath, ...effectiveTriggerOptions } as any,
+          triggerHandler,
+        )
+      : onDocumentWritten(documentPath, triggerHandler);
   }
 
   return triggers;

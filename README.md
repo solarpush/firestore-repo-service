@@ -443,6 +443,7 @@ import * as pubsubHandler from "firebase-functions/v2/pubsub";
 const servers = createServers(repos, {
   onRequest,
   httpsOptions: { invoker: "public" },
+  triggerOptions: { region: "europe-west1" },
 });
 
 // Admin UI — repo auto-injected from the key, fieldsConfig typed against the model
@@ -510,6 +511,8 @@ export const { functions } = servers.sync({
   ],
   topicPrefix: "firestore-sync",
   autoMigrate: true,
+  workerOptions: { concurrency: 20, memory: "512MiB" },
+  triggerOptions: { region: "europe-west1" },
   admin: {
     auth: { type: "basic", username: "admin", password: "secret" },
     featuresFlag: { healthCheck: true, manualSync: true, configCheck: true },

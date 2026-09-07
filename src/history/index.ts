@@ -34,6 +34,8 @@ export type {
   HistoryMeta,
   HistoryOperation,
   HistoryRawListOptions,
+  HistoryTriggerOptions,
+  TriggerOptions,
   HistoryTriggerRepoOverride,
   HistoryTriggersConfig,
   HistoryValueType,

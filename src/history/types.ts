@@ -8,7 +8,17 @@
  */
 
 import type { Timestamp } from "firebase-admin/firestore";
-import type { onDocumentWritten } from "firebase-functions/v2/firestore";
+import type {
+  DocumentOptions,
+  onDocumentWritten,
+} from "firebase-functions/v2/firestore";
+
+/**
+ * Cloud Functions v2 options forwarded to `onDocumentWritten()` for history triggers.
+ * The `document` field is omitted because the library sets it itself from the collection path.
+ */
+export type TriggerOptions = Omit<DocumentOptions, "document">;
+export type HistoryTriggerOptions = TriggerOptions;
 
 /* ------------------------------------------------------------------------- */
 /* Public unified shape                                                      */
@@ -134,6 +144,11 @@ export interface HistoryConfigBase {
    * the TTL policy on the `expiresAt` field via gcloud / console.
    */
   ttl?: { days: number };
+  /**
+   * Cloud Functions v2 options forwarded to `onDocumentWritten()` for this
+   * repository's history trigger (e.g. `region`, `vpcConnector`, `memory`, etc.).
+   */
+  triggerOptions?: HistoryTriggerOptions;
 }
 
 /**
@@ -214,12 +229,23 @@ export interface HistoryTriggerRepoOverride {
    * @example "residences/{residenceId}/workshops/{docId}"
    */
   triggerPath?: string;
+  /**
+   * Cloud Functions v2 options forwarded to `onDocumentWritten()` for this
+   * repository's history trigger. Overrides global `triggerOptions`.
+   */
+  triggerOptions?: HistoryTriggerOptions;
 }
 
 export interface HistoryTriggersConfig<M = Record<string, any>> {
   deps: HistoryFirestoreTriggersDep;
   /** Defaults applied to every repo unless overridden. */
   defaults?: { ttl?: { days: number } };
+  /**
+   * Cloud Functions v2 options forwarded to `onDocumentWritten()` for every
+   * history trigger handler. Use to configure `region`, `vpcConnector`,
+   * `memory`, `cpu`, `timeoutSeconds`, `maxInstances`, `secrets`, etc.
+   */
+  triggerOptions?: HistoryTriggerOptions;
   /** Per-repo overrides keyed by repo name in the mapping. */
   repos?: Partial<Record<keyof M & string, HistoryTriggerRepoOverride>>;
 }

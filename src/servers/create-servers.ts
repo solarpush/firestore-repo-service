@@ -39,6 +39,7 @@
  * caller-provided `onRequest`). Otherwise they return the raw handler.
  */
 
+import type { DocumentOptions } from "firebase-functions/v2/firestore";
 import type { HttpsOptions, onRequest as OnRequestFn } from "firebase-functions/v2/https";
 import { createHistoryTriggers } from "../history/triggers";
 import type { HistoryTriggersConfig } from "../history/types";
@@ -103,6 +104,13 @@ export type BoundFirestoreSyncConfig<TRepos extends Record<string, any>> =
 // Shared deps
 // ---------------------------------------------------------------------------
 
+/**
+ * Cloud Functions v2 options forwarded to `onDocumentWritten()` for Firestore triggers
+ * (sync & history). The `document` field is omitted because the library sets it
+ * itself from the collection / document path.
+ */
+export type TriggerOptions = Omit<DocumentOptions, "document">;
+
 /** Optional dependencies shared across every server. */
 export interface CreateServersDeps {
   /**
@@ -117,6 +125,11 @@ export interface CreateServersDeps {
    * override these defaults.
    */
   httpsOptions?: HttpsOptions;
+  /**
+   * Default `triggerOptions` applied to Firestore triggers (`servers.sync` & `servers.history`).
+   * Per-pipeline or per-repo options override these defaults.
+   */
+  triggerOptions?: TriggerOptions;
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +262,14 @@ export function createServers<
      * bundled `adminsync` Cloud Function is auto-generated.
      */
     sync(config: BoundFirestoreSyncConfig<TRepos>) {
-      const merged: BoundFirestoreSyncConfig<TRepos> = { ...config };
+      const triggerOptions =
+        deps.triggerOptions || config.triggerOptions
+          ? { ...deps.triggerOptions, ...config.triggerOptions }
+          : undefined;
+      const merged: BoundFirestoreSyncConfig<TRepos> = {
+        ...config,
+        ...(triggerOptions ? { triggerOptions } : {}),
+      };
       if (deps.onRequest && merged.admin && !merged.admin.onRequest) {
         merged.admin = {
           ...merged.admin,
@@ -291,11 +311,9 @@ export function createServers<
      * config has `history.enabled === true`. Returns the trigger map
      * (keys: `${repoName}_onHistory`).
      *
-     * Note: history triggers are Firestore document triggers, not HTTPS
-     * functions, so they do **not** inherit the `httpsOptions` declared on
-     * `createServers`. Region / runtime options must be configured via the
-     * Firebase Functions `setGlobalOptions(...)` API or by post-wrapping
-     * the returned trigger.
+     * Triggers inherit `triggerOptions` declared on `createServers` (e.g. `region`,
+     * `vpcConnector`), which can also be overridden per pipeline in `config.triggerOptions`
+     * or per repository.
      *
      * @example
      * ```ts
@@ -304,12 +322,21 @@ export function createServers<
      * export const historyTriggers = servers.history({
      *   deps: { onDocumentWritten: firestoreTriggers.onDocumentWritten },
      *   defaults: { ttl: { days: 365 } },
+     *   triggerOptions: { region: "europe-west1" },
      * });
      * // export const { posts_onHistory } = historyTriggers;
      * ```
      */
     history(config: HistoryTriggersConfig<TRepos>): Record<string, any> {
-      return createHistoryTriggers(repos, config);
+      const triggerOptions =
+        deps.triggerOptions || config.triggerOptions
+          ? { ...deps.triggerOptions, ...config.triggerOptions }
+          : undefined;
+      const merged: HistoryTriggersConfig<TRepos> = {
+        ...config,
+        ...(triggerOptions ? { triggerOptions } : {}),
+      };
+      return createHistoryTriggers(repos, merged);
     },
   };
 }

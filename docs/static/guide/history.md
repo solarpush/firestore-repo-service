@@ -57,20 +57,23 @@ Two equivalent ways:
 
 #### Via `createServers` (recommended)
 
-`servers.history()` lives next to `servers.api()` / `servers.sync()` and reuses the same `repos` instance. Note that history is built on Firestore triggers, so it does **not** inherit `httpsOptions` from the API server.
+`servers.history()` lives next to `servers.api()` / `servers.sync()` and reuses the same `repos` instance. History triggers automatically inherit `triggerOptions` declared on `createServers` (or can be configured directly via `triggerOptions: { region, vpcConnector, memory, ... }`).
 
 ```typescript
 import { createServers } from "@lpdjs/firestore-repo-service";
 import * as firestoreTriggers from "firebase-functions/v2/firestore";
 import { repos } from "./repos";
 
-const servers = createServers({ repos /* …other deps */ });
+const servers = createServers(repos, {
+  triggerOptions: { region: "europe-west1" },
+});
 
 export const historyTriggers = servers.history({
   deps: { onDocumentWritten: firestoreTriggers.onDocumentWritten },
-  defaults: { ttl: { field: "expiresAt", days: 365 } },
+  defaults: { ttl: { days: 365 } },
+  triggerOptions: { memory: "256MiB" }, // merges with region: "europe-west1"
   repos: {
-    residences: { exclude: ["internalState"] },
+    residences: { triggerPath: "residences/{docId}" },
   },
 });
 

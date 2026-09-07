@@ -28,6 +28,8 @@ export type {
   SyncHealthResult,
   SyncOperation,
   SyncTriggersConfig,
+  SyncTriggerOptions,
+  TriggerOptions,
   SyncWorkerConfig,
   SyncWorkerOptions,
   AdminHttpsOptions,

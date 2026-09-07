@@ -142,9 +142,14 @@ export function createHistoryTriggers<M extends Record<string, any>>(
     const documentKey: string = systemKeys[0] ?? "docId";
     const metaFields = metaFieldsOf(repoCfg as HistoryConfigForModel<unknown>);
 
-    triggers[`${repoName}_onHistory`] = onDocumentWritten(
-      documentPath,
-      async (event: any) => {
+    const effectiveTriggerOptions = {
+      ...config.triggerOptions,
+      ...(repoCfg as any)?.triggerOptions,
+      ...override?.triggerOptions,
+    };
+    const hasTriggerOptions = Object.keys(effectiveTriggerOptions).length > 0;
+
+    const triggerHandler = async (event: any) => {
         try {
           const before = event.data?.before?.data() as
             | Record<string, unknown>
@@ -217,8 +222,14 @@ export function createHistoryTriggers<M extends Record<string, any>>(
             err,
           );
         }
-      },
-    );
+      };
+
+    triggers[`${repoName}_onHistory`] = hasTriggerOptions
+      ? onDocumentWritten(
+          { document: documentPath, ...effectiveTriggerOptions } as any,
+          triggerHandler,
+        )
+      : onDocumentWritten(documentPath, triggerHandler);
   }
 
   return triggers;

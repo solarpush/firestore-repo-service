@@ -46,6 +46,8 @@ const sync = servers.sync({
   ],
   topicPrefix: "firestore-sync",
   autoMigrate: true,
+  workerOptions: { region: "europe-west1", concurrency: 20, memory: "512MiB" },
+  triggerOptions: { region: "europe-west1" },
   admin: {
     httpsOptions: { invoker: "public" },
     auth: { type: "basic", username: "admin", password: "secret" },
@@ -94,6 +96,7 @@ Le wrapper unifié qui crée les triggers, les workers et le serveur admin optio
 | `flushIntervalMs` | `number`                            | `5000`             | Intervalle de flush en ms                                  |
 | `autoMigrate`     | `boolean`                           | `false`            | Créer/migrer les tables et index automatiquement           |
 | `workerOptions`   | `SyncWorkerOptions`                 | —                  | Options CF v2 du worker (`concurrency`, `maxInstances`, …) |
+| `triggerOptions`  | `TriggerOptions`                    | —                  | Options CF v2 des triggers (`region`, `vpcConnector`, …)   |
 | `admin`           | `adminsyncConfig`                   | —                  | Configuration optionnelle de l'admin                       |
 | `repos`           | `TypedRepoSyncConfigs`              | —                  | Surcharges par repo                                        |
 
@@ -201,13 +204,14 @@ ci-dessus).
 
 ## Tuning & Scaling
 
-Trois leviers pour ajuster latence, throughput et pression sur les quotas BigQuery :
+Quatre leviers pour ajuster latence, throughput, localisation/VPC et pression sur les quotas BigQuery :
 
-| Option            | Où               | Défaut | Ce qu'il contrôle                                            |
-| ----------------- | ---------------- | ------ | ------------------------------------------------------------ |
-| `batchSize`       | config top-level | `100`  | Nombre max de lignes par `MERGE` BigQuery                    |
-| `flushIntervalMs` | config top-level | `5000` | Délai max avant de flush la queue mémoire                    |
-| `workerOptions`   | config top-level | —      | Options Cloud Functions v2 du worker (concurrence, scaling…) |
+| Option            | Où                    | Défaut | Ce qu'il contrôle                                            |
+| ----------------- | --------------------- | ------ | ------------------------------------------------------------ |
+| `batchSize`       | config top-level      | `100`  | Nombre max de lignes par `MERGE` BigQuery                    |
+| `flushIntervalMs` | config top-level      | `5000` | Délai max avant de flush la queue mémoire                    |
+| `workerOptions`   | config top-level      | —      | Options Cloud Functions v2 du worker (concurrence, scaling…) |
+| `triggerOptions`  | top-level ou par repo | —      | Options Cloud Functions v2 des triggers (région, VPC, RAM…)  |
 
 ```typescript
 createServers(repos).sync({
@@ -223,12 +227,20 @@ createServers(repos).sync({
     region: "europe-west1",
     retry: true, // PubSub retry sur throw → aucun event perdu
   },
+  triggerOptions: {
+    region: "europe-west1",
+    vpcConnector: "my-connector",
+  },
 });
 ```
 
 `workerOptions` est transmis tel quel à `onMessagePublished({ topic, ...workerOptions }, …)`.
 Tous les champs de [`PubSubOptions`](https://firebase.google.com/docs/reference/functions/2nd-gen/node/firebase-functions.v2.pubsub.pubsuboptions)
 sont acceptés (`cpu`, `vpcConnector`, `serviceAccount`, `secrets`, etc.).
+
+`triggerOptions` est transmis tel quel à `onDocumentWritten({ document, ...triggerOptions }, …)`.
+Tous les champs de [`DocumentOptions`](https://firebase.google.com/docs/reference/functions/2nd-gen/node/firebase-functions.v2.firestore.documentoptions)
+sont acceptés (`region`, `vpcConnector`, `vpcConnectorEgressSettings`, `memory`, `cpu`, `timeoutSeconds`, `secrets`, etc.). Il peut aussi être configuré par repository dans `repos.<nom>.triggerOptions` ou hérité de `createServers(repos, { triggerOptions })`.
 
 ### Concurrence & sémantique d'ack PubSub
 

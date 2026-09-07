@@ -45,6 +45,7 @@ export type {
   BoundCrudServerOptions,
   BoundFirestoreSyncConfig,
   CreateServersDeps,
+  TriggerOptions,
 } from "./create-servers";
 
 // ── Admin ORM (types only — use `createServers().admin()` to build) ─────────

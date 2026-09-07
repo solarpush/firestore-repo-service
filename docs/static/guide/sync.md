@@ -46,6 +46,8 @@ const sync = servers.sync({
   ],
   topicPrefix: "firestore-sync",
   autoMigrate: true,
+  workerOptions: { region: "europe-west1", concurrency: 20, memory: "512MiB" },
+  triggerOptions: { region: "europe-west1" },
   admin: {
     httpsOptions: { invoker: "public" },
     auth: { type: "basic", username: "admin", password: "secret" },
@@ -94,6 +96,7 @@ The unified wrapper that creates triggers, workers, and the optional admin serve
 | `flushIntervalMs` | `number`                            | `5000`             | Flush interval in ms                                            |
 | `autoMigrate`     | `boolean`                           | `false`            | Auto-create/migrate tables and indexes on first event           |
 | `workerOptions`   | `SyncWorkerOptions`                 | —                  | CF v2 options for the worker (`concurrency`, `maxInstances`, …) |
+| `triggerOptions`  | `TriggerOptions`                    | —                  | CF v2 options for the triggers (`region`, `vpcConnector`, …)    |
 | `admin`           | `adminsyncConfig`                   | —                  | Optional admin endpoint config                                  |
 | `repos`           | `TypedRepoSyncConfigs`              | —                  | Per-repo overrides                                              |
 
@@ -210,13 +213,14 @@ The helper has been removed in favour of application-level versioning (see above
 
 ## Tuning & Scaling
 
-Three knobs let you trade latency, throughput and BigQuery quota pressure:
+Four knobs let you trade latency, throughput, VPC/location and BigQuery quota pressure:
 
-| Option            | Where            | Default | What it controls                                                            |
-| ----------------- | ---------------- | ------- | --------------------------------------------------------------------------- |
-| `batchSize`       | top-level config | `100`   | Max rows merged per flush batch                                             |
-| `flushIntervalMs` | top-level config | `5000`  | Max time a row sits in the in-memory queue before being flushed             |
-| `workerOptions`   | top-level config | —       | Cloud Functions v2 options for every worker handler (concurrency, scaling…) |
+| Option            | Where                   | Default | What it controls                                                            |
+| ----------------- | ----------------------- | ------- | --------------------------------------------------------------------------- |
+| `batchSize`       | top-level config        | `100`   | Max rows merged per flush batch                                             |
+| `flushIntervalMs` | top-level config        | `5000`  | Max time a row sits in the in-memory queue before being flushed             |
+| `workerOptions`   | top-level config        | —       | Cloud Functions v2 options for every worker handler (concurrency, scaling…) |
+| `triggerOptions`  | top-level or per-repo   | —       | Cloud Functions v2 options for Firestore triggers (region, VPC, RAM…)       |
 
 ```typescript
 createServers(repos).sync({
@@ -230,14 +234,22 @@ createServers(repos).sync({
     memory: "512MiB",
     timeoutSeconds: 120,
     region: "europe-west1",
-    retry: true, // PubSub retries on thrown error → no event loss
+    retry: true, // PubSub retry on unhandled throw → no dropped events
+  },
+  triggerOptions: {
+    region: "europe-west1",
+    vpcConnector: "my-connector",
   },
 });
 ```
 
-`workerOptions` is forwarded as-is to `onMessagePublished({ topic, ...workerOptions }, …)`.
-Any [`PubSubOptions`](https://firebase.google.com/docs/reference/functions/2nd-gen/node/firebase-functions.v2.pubsub.pubsuboptions)
-field is accepted (`cpu`, `vpcConnector`, `serviceAccount`, `secrets`, etc.).
+`workerOptions` is forwarded verbatim to `onMessagePublished({ topic, ...workerOptions }, …)`.
+All fields of [`PubSubOptions`](https://firebase.google.com/docs/reference/functions/2nd-gen/node/firebase-functions.v2.pubsub.pubsuboptions)
+are accepted (`cpu`, `vpcConnector`, `serviceAccount`, `secrets`, etc.).
+
+`triggerOptions` is forwarded verbatim to `onDocumentWritten({ document, ...triggerOptions }, …)`.
+All fields of [`DocumentOptions`](https://firebase.google.com/docs/reference/functions/2nd-gen/node/firebase-functions.v2.firestore.documentoptions)
+are accepted (`region`, `vpcConnector`, `vpcConnectorEgressSettings`, `memory`, `cpu`, `timeoutSeconds`, `secrets`, etc.). Can also be declared globally via `createServers(repos, { triggerOptions })` (inherited by both sync and history) or overridden per repo via `repos.<name>.triggerOptions`.
 
 ### Concurrency & PubSub ack semantics
 
