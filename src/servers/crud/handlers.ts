@@ -270,17 +270,46 @@ function resolveFieldPathSchema(entrySchema: any, path: string): any {
 
 /** Recursively make Zod objects deep-partial for PATCH updates */
 function makeDeepPartial(s: z.ZodType): z.ZodType {
-  const unwrapped = unwrapZodType(s);
-  const def = (unwrapped as any)?._zod?.def ?? (unwrapped as any)?._def;
+  const def = (s as any)?._zod?.def ?? (s as any)?._def;
   const typeName = def?.typeName ?? def?.type;
+
   if (typeName === "ZodObject" || typeName === "object") {
-    const shape = (unwrapped as z.ZodObject<any>).shape;
+    const shape = (s as z.ZodObject<any>).shape;
     const newShape: Record<string, z.ZodType> = {};
     for (const [k, v] of Object.entries(shape)) {
       newShape[k] = makeDeepPartial(v as z.ZodType);
     }
     return z.object(newShape).partial();
   }
+
+  if (typeName === "ZodOptional" || typeName === "optional") {
+    const inner = def.innerType as z.ZodType | undefined;
+    if (!inner) return s;
+    const nextInner = makeDeepPartial(inner);
+    return nextInner === inner ? s : nextInner.optional();
+  }
+
+  if (typeName === "ZodNullable" || typeName === "nullable") {
+    const inner = def.innerType as z.ZodType | undefined;
+    if (!inner) return s;
+    const nextInner = makeDeepPartial(inner);
+    return nextInner === inner ? s : nextInner.nullable();
+  }
+
+  if (typeName === "ZodDefault" || typeName === "default") {
+    const inner = def.innerType as z.ZodType | undefined;
+    if (!inner) return s;
+    return makeDeepPartial(inner).optional();
+  }
+
+  if (typeName === "ZodUnion" || typeName === "union") {
+    const options = def.options as z.ZodType[] | undefined;
+    if (!options || options.length < 2) return s;
+    const nextOptions = options.map((opt) => makeDeepPartial(opt));
+    const changed = nextOptions.some((opt, i) => opt !== options[i]);
+    return changed ? z.union(nextOptions as any) : s;
+  }
+
   return s;
 }
 
@@ -328,10 +357,13 @@ function validateData(
             error: `Field '${key}' does not exist in schema`,
           };
         }
+        const effectiveFieldSchema = partial
+          ? makeDeepPartial(fieldSchema)
+          : fieldSchema;
         const wrappedSchema =
           getDateHandling() === "normalize"
-            ? wrapDateSchemas(fieldSchema)
-            : fieldSchema;
+            ? wrapDateSchemas(effectiveFieldSchema)
+            : effectiveFieldSchema;
         const parsedValue = wrappedSchema.parse(value);
         resultData[key] = parsedValue;
       } else {

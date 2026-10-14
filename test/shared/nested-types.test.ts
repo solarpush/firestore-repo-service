@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import type { FieldPath, WhereClause } from "../../src/shared/types";
+import type { UpdatableData } from "../../src/repositories/types";
+import type {
+  FieldPath,
+  RepositoryConfig,
+  WhereClause,
+} from "../../src/shared/types";
 
 describe("FieldPath and WhereClause with optional and nullable fields", () => {
   const postSchema = z.object({
@@ -42,4 +47,41 @@ describe("FieldPath and WhereClause with optional and nullable fields", () => {
     expect(whereNested).toBeDefined();
     expect(whereNull).toBeDefined();
   });
+
+  test("UpdatableData supports deep-partial objects and dot-notation keys", () => {
+    type PostRepoConfig = RepositoryConfig<
+      Post,
+      readonly ["docId"],
+      readonly [],
+      false,
+      (db: any, docId: string) => any,
+      {},
+      "docId"
+    >;
+
+    type PostUpdate = UpdatableData<PostRepoConfig>;
+
+    const dotUpdate: PostUpdate = {
+      "address.city": "Paris",
+    };
+    const nestedPartialUpdate: PostUpdate = {
+      address: { city: "Lyon" },
+    };
+    const nullNestedUpdate: PostUpdate = {
+      address: null,
+    };
+
+    // @ts-expect-error - invalid dot-notation key must be rejected
+    const invalidKeyUpdate: PostUpdate = { "address.unknown": "Paris" };
+    // @ts-expect-error - invalid value type on dot-notation key must be rejected
+    const invalidValueUpdate: PostUpdate = { "address.city": 123 };
+
+    expect(dotUpdate["address.city"]).toBe("Paris");
+    expect(nestedPartialUpdate.address?.city).toBe("Lyon");
+    expect(nullNestedUpdate.address).toBeNull();
+    expect(invalidKeyUpdate).toBeDefined();
+    expect(invalidValueUpdate).toBeDefined();
+  });
 });
+
+

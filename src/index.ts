@@ -9,6 +9,8 @@ import type { z } from "zod";
 
 // Shared types
 export type {
+  DeepPartial,
+  DotNotationUpdate,
   ExtractDocumentRefSignature,
   ExtractUpdateSignature,
   FieldPath,
@@ -56,6 +58,7 @@ export type {
   IncludeConfigTyped,
   PaginationWithIncludeOptionsTyped,
   PopulateOptionsTyped,
+  UpdatableData,
 } from "./repositories/types";
 
 // Date handling (global)

@@ -19,6 +19,12 @@ export type ExtractDocumentRefSignature<T> = T extends (
   : never;
 
 /**
+ * `true` when `T` is `any` (the `0 extends (1 & T)` trick).
+ * @internal
+ */
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
+/**
  * Extract the update signature from refCb
  * @internal
  */
@@ -26,22 +32,24 @@ export type ExtractUpdateSignature<T, TType> = T extends (
   db: Firestore,
   ...args: infer P
 ) => DocumentReference
-  ? (...args: [...P, Partial<TType>]) => Promise<TType>
+  ? (...args: [...P, DeepPartial<TType> & DotNotationUpdate<TType>]) => Promise<TType>
   : never;
 
 /**
  * Check if a type is a plain object (not Date, Array, Function, etc.)
  * @internal
  */
-type IsPlainObject<T> = NonNullable<T> extends Date
+type IsPlainObject<T> = IsAny<T> extends true
   ? false
-  : NonNullable<T> extends Array<any>
+  : NonNullable<T> extends Date
     ? false
-    : NonNullable<T> extends Function
+    : NonNullable<T> extends Array<any>
       ? false
-      : NonNullable<T> extends object
-        ? true
-        : false;
+      : NonNullable<T> extends Function
+        ? false
+        : NonNullable<T> extends object
+          ? true
+          : false;
 
 /**
  * Recursively generates dot-notation paths for nested plain objects only
@@ -97,6 +105,34 @@ type PathValue<
  * @template T - Data model type
  */
 export type FieldPath<T> = NestedPaths<T>;
+
+/**
+ * Recursively makes all properties of plain objects optional while preserving null/undefined.
+ * @template T - Data model type
+ */
+export type DeepPartial<T, Depth extends number[] = []> = IsAny<T> extends true
+  ? Record<string, any>
+  : Depth["length"] extends 5
+    ? Partial<T>
+    : {
+        [K in keyof T]?: IsPlainObject<T[K]> extends true
+          ? DeepPartial<NonNullable<T[K]>, [...Depth, 1]> | Extract<T[K], null | undefined>
+          : T[K];
+      };
+
+/**
+ * Optional dot-notation key-value pairs for nested plain object fields (e.g. `{ "address.city"?: string }`).
+ * @template T - Data model type
+ */
+export type DotNotationUpdate<T> = IsAny<T> extends true
+  ? Record<string, any>
+  : {
+      [P in FieldPath<T> as P extends `${string}.${string}` ? P : never]?: IsPlainObject<
+        PathValue<T, P>
+      > extends true
+        ? DeepPartial<NonNullable<PathValue<T, P>>> | Extract<PathValue<T, P>, null | undefined>
+        : PathValue<T, P>;
+    };
 
 /**
  * Type for a where condition as a tuple [field, operator, value]
@@ -303,7 +339,7 @@ export interface RepositoryConfig<
     : ExtractDocumentRefSignature<TRefCb>;
   update: TRefCb extends undefined
     ? TIsGroup extends true
-      ? (...args: [...string[], Partial<T>]) => Promise<T>
-      : (docId: string, data: Partial<T>) => Promise<T>
+      ? (...args: [...string[], DeepPartial<T> & DotNotationUpdate<T>]) => Promise<T>
+      : (docId: string, data: DeepPartial<T> & DotNotationUpdate<T>) => Promise<T>
     : ExtractUpdateSignature<TRefCb, T>;
 }

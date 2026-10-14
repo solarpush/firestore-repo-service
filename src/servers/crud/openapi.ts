@@ -241,6 +241,59 @@ function resolveFieldPathSchema(entrySchema: any, path: string): any {
   return cur;
 }
 
+/** Recursively make Zod objects deep-partial for PATCH updates while preserving nullable/metadata */
+function makeDeepPartial(s: z.ZodType): z.ZodType {
+  const def = (s as any)?._zod?.def ?? (s as any)?._def;
+  const typeName = def?.typeName ?? def?.type;
+
+  const copyMetadata = (target: z.ZodType): z.ZodType => {
+    const metadata = getOpenApiMetadata(s as unknown as z.ZodTypeAny);
+    if (metadata && typeof (target as any).openapi === "function") {
+      return (target as any).openapi(metadata);
+    }
+    return target;
+  };
+
+  if (typeName === "ZodObject" || typeName === "object") {
+    const shape = (s as z.ZodObject<any>).shape;
+    const newShape: Record<string, z.ZodType> = {};
+    for (const [k, v] of Object.entries(shape)) {
+      newShape[k] = makeDeepPartial(v as z.ZodType);
+    }
+    return copyMetadata(z.object(newShape).partial());
+  }
+
+  if (typeName === "ZodOptional" || typeName === "optional") {
+    const inner = def.innerType as z.ZodType | undefined;
+    if (!inner) return s;
+    const nextInner = makeDeepPartial(inner);
+    return nextInner === inner ? s : copyMetadata(nextInner.optional());
+  }
+
+  if (typeName === "ZodNullable" || typeName === "nullable") {
+    const inner = def.innerType as z.ZodType | undefined;
+    if (!inner) return s;
+    const nextInner = makeDeepPartial(inner);
+    return nextInner === inner ? s : copyMetadata(nextInner.nullable());
+  }
+
+  if (typeName === "ZodDefault" || typeName === "default") {
+    const inner = def.innerType as z.ZodType | undefined;
+    if (!inner) return s;
+    return copyMetadata(makeDeepPartial(inner).optional());
+  }
+
+  if (typeName === "ZodUnion" || typeName === "union") {
+    const options = def.options as z.ZodType[] | undefined;
+    if (!options || options.length < 2) return s;
+    const nextOptions = options.map((opt) => makeDeepPartial(opt));
+    const changed = nextOptions.some((opt, i) => opt !== options[i]);
+    return changed ? copyMetadata(z.union(nextOptions as any)) : s;
+  }
+
+  return s;
+}
+
 /** Recursively extract leaf fields and parent object fields from a Zod object schema */
 function extractLeafFields(
   zodSchema: any,
@@ -706,6 +759,7 @@ function buildPathsForEntry(
   modelSchemaName: string,
   createSchemaName: string | null,
   updateSchemaName: string | null,
+  patchSchemaName: string | null = null,
   querySchemaName: string = "QueryRequestBody",
 ): Record<string, Record<string, OpenAPIOperation>> {
   const paths: Record<string, Record<string, OpenAPIOperation>> = {};
@@ -858,10 +912,7 @@ function buildPathsForEntry(
       required: true,
       content: {
         "application/json": {
-          schema: {
-            allOf: [schemaRef(updateSchemaName ?? modelSchemaName)],
-            description: "All fields are optional for partial updates",
-          },
+          schema: schemaRef(patchSchemaName ?? updateSchemaName ?? modelSchemaName),
         },
       },
     },
@@ -972,6 +1023,7 @@ export function generateOpenAPISpec(
     const modelName = capitalize(singularize(name));
     const createName = `${modelName}Create`;
     const updateName = `${modelName}Update`;
+    const patchName = `${modelName}Patch`;
     const queryName = `${modelName}QueryRequestBody`;
 
     // Full model schema
@@ -1017,12 +1069,19 @@ export function generateOpenAPISpec(
       createSchemaName = createName;
     }
 
-    // Update schema
+    // Update & Patch schemas
     let updateSchemaName: string | null = null;
+    let patchSchemaName: string | null = null;
     const updateShape = buildShape(entry.mutableFields);
     if (Object.keys(updateShape).length > 0) {
-      schemas[updateName] = zodToJsonSchema(z.object(updateShape));
+      const updateZodObj = z.object(updateShape);
+      schemas[updateName] = zodToJsonSchema(updateZodObj);
       updateSchemaName = updateName;
+      schemas[patchName] = zodToJsonSchema(makeDeepPartial(updateZodObj));
+      patchSchemaName = patchName;
+    } else {
+      schemas[patchName] = zodToJsonSchema(makeDeepPartial(entry.schema));
+      patchSchemaName = patchName;
     }
 
     // Batch schema
@@ -1046,10 +1105,7 @@ export function generateOpenAPISpec(
       properties: {
         type: { type: "string", enum: ["update"], const: "update" },
         id: { type: "string" },
-        data: {
-          allOf: [schemaRef(updateSchemaName ?? modelName)],
-          description: "Partial updates allowed",
-        },
+        data: schemaRef(patchSchemaName ?? updateSchemaName ?? modelName),
       },
       required: ["type", "id", "data"],
     };
@@ -1093,6 +1149,7 @@ export function generateOpenAPISpec(
       modelName,
       createSchemaName,
       updateSchemaName,
+      patchSchemaName,
       queryName,
     );
     Object.assign(allPaths, entryPaths);

@@ -12,6 +12,8 @@ import type {
 } from "../methods/system";
 import type { createPaginationIterator, PaginationResult } from "../pagination";
 import type {
+  DeepPartial,
+  DotNotationUpdate,
   GetOptions,
   GetResult,
   ExtractReturnDoc,
@@ -108,12 +110,14 @@ type SystemKeys<
   | Extract<T["updatedKey"], keyof T["type"]>;
 
 /**
- * Type for updatable data - excludes documentKey, pathKey and updatedKey (all auto-managed)
+ * Type for updatable data - excludes documentKey, pathKey and updatedKey (all auto-managed),
+ * and supports deep-partial nested objects as well as dot-notation paths (e.g. "address.city").
  * @internal
  */
-type UpdatableData<
+export type UpdatableData<
   T extends RepositoryConfig<any, any, any, any, any, any, any, any, any, any, any>,
-> = Omit<Partial<T["type"]>, SystemKeys<T>>;
+> = DeepPartial<Omit<T["type"], SystemKeys<T>>> &
+  DotNotationUpdate<Omit<T["type"], SystemKeys<T>>>;
 
 /**
  * Type for create data - excludes pathKey, createdKey and updatedKey (auto-managed), documentKey is optional
