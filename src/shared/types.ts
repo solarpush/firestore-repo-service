@@ -36,20 +36,39 @@ export type ExtractUpdateSignature<T, TType> = T extends (
   : never;
 
 /**
- * Check if a type is a plain object (not Date, Array, Function, etc.)
+ * Check if an object type has any method properties (e.g. Timestamp.toDate, GeoPoint.isEqual)
+ * @internal
+ */
+type HasMethod<T> = {
+  [K in keyof T]-?: NonNullable<T[K]> extends (...args: any[]) => any ? K : never;
+}[keyof T] extends never
+  ? false
+  : true;
+
+/**
+ * Check if a type is a plain data object with known static keys
+ * (excludes Date, Timestamp, GeoPoint, DocumentReference, Array, Function, Map, Set, RegExp, and Record<string, V>)
  * @internal
  */
 type IsPlainObject<T> = IsAny<T> extends true
   ? false
-  : NonNullable<T> extends Date
+  : NonNullable<T> extends
+        | Date
+        | Array<any>
+        | ReadonlyArray<any>
+        | Function
+        | RegExp
+        | Map<any, any>
+        | Set<any>
+        | Promise<any>
     ? false
-    : NonNullable<T> extends Array<any>
-      ? false
-      : NonNullable<T> extends Function
+    : NonNullable<T> extends object
+      ? string extends keyof NonNullable<T>
         ? false
-        : NonNullable<T> extends object
-          ? true
-          : false;
+        : HasMethod<NonNullable<T>> extends true
+          ? false
+          : true
+      : false;
 
 /**
  * Recursively generates dot-notation paths for nested plain objects only

@@ -82,6 +82,72 @@ describe("FieldPath and WhereClause with optional and nullable fields", () => {
     expect(invalidKeyUpdate).toBeDefined();
     expect(invalidValueUpdate).toBeDefined();
   });
+
+  test("UpdatableData does not descend into Timestamp, GeoPoint, or Record<string, V> and accepts computed string keys", () => {
+    interface FakeTimestamp {
+      readonly seconds: number;
+      readonly nanoseconds: number;
+      toDate(): Date;
+      toMillis(): number;
+      isEqual(other: FakeTimestamp): boolean;
+      valueOf(): string;
+    }
+
+    interface FakeGeoPoint {
+      readonly latitude: number;
+      readonly longitude: number;
+      isEqual(other: FakeGeoPoint): boolean;
+    }
+
+    interface PreventionModel {
+      docId: string;
+      createdAt: FakeTimestamp;
+      updatedAt: FakeTimestamp;
+      q0?: "pending" | "received" | "entered" | null;
+      q5?: "pending" | "received" | "entered" | null;
+      proConfirmationEmailDate?: Record<string, FakeTimestamp> | null;
+      workshopAddress: {
+        city: string;
+        coordinates?: FakeGeoPoint | null;
+      } | null;
+    }
+
+    type PreventionRepoConfig = RepositoryConfig<
+      PreventionModel,
+      readonly ["docId"],
+      readonly [],
+      true,
+      (db: any, ruleDoc: string | null, docId: string) => any,
+      {},
+      "docId",
+      undefined,
+      "createdAt",
+      "updatedAt"
+    >;
+
+    type PreventionUpdate = UpdatableData<PreventionRepoConfig>;
+
+    const questionnaireTypeToField: Record<string, string> = {
+      q0: "q0",
+      q5: "q5",
+    };
+    const dynamicKey = questionnaireTypeToField["q0"]!;
+
+    // Must accept computed string keys (e.g. { [questionnaireTypeToField[type]]: "pending" })
+    const dynamicUpdate: PreventionUpdate = {
+      [dynamicKey]: "pending",
+    };
+
+    // Must accept dot notation on plain nested objects
+    const addressDotUpdate: PreventionUpdate = {
+      "workshopAddress.city": "Paris",
+    };
+
+    // @ts-expect-error - must NOT generate dot paths inside Timestamp (.seconds)
+    const invalidTimestampDot: PreventionUpdate = { "createdAt.seconds": 123 };
+
+    expect((dynamicUpdate as Record<string, unknown>)[dynamicKey]).toBe("pending");
+    expect(addressDotUpdate["workshopAddress.city"]).toBe("Paris");
+    expect(invalidTimestampDot).toBeDefined();
+  });
 });
-
-

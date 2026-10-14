@@ -9,6 +9,7 @@ import {
   OpenAPIRegistry,
   OpenApiGeneratorV31,
   extendZodWithOpenApi,
+  getOpenApiMetadata,
 } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 import type {
@@ -26,6 +27,81 @@ extendZodWithOpenApi(z);
 
 const DEFAULT_RESPONSE_DESCRIPTION = "Successful response";
 const DEFAULT_ERROR_DESCRIPTION = "Error response";
+
+/**
+ * Recursively walks a Zod schema graph and ensures any `z.custom()` / `z.instanceof()`
+ * node (`def.type === "custom"`) has a `type` entry in its metadata.
+ * Without this, `@asteasolutions/zod-to-openapi` throws `UnknownZodTypeError` when a
+ * custom schema (e.g. Firestore `Timestamp` or `GeoPoint`) either lacks `.openapi(...)`
+ * or only specifies `{ anyOf: [...] }` / `{ oneOf: [...] }` without a top-level `type`.
+ */
+function ensureCustomSchemasHaveOpenApiType(
+  schema: unknown,
+  visited = new Set<unknown>(),
+): void {
+  if (!schema || typeof schema !== "object" || visited.has(schema)) return;
+  visited.add(schema);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const s = schema as any;
+  const def = s._zod?.def ?? s.def;
+  if (!def) return;
+
+  if (def.type === "custom") {
+    const meta = getOpenApiMetadata(s) as Record<string, unknown> | undefined;
+    if (!meta?.type) {
+      z.globalRegistry.add(s, { ...(meta ?? {}), type: "object" });
+    }
+    return;
+  }
+
+  if (def.innerType) ensureCustomSchemasHaveOpenApiType(def.innerType, visited);
+  if (def.element) ensureCustomSchemasHaveOpenApiType(def.element, visited);
+  if (def.valueType) ensureCustomSchemasHaveOpenApiType(def.valueType, visited);
+  if (def.keyType) ensureCustomSchemasHaveOpenApiType(def.keyType, visited);
+  if (def.left) ensureCustomSchemasHaveOpenApiType(def.left, visited);
+  if (def.right) ensureCustomSchemasHaveOpenApiType(def.right, visited);
+  if (def.in) ensureCustomSchemasHaveOpenApiType(def.in, visited);
+  if (def.out) ensureCustomSchemasHaveOpenApiType(def.out, visited);
+  if (typeof def.getter === "function") {
+    try {
+      ensureCustomSchemasHaveOpenApiType(def.getter(), visited);
+    } catch {
+      // ignore lazy evaluation errors
+    }
+  }
+  if (Array.isArray(def.options)) {
+    for (const opt of def.options) ensureCustomSchemasHaveOpenApiType(opt, visited);
+  }
+  if (Array.isArray(def.items)) {
+    for (const item of def.items) ensureCustomSchemasHaveOpenApiType(item, visited);
+  }
+  const shape = typeof def.shape === "function" ? def.shape() : def.shape;
+  if (shape && typeof shape === "object") {
+    for (const val of Object.values(shape)) {
+      ensureCustomSchemasHaveOpenApiType(val, visited);
+    }
+  }
+}
+
+/**
+ * Recursively strips top-level `type` on schema nodes that also define `anyOf` or `oneOf`
+ * (preventing OpenAPI 3.1 generator conflicts when a fallback `type: "object"` was injected).
+ */
+function stripRedundantTypeWithComposition(node: unknown): void {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const item of node) stripRedundantTypeWithComposition(item);
+    return;
+  }
+  const record = node as Record<string, unknown>;
+  if ((Array.isArray(record.anyOf) || Array.isArray(record.oneOf)) && "type" in record) {
+    delete record.type;
+  }
+  for (const val of Object.values(record)) {
+    stripRedundantTypeWithComposition(val);
+  }
+}
 
 function defaultSource(method: HttpMethod): PayloadSource {
   return method === "get" ? "query" : "json";
@@ -85,6 +161,8 @@ export function buildOpenApiDocument(
     const fullPath = joinPath(basePath, route.path ?? "/");
     const status = route.status ?? 200;
 
+    if (route.input) ensureCustomSchemasHaveOpenApiType(route.input);
+
     const requestBody = buildRequestBody(method, source, route.input);
     const requestQuery = buildQueryOrParam(source, route.input, "query");
     const requestParams = buildQueryOrParam(source, route.input, "param");
@@ -92,6 +170,7 @@ export function buildOpenApiDocument(
 
     // Success response — wrapped by the interceptor envelope when declared.
     const successSchema = resolveSuccessSchema(route.output, interceptor);
+    if (successSchema) ensureCustomSchemasHaveOpenApiType(successSchema);
     const responses: Record<string, unknown> = {
       [status]: successSchema
         ? {
@@ -105,6 +184,7 @@ export function buildOpenApiDocument(
     if (interceptor?.errors) {
       for (const [code, entry] of Object.entries(interceptor.errors)) {
         const { description, schema } = normalizeErrorResponse(entry);
+        if (schema) ensureCustomSchemasHaveOpenApiType(schema);
         responses[code] = schema
           ? { description, content: { "application/json": { schema } } }
           : { description };
@@ -143,6 +223,7 @@ export function buildOpenApiDocument(
     servers: config.servers,
     security: config.security,
   });
+  stripRedundantTypeWithComposition(document);
   return document as unknown as Record<string, unknown>;
 }
 

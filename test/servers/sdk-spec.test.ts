@@ -45,4 +45,43 @@ describe("apis.spec — static Hono OpenAPI export", () => {
     // @ts-expect-error unknown tag — also a compile error (literal-key inference)
     expect(() => apis.spec("ghost", [])).toThrow(/unknown api/);
   });
+
+  test("handles z.custom and z.instanceof (e.g. Timestamp) without throwing UnknownZodTypeError", () => {
+    class FakeTimestamp {}
+    const customTimestamp = z.instanceof(FakeTimestamp);
+    const customUnionMeta = z.custom<FakeTimestamp>(() => true).openapi({
+      anyOf: [{ type: "string" }, { type: "object" }],
+    });
+
+    const apis = createApiRegistry({ v1: { basePath: "/v1", openapi } });
+    const routes: AnyRouteDef[] = [
+      {
+        api: "v1",
+        method: "post",
+        path: "/events",
+        input: z.object({
+          createdAt: customTimestamp,
+          scheduledAt: customUnionMeta.nullable().optional(),
+        }),
+        output: z.object({
+          id: z.string(),
+          createdAt: customTimestamp,
+        }),
+        tags: ["events"],
+        summary: "Create event",
+        handler: () => ({ id: "1", createdAt: new FakeTimestamp() }),
+      } as unknown as AnyRouteDef,
+    ];
+
+    const doc = apis.spec("v1", routes) as any;
+    expect(doc.openapi).toBe("3.1.0");
+    const postOp = doc.paths["/v1/events"]?.post;
+    expect(postOp).toBeDefined();
+    const reqProps =
+      postOp.requestBody.content["application/json"].schema.properties;
+    expect(reqProps.createdAt).toEqual({ type: "object" });
+    expect(reqProps.scheduledAt.anyOf).toBeDefined();
+    expect(reqProps.scheduledAt.type).toBeUndefined();
+  });
 });
+
