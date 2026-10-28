@@ -134,7 +134,17 @@ export function createFirestoreSync<M extends Record<string, any>>(
     const isGroup = rawMapping
       ? !!rawMapping[repoName]?.isGroup
       : !!(repoMapping[repoName] as any)?._isGroup;
-    if (!hasExplicitRepos && isGroup && !repoConfigsMap?.[repoName]?.triggerPath) {
+    const rawPath: string | undefined = rawMapping
+      ? rawMapping[repoName]?.path
+      : (repoMapping[repoName] as any)?._collectionPath;
+    const hasTemplateTriggerPath =
+      typeof rawPath === "string" && rawPath.includes("/");
+    if (
+      !hasExplicitRepos &&
+      isGroup &&
+      !repoConfigsMap?.[repoName]?.triggerPath &&
+      !hasTemplateTriggerPath
+    ) {
       continue;
     }
 

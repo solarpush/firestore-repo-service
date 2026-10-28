@@ -19,6 +19,7 @@
  * ```
  */
 
+import { parsePathTemplate } from "../shared/path-template";
 import { computeDiff } from "./diff";
 import {
   buildHistoryEntry,
@@ -41,6 +42,8 @@ interface RepoHistoryMeta {
   isGroup: boolean;
   /** Collection path of a non-group repo (used to derive the trigger path). */
   collectionPath: string | null;
+  /** Auto-derived document trigger path template when path is a full template (e.g. "residences/{residenceId}/res_events/{docId}"). */
+  documentPathTemplate: string | null;
 }
 
 /** Read history metadata from a **raw repository config** (no db resolution). */
@@ -55,11 +58,19 @@ function metaFromConfig(cfg: any): RepoHistoryMeta {
     cfg?.createdKey,
     cfg?.updatedKey,
   ].filter((k): k is string => typeof k === "string");
+  const rawPath = typeof cfg?.path === "string" ? cfg.path : null;
+  const parsed = rawPath
+    ? parsePathTemplate(rawPath, cfg?.documentKey ?? "docId")
+    : null;
   return {
     historyConfig,
     systemKeys,
     isGroup: !!cfg?.isGroup,
-    collectionPath: typeof cfg?.path === "string" ? cfg.path : null,
+    collectionPath: parsed ? parsed.collectionPath : null,
+    documentPathTemplate:
+      parsed && (!cfg?.isGroup || parsed.collectionPath.includes("/"))
+        ? parsed.documentPathTemplate
+        : null,
   };
 }
 
@@ -74,11 +85,20 @@ function metaFromRepo(repo: any): RepoHistoryMeta {
     "enabled" in repo.history
       ? repo.history
       : undefined);
+  const collectionPath = repo._collectionPath ?? repo.ref?.path ?? null;
+  const docTemplate =
+    typeof repo._documentPathTemplate === "string"
+      ? repo._documentPathTemplate
+      : null;
   return {
     historyConfig,
     systemKeys: (repo._systemKeys as string[]) ?? [],
     isGroup: !!repo._isGroup,
-    collectionPath: repo.ref?.path ?? null,
+    collectionPath,
+    documentPathTemplate:
+      docTemplate && (!repo._isGroup || (collectionPath && collectionPath.includes("/")))
+        ? docTemplate
+        : null,
   };
 }
 
@@ -123,17 +143,20 @@ export function createHistoryTriggers<M extends Record<string, any>>(
     const override = config.repos?.[repoName as keyof M & string];
     let documentPath: string | null;
     if (meta.isGroup) {
-      if (!override?.triggerPath) {
+      const resolvedGroupPath =
+        override?.triggerPath ?? meta.documentPathTemplate;
+      if (!resolvedGroupPath) {
         console.warn(
           `[HistoryTriggers] Skipping collection-group repo "${repoName}". ` +
-            "Provide a triggerPath in the history triggers repos override.",
+            "Provide a triggerPath in the history triggers repos override or use a full path template.",
         );
         continue;
       }
-      documentPath = override.triggerPath;
+      documentPath = resolvedGroupPath;
     } else {
       documentPath =
         override?.triggerPath ??
+        meta.documentPathTemplate ??
         buildDocumentPath(repoName, meta.collectionPath);
     }
     if (!documentPath) continue;

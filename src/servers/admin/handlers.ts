@@ -11,9 +11,12 @@
  *   POST /:repoName/:id/delete   → delete document
  */
 
-import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import type { ConfiguredRepository } from "../../repositories/types";
+import {
+  extractPathArgsFromDoc,
+  generateFirestoreId,
+} from "../../shared/path-template";
 import type { RepositoryConfig } from "../../shared/types";
 import {
   getEffectInnerType,
@@ -62,6 +65,8 @@ export interface AdminRepoEntry {
   isGroup?: boolean;
   /** Parent key field names needed to build a subcollection document ref (auto-detected from refCb) */
   parentKeys?: string[];
+  /** Full Firestore document path template with {param} placeholders */
+  documentPathTemplate?: string;
   /** Field name for the creation timestamp (auto-set on create) */
   createdKey?: string;
   /** List of columns to display in the table (defaults to schema keys) */
@@ -96,27 +101,6 @@ export type RepoRegistry = Record<string, AdminRepoEntry>;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-const _idChars =
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-
-/**
- * Generate a random 20-char alphanumeric ID matching Firestore's native format.
- * Uses a CSPRNG (`crypto.randomBytes`) with rejection sampling for a uniform,
- * unpredictable id — see issue #02.
- */
-function generateFirestoreId(): string {
-  let id = "";
-  while (id.length < 20) {
-    const bytes = randomBytes(20);
-    for (let i = 0; i < bytes.length && id.length < 20; i++) {
-      const byte = bytes[i]!;
-      if (byte >= _idChars.length * 4) continue; // drop biased tail (248..255)
-      id += _idChars.charAt(byte % _idChars.length);
-    }
-  }
-  return id;
-}
 
 /**
  * Rehydrate a cursor snapshot for both root collections and subcollections (collection groups).
@@ -168,18 +152,15 @@ async function rehydrateAdminCursor(
  */
 function extractPathArgs(
   doc: Record<string, unknown>,
-  pathKey?: string,
+  entry: AdminRepoEntry,
 ): string[] | undefined {
-  if (!pathKey) return undefined;
-  const fullPath = doc[pathKey];
-  if (typeof fullPath !== "string" || !fullPath) return undefined;
-  const segments = fullPath.split("/").filter(Boolean);
-  // Doc IDs are at odd indices: col/id/col/id/...
-  const args: string[] = [];
-  for (let i = 1; i < segments.length; i += 2) {
-    args.push(segments[i]!);
-  }
-  return args.length > 0 ? args : undefined;
+  return extractPathArgsFromDoc(doc, {
+    pathKey: entry.pathKey,
+    documentKey: entry.documentKey ?? "docId",
+    parentKeys: entry.parentKeys,
+    documentPathTemplate: entry.documentPathTemplate,
+    isGroup: entry.isGroup,
+  });
 }
 
 /**
@@ -1106,22 +1087,26 @@ export function createAdminHandlers(
 
     try {
       if (entry.isGroup && entry.parentKeys && entry.parentKeys.length > 0) {
-        // Collection-group repos cannot use create(); use set() with parent path args.
         const data: Record<string, any> = { ...validation.data };
-        // set() doesn't auto-set createdKey, so inject it here
-        if (entry.createdKey) {
-          data[entry.createdKey] = new Date();
-        }
-        const missingKeys = entry.parentKeys.filter((k) => !data[k]);
+        const missingKeys = entry.parentKeys.filter(
+          (k) =>
+            data[k] === undefined ||
+            data[k] === null ||
+            (typeof data[k] === "string" && data[k].trim() === ""),
+        );
         if (missingKeys.length > 0) {
           throw new Error(
             `Missing parent key(s) for subcollection create: ${missingKeys.join(", ")}`,
           );
         }
-        const parentIds = entry.parentKeys.map((k) => data[k] as string);
-        const docKey = entry.documentKey ?? "docId";
-        const docId = data[docKey] || generateFirestoreId();
-        await entry.repo.set(...parentIds, docId, data);
+        if (typeof entry.repo.create === "function") {
+          await entry.repo.create(data);
+        } else {
+          const parentIds = entry.parentKeys.map((k) => String(data[k]));
+          const docKey = entry.documentKey ?? "docId";
+          const docId = data[docKey] || generateFirestoreId();
+          await entry.repo.set(...parentIds, docId, data);
+        }
       } else {
         await entry.repo.create(validation.data);
       }
@@ -1252,7 +1237,7 @@ export function createAdminHandlers(
     try {
       // Fetch document to extract path args for subcollection repos
       const doc = await fetchDocById(entry, docId);
-      const pathArgs = (doc && extractPathArgs(doc, entry.pathKey)) ?? [docId];
+      const pathArgs = (doc && extractPathArgs(doc, entry)) ?? [docId];
       await entry.repo.update(...pathArgs, validation.data);
       redirect(res, `${lb}/${entry.name}?flash=updated`);
     } catch (err) {
@@ -1302,7 +1287,7 @@ export function createAdminHandlers(
     try {
       // Fetch document to extract path args for subcollection repos
       const doc = await fetchDocById(entry, docId);
-      const pathArgs = (doc && extractPathArgs(doc, entry.pathKey)) ?? [docId];
+      const pathArgs = (doc && extractPathArgs(doc, entry)) ?? [docId];
       await entry.repo.delete(...pathArgs);
       redirect(res, `${lb}/${entry.name}?flash=deleted`);
     } catch (err) {
@@ -1481,7 +1466,7 @@ export function createAdminHandlers(
       let pathArgs: string[] | undefined;
       if (entry.isGroup || entry.parentKeys?.length) {
         const doc = await fetchDocById(entry, id);
-        pathArgs = doc ? extractPathArgs(doc, entry.pathKey) : undefined;
+        pathArgs = doc ? extractPathArgs(doc, entry) : undefined;
       }
       if (!pathArgs) pathArgs = [id];
       try {
@@ -1738,7 +1723,7 @@ export function createAdminHandlers(
     let pathArgs: string[] = [docId];
     try {
       const doc = await fetchDocById(entry, docId);
-      const extracted = doc ? extractPathArgs(doc, entry.pathKey) : undefined;
+      const extracted = doc ? extractPathArgs(doc, entry) : undefined;
       if (extracted && extracted.length > 0) pathArgs = extracted;
     } catch {
       // best-effort: fall back to [docId]

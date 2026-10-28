@@ -495,6 +495,9 @@ export function createAdminServer<
       pathKey: (cfg.repo as any)._pathKey ?? undefined,
       isGroup: !!(cfg.repo as any)._isGroup,
       parentKeys,
+      documentPathTemplate:
+        ((cfg.repo as any)._documentPathTemplate as string | undefined) ??
+        undefined,
       createdKey: (cfg.repo as any)._createdKey ?? undefined,
       listColumns: cfg.listColumns,
       pageSize: cfg.pageSize,

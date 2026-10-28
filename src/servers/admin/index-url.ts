@@ -20,6 +20,7 @@
  *   `/project/{p}/firestore/databases/-default-/indexes/automatic`.
  */
 
+import { parsePathTemplate } from "../../shared/path-template";
 import type {
   FilterState,
   QueryError,
@@ -45,12 +46,12 @@ function toIndexOrder(dir?: "asc" | "desc"): "ASCENDING" | "DESCENDING" {
 }
 
 /**
- * Extract the collection ID (last path segment) from a Firestore path.
+ * Extract the collection ID (last collection segment) from a Firestore path.
  * e.g. "posts/{postId}/comments" → "comments"
+ * e.g. "posts/{postId}/comments/{docId}" → "comments"
  */
 export function collectionIdFromPath(path: string): string {
-  const segments = path.split("/").filter(Boolean);
-  return segments[segments.length - 1] ?? path;
+  return parsePathTemplate(path).collectionId || path;
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────

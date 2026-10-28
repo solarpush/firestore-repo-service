@@ -397,8 +397,10 @@ export interface CrudRepoEntry {
   pathKey?: string;
   /** Whether this repo is a collection group (subcollection) */
   isGroup?: boolean;
-  /** Parent key field names needed to build a subcollection document ref (auto-detected from refCb) */
+  /** Parent key field names needed to build a subcollection document ref (auto-detected from path template or refCb) */
   parentKeys?: string[];
+  /** Full Firestore document path pattern with `{param}` placeholders */
+  documentPathTemplate?: string;
   /** Field name for the creation timestamp (auto-set on create) */
   createdKey?: string;
   pageSize: number;

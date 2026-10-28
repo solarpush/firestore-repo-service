@@ -1,5 +1,9 @@
 import type { CollectionReference } from "firebase-admin/firestore";
 import { maybeNormalize } from "../shared/date-config";
+import {
+  extractPathArgsFromDoc,
+  generateFirestoreId,
+} from "../shared/path-template";
 
 /**
  * Creates CRUD methods (create, set, update, delete).
@@ -71,52 +75,160 @@ export function createCrudMethods<T>(
   pathKey?: string,
   createdKey?: string,
   updatedKey?: string,
+  parentKeys: string[] = [],
+  documentPathTemplate?: string | null,
 ) {
   const now = () => new Date();
 
   // Create - adds a new document, optionally with a provided document key
-  const create = async (data: any): Promise<T> => {
-    if (!actualCollection) {
-      throw new Error(
-        "Cannot use create() on collection groups. Use set() with a specific document ID instead.",
-      );
+  const create = async (...args: any[]): Promise<T> => {
+    const data = args[args.length - 1];
+    const explicitParentArgs = args.slice(0, -1);
+
+    if (!data || typeof data !== "object") {
+      throw new Error("Create data payload must be an object.");
     }
 
-    let docRef;
+    let docRef: any;
     let docId: string;
+
+    const hasProvidedDocId =
+      typeof data[documentKey] === "string" && data[documentKey].trim() !== "";
 
     // Auto-set createdKey and updatedKey
     const enrichedData = { ...data };
-    if (createdKey) {
+    if (createdKey && enrichedData[createdKey] === undefined) {
       enrichedData[createdKey] = now();
     }
     if (updatedKey) {
       enrichedData[updatedKey] = now();
     }
 
-    // If documentKey is provided in data, use set() with that ID
-    if (data[documentKey]) {
-      docId = data[documentKey];
-      docRef = actualCollection.doc(docId);
-      // Also set pathKey if defined
-      const dataWithPath = pathKey
-        ? { ...enrichedData, [pathKey]: docRef.path }
-        : enrichedData;
-      await docRef.set(dataWithPath);
-    } else {
-      // Otherwise, use add() to auto-generate ID
-      docRef = await actualCollection.add(enrichedData);
-      docId = docRef.id;
-      // Update the document to include the documentKey and optionally pathKey
-      const updates: Record<string, string> = { [documentKey]: docId };
-      if (pathKey) {
-        updates[pathKey] = docRef.path;
+    if (actualCollection && explicitParentArgs.length === 0) {
+      // If documentKey is provided in data, use set() with that ID
+      if (hasProvidedDocId) {
+        docId = data[documentKey];
+        docRef =
+          typeof actualCollection.doc === "function"
+            ? actualCollection.doc(docId)
+            : documentRef(docId);
+        enrichedData[documentKey] = docId;
+        // Also set pathKey if defined
+        const dataWithPath =
+          pathKey && docRef?.path
+            ? { ...enrichedData, [pathKey]: docRef.path }
+            : enrichedData;
+        await docRef.set(dataWithPath);
+        if (pathKey && docRef?.path) {
+          enrichedData[pathKey] = docRef.path;
+        }
+      } else if (typeof actualCollection.add === "function") {
+        // Otherwise, use add() to auto-generate ID
+        docRef = await actualCollection.add(enrichedData);
+        docId = docRef.id;
+        enrichedData[documentKey] = docId;
+        // Update the document to include the documentKey and optionally pathKey
+        const updates: Record<string, string> = { [documentKey]: docId };
+        if (pathKey && docRef?.path) {
+          updates[pathKey] = docRef.path;
+          enrichedData[pathKey] = docRef.path;
+        }
+        await docRef.update(updates);
+      } else {
+        docId = generateFirestoreId();
+        docRef =
+          typeof actualCollection.doc === "function"
+            ? actualCollection.doc(docId)
+            : documentRef(docId);
+        enrichedData[documentKey] = docRef?.id ?? docId;
+        if (pathKey && docRef?.path) {
+          enrichedData[pathKey] = docRef.path;
+        }
+        await docRef.set(enrichedData);
       }
-      await docRef.update(updates);
+    } else {
+      // Subcollection / collection group (actualCollection === null)
+      let parentArgs: string[] = [];
+
+      if (explicitParentArgs.length > 0) {
+        for (let i = 0; i < explicitParentArgs.length; i++) {
+          const val = explicitParentArgs[i];
+          if (typeof val !== "string" || val.trim() === "") {
+            const keyName = parentKeys[i] ?? `arg[${i}]`;
+            throw new Error(
+              `Missing or empty parent key "${keyName}" for subcollection create()`,
+            );
+          }
+          parentArgs.push(val);
+        }
+      } else if (parentKeys.length > 0) {
+        const missingKeys: string[] = [];
+        for (const pk of parentKeys) {
+          const val = data[pk];
+          if (typeof val === "string" && val.trim() !== "") {
+            parentArgs.push(val);
+          } else {
+            missingKeys.push(pk);
+          }
+        }
+        if (missingKeys.length > 0) {
+          const fromPath = extractPathArgsFromDoc(data, {
+            pathKey,
+            documentKey,
+            parentKeys,
+            documentPathTemplate,
+            isGroup: true,
+          });
+          if (fromPath && fromPath.length >= parentKeys.length) {
+            parentArgs = fromPath.slice(0, parentKeys.length);
+          } else {
+            throw new Error(
+              `Missing or empty required parent key(s) in data for subcollection create(): ${missingKeys.join(", ")}`,
+            );
+          }
+        }
+      } else if (
+        pathKey &&
+        typeof data[pathKey] === "string" &&
+        data[pathKey].trim() !== ""
+      ) {
+        const fromPath = extractPathArgsFromDoc(data, {
+          pathKey,
+          documentKey,
+          parentKeys,
+          documentPathTemplate,
+          isGroup: true,
+        });
+        if (fromPath && fromPath.length > 1) {
+          parentArgs = fromPath.slice(0, -1);
+        }
+      }
+
+      if (parentArgs.length === 0) {
+        throw new Error(
+          "Cannot use create() on collection groups without parent keys. Configure a path template (e.g. 'residences/{residenceId}/events') or provide parent keys in data.",
+        );
+      }
+
+      docId = hasProvidedDocId ? data[documentKey] : generateFirestoreId();
+      docRef = documentRef(...parentArgs, docId);
+      enrichedData[documentKey] = docRef?.id ?? docId;
+      if (pathKey && docRef?.path) {
+        enrichedData[pathKey] = docRef.path;
+      }
+      await docRef.set(enrichedData);
     }
 
-    const createdDoc = await docRef.get();
-    return maybeNormalize(createdDoc.data()) as T;
+    if (typeof docRef?.get === "function") {
+      const createdDoc = await docRef.get();
+      const rawData =
+        typeof createdDoc?.data === "function"
+          ? createdDoc.data()
+          : enrichedData;
+      return maybeNormalize(rawData ?? enrichedData) as T;
+    }
+
+    return maybeNormalize(enrichedData) as T;
   };
 
   // Set - creates or replaces a document
@@ -130,6 +242,11 @@ export function createCrudMethods<T>(
     const mergeOption = hasOptions ? lastArg : { merge: true };
 
     const enrichedData = { ...data };
+
+    // Auto-set createdKey if not already provided in data
+    if (createdKey && enrichedData[createdKey] === undefined) {
+      enrichedData[createdKey] = now();
+    }
 
     // Auto-set updatedKey
     if (updatedKey) {
@@ -150,8 +267,16 @@ export function createCrudMethods<T>(
 
     await docRef.set(enrichedData, mergeOption);
 
-    const setDocument = await docRef.get();
-    return maybeNormalize(setDocument.data()) as T;
+    if (typeof docRef?.get === "function") {
+      const setDocument = await docRef.get();
+      const rawData =
+        typeof setDocument?.data === "function"
+          ? setDocument.data()
+          : enrichedData;
+      return maybeNormalize(rawData ?? enrichedData) as T;
+    }
+
+    return maybeNormalize(enrichedData) as T;
   };
 
   // Update - updates a document and returns the merged object

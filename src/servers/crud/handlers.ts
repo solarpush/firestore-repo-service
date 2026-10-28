@@ -10,13 +10,16 @@
  *   DELETE /:repoName/:id       → delete document
  */
 
-import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import {
   coerceToDate,
   getDateHandling,
   maybeNormalize,
 } from "../../shared/date-config";
+import {
+  extractPathArgsFromDoc,
+  generateFirestoreId,
+} from "../../shared/path-template";
 import { getArrayElementType } from "../../shared/zod-compat";
 import { toQueryError, type QueryErrorContext } from "../admin/index-url";
 import { computeDeepDiff } from "./rules";
@@ -104,34 +107,6 @@ async function sendQueryError(
     }
   }
   return sendJson(c, payload, status);
-}
-
-// ---------------------------------------------------------------------------
-// ID generation
-// ---------------------------------------------------------------------------
-
-const _idChars =
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-
-/**
- * Generate a random 20-char alphanumeric ID matching Firestore's native format.
- *
- * Uses a CSPRNG (`crypto.randomBytes`) — not `Math.random()` — so generated
- * ids are unpredictable, matching Firestore's own `doc().id`. Rejection
- * sampling (dropping the biased tail `>= 62*4`) keeps the distribution uniform
- * across the 62-char alphabet.
- */
-function generateFirestoreId(): string {
-  let id = "";
-  while (id.length < 20) {
-    const bytes = randomBytes(20);
-    for (let i = 0; i < bytes.length && id.length < 20; i++) {
-      const byte = bytes[i]!;
-      if (byte >= _idChars.length * 4) continue; // drop biased tail (248..255)
-      id += _idChars.charAt(byte % _idChars.length);
-    }
-  }
-  return id;
 }
 
 // ---------------------------------------------------------------------------
@@ -853,17 +828,15 @@ export function createCrudHandlers(
    */
   function extractPathArgs(
     doc: Record<string, unknown>,
-    pathKey?: string,
+    entry: CrudRepoEntry,
   ): string[] | undefined {
-    if (!pathKey) return undefined;
-    const fullPath = doc[pathKey];
-    if (typeof fullPath !== "string" || !fullPath) return undefined;
-    const segments = fullPath.split("/").filter(Boolean);
-    const args: string[] = [];
-    for (let i = 1; i < segments.length; i += 2) {
-      args.push(segments[i]!);
-    }
-    return args.length > 0 ? args : undefined;
+    return extractPathArgsFromDoc(doc, {
+      pathKey: entry.pathKey,
+      documentKey: entry.documentKey,
+      parentKeys: entry.parentKeys,
+      documentPathTemplate: entry.documentPathTemplate,
+      isGroup: entry.isGroup,
+    });
   }
 
   /**
@@ -1426,13 +1399,13 @@ export function createCrudHandlers(
       // Create document
       let created: any;
       if (entry.isGroup && entry.parentKeys && entry.parentKeys.length > 0) {
-        // Collection-group repos cannot use create(); use set() with parent path args.
         const data: Record<string, any> = { ...validation.data };
-        // set() doesn't auto-set createdKey, so inject it here
-        if (entry.createdKey) {
-          data[entry.createdKey] = new Date();
-        }
-        const missingKeys = entry.parentKeys.filter((k) => !data[k]);
+        const missingKeys = entry.parentKeys.filter(
+          (k) =>
+            data[k] === undefined ||
+            data[k] === null ||
+            (typeof data[k] === "string" && data[k].trim() === ""),
+        );
         if (missingKeys.length > 0) {
           sendError(
             c,
@@ -1441,9 +1414,13 @@ export function createCrudHandlers(
           );
           return;
         }
-        const parentIds = entry.parentKeys.map((k) => data[k] as string);
-        const docId = data[entry.documentKey] || generateFirestoreId();
-        created = await entry.repo.set(...parentIds, docId, data);
+        if (typeof entry.repo.create === "function") {
+          created = await entry.repo.create(data as any);
+        } else {
+          const parentIds = entry.parentKeys.map((k) => String(data[k]));
+          const docId = data[entry.documentKey] || generateFirestoreId();
+          created = await entry.repo.set(...parentIds, docId, data);
+        }
       } else {
         created = await entry.repo.create(validation.data as any);
       }
@@ -1513,7 +1490,7 @@ export function createCrudHandlers(
       if (!updateRuleCheck.allowed) return updateRuleCheck.errorResponse;
 
       // Update document — derive path args for subcollections
-      const pathArgs = extractPathArgs(existingDoc, entry.pathKey) ?? [id];
+      const pathArgs = extractPathArgs(existingDoc, entry) ?? [id];
       const updated = await entry.repo.update(
         ...pathArgs,
         validation.data as any,
@@ -1561,7 +1538,7 @@ export function createCrudHandlers(
       });
       if (!deleteRuleCheck.allowed) return deleteRuleCheck.errorResponse;
 
-      const pathArgs = extractPathArgs(doc, entry.pathKey) ?? [id];
+      const pathArgs = extractPathArgs(doc, entry) ?? [id];
       await entry.repo.delete(...pathArgs);
       return sendSuccess(c, { deleted: true });
     } catch (err) {
@@ -1626,7 +1603,9 @@ export function createCrudHandlers(
 
           let docId = op.data[entry.documentKey] || generateFirestoreId();
           const data = { ...validation.data };
-          if (entry.createdKey) data[entry.createdKey] = new Date();
+          if (entry.createdKey && data[entry.createdKey] === undefined) {
+            data[entry.createdKey] = new Date();
+          }
 
           if (entry.isGroup && entry.parentKeys) {
             const parentIds = entry.parentKeys.map(
@@ -1672,7 +1651,7 @@ export function createCrudHandlers(
           });
           if (!updateRuleCheck.allowed) return updateRuleCheck.errorResponse;
 
-          const pathArgs = extractPathArgs(existingDoc, entry.pathKey) ?? [
+          const pathArgs = extractPathArgs(existingDoc, entry) ?? [
             op.id,
           ];
           batch.update(...pathArgs, validation.data);
@@ -1691,7 +1670,7 @@ export function createCrudHandlers(
           });
           if (!deleteRuleCheck.allowed) return deleteRuleCheck.errorResponse;
 
-          const pathArgs = extractPathArgs(doc, entry.pathKey) ?? [op.id];
+          const pathArgs = extractPathArgs(doc, entry) ?? [op.id];
           batch.delete(...pathArgs);
           results.push({ op: "delete", id: op.id });
         }

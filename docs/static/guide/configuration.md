@@ -2,17 +2,17 @@
 
 ## `createRepositoryConfig()`
 
-| Parameter     | Type       | Default           | Description                                       |
-|---------------|------------|-------------------|---------------------------------------------------|
-| `path`        | `string`   | —                 | Firestore collection path                         |
-| `isGroup`     | `boolean`  | —                 | `true` for collection group queries               |
-| `foreignKeys` | `string[]` | —                 | Keys for `get.by*` (unique retrieval)              |
-| `queryKeys`   | `string[]` | —                 | Keys for `query.by*` (list retrieval)              |
-| `refCb`       | Function   | —                 | Builds the `DocumentReference`                    |
-| `documentKey` | `string`   | `"docId"`         | Field auto-injected with the Firestore document ID |
-| `pathKey`     | `string`   | `"documentPath"`  | Field auto-injected with the full Firestore path  |
-| `createdKey`  | `string`   | `"createdAt"`     | Field auto-set on creation                        |
-| `updatedKey`  | `string`   | `"updatedAt"`     | Field auto-updated on every write                 |
+| Parameter     | Type       | Default           | Description                                                                                      |
+|---------------|------------|-------------------|--------------------------------------------------------------------------------------------------|
+| `path`        | `string`   | —                 | Firestore collection path or typed template (e.g. `"users"` or `"posts/{postId}/comments"`)      |
+| `isGroup`     | `boolean`  | —                 | `true` for collection group / subcollection queries                                              |
+| `foreignKeys` | `string[]` | —                 | Keys for `get.by*` (unique retrieval)                                                            |
+| `queryKeys`   | `string[]` | —                 | Keys for `query.by*` (list retrieval)                                                            |
+| `documentKey` | `string`   | `"docId"`         | Field auto-injected with the Firestore document ID                                               |
+| `pathKey`     | `string`   | `"documentPath"`  | Field auto-injected with the full Firestore path                                                 |
+| `createdKey`  | `string`   | `"createdAt"`     | Field auto-set on creation (in `create()` and `set()` when omitted)                              |
+| `updatedKey`  | `string`   | `"updatedAt"`     | Field auto-updated on every write                                                                |
+| `refCb`       | Function   | *(optional)*      | **Deprecated** — Legacy callback building `DocumentReference` (now auto-derived from `path`)     |
 
 ### Simple collection
 
@@ -26,17 +26,17 @@ users: createRepositoryConfig(userSchema)({
   pathKey:     "documentPath",
   createdKey:  "createdAt",
   updatedKey:  "updatedAt",
-  refCb: (db: Firestore, docId: string) => db.collection("users").doc(docId),
 });
 ```
 
-### Sub-collection
+### Sub-collection (Typed Path Template)
 
-The `refCb` receives parent IDs in order, then the document ID last.
+Instead of writing a manual `refCb`, use a path template with `{param}` placeholders.
+Every `{param}` is strictly validated at compile-time against `keyof Model`, and its left-to-right order automatically types `documentRef`, `set`, `update`, and `delete`:
 
 ```typescript
-comments: createRepositoryConfig<CommentModel>()({
-  path:        "comments",
+comments: createRepositoryConfig(commentSchema)({
+  path:        "posts/{postId}/comments",
   isGroup:     true,
   foreignKeys: ["docId", "postId", "userId"] as const,
   queryKeys:   ["postId", "userId"] as const,
@@ -44,10 +44,24 @@ comments: createRepositoryConfig<CommentModel>()({
   pathKey:     "documentPath",
   createdKey:  "createdAt",
   updatedKey:  "updatedAt",
-  refCb: (db: Firestore, postId: string, commentId: string) =>
-    db.collection("posts").doc(postId).collection("comments").doc(commentId),
 });
+
+// Create on a sub-collection: parent keys ("postId") are extracted from data,
+// while docId and documentPath ("posts/p1/comments/<autoId>") are generated on the fly!
+const comment = await repos.comments.create({
+  postId: "p1",
+  userId: "u1",
+  content: "Great post!",
+});
+
+// Update / Delete receive parent IDs in template order, followed by docId:
+await repos.comments.update("p1", comment.docId, { content: "Edited" });
+await repos.comments.delete("p1", comment.docId);
 ```
+
+::: tip Static transit documents
+If your sub-collection sits under a fixed singleton/transit document (e.g. `"prevention/prev_rules/prev_workshops/{workshopId}/prev_events"`), simply write the static document ID (`prev_rules`) without `{...}` braces. It will be traversed in Firestore paths automatically without requiring an extra argument in `documentRef`, `update`, or `delete`.
+:::
 
 ## `buildRepositoryRelations()`
 

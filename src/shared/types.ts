@@ -8,32 +8,115 @@ import type {
 } from "firebase-admin/firestore";
 
 /**
- * Extract the documentRef signature from refCb (without the db parameter)
- * @internal
- */
-export type ExtractDocumentRefSignature<T> = T extends (
-  db: Firestore,
-  ...args: infer P
-) => DocumentReference
-  ? (...args: P) => DocumentReference
-  : never;
-
-/**
  * `true` when `T` is `any` (the `0 extends (1 & T)` trick).
  * @internal
  */
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
 /**
+ * Extract the documentRef signature from refCb (without the db parameter)
+ * @internal
+ */
+export type ExtractDocumentRefSignature<T> = IsAny<T> extends true
+  ? (...args: any[]) => DocumentReference
+  : T extends (db: Firestore, ...args: infer P) => DocumentReference
+    ? (...args: P) => DocumentReference
+    : never;
+
+/**
+ * Extract all `{param}` names from a path template string in left-to-right order.
+ * @example ExtractPathParams<"prevention/prev_rules/prev_workshops/{workshopId}/prev_events"> // ["workshopId"]
+ */
+export type ExtractPathParams<TPath extends string> =
+  string extends TPath
+    ? []
+    : TPath extends `${string}{${infer Param}}${infer Rest}`
+      ? [Param, ...ExtractPathParams<Rest>]
+      : [];
+
+/**
+ * Extract dynamic parent key names from a path template (strips trailing `/{documentKey}` if present).
+ */
+export type ExtractParentParams<
+  TPath extends string,
+  TDocumentKey extends string,
+> = ExtractPathParams<TPath> extends [
+  ...infer Parents extends string[],
+  TDocumentKey,
+]
+  ? Parents
+  : ExtractPathParams<TPath>;
+
+/**
+ * Detect `{param}` names in `TPath` that are not valid keys of `TModel`.
+ */
+export type InvalidPathParams<TPath extends string, TModel> = Exclude<
+  ExtractPathParams<TPath>[number],
+  keyof TModel & string
+>;
+
+/**
+ * Constrain `TPath` so every `{param}` placeholder must be a strict `keyof TModel`.
+ */
+export type ValidatedPath<TPath extends string, TModel> =
+  string extends TPath
+    ? TPath
+    : [InvalidPathParams<TPath, TModel>] extends [never]
+      ? TPath
+      : `Invalid path parameter(s): {${InvalidPathParams<TPath, TModel>}} — must be keyof model (${keyof TModel & string})`;
+
+/**
+ * Convert an ordered tuple of parent key names into a positional string parameter tuple followed by `docId: string`.
+ * @internal
+ */
+export type PathParamsToArgsTuple<TParams extends readonly string[]> = [
+  ...{ [I in keyof TParams]: string },
+  docId: string,
+];
+
+/**
+ * Synthesize a `refCb` function signature from a `TPath` template when `refCb` is omitted.
+ * @internal
+ */
+export type SynthesizedRefCb<
+  TPath extends string,
+  TDocumentKey extends string,
+  TIsGroup extends boolean,
+> = ExtractParentParams<TPath, TDocumentKey> extends [string, ...string[]]
+  ? (
+      db: Firestore,
+      ...args: PathParamsToArgsTuple<ExtractParentParams<TPath, TDocumentKey>>
+    ) => DocumentReference
+  : TIsGroup extends true
+    ? (db: Firestore, ...pathSegments: string[]) => DocumentReference
+    : (db: Firestore, docId: string) => DocumentReference;
+
+/**
+ * Resolve the effective `refCb` signature: either the user-provided `TRefCb` or the synthesized signature from `TPath`.
+ * @internal
+ */
+export type EffectiveRefCb<
+  TPath extends string,
+  TDocumentKey extends string,
+  TIsGroup extends boolean,
+  TRefCb,
+> = IsAny<TRefCb> extends true
+  ? any
+  : [TRefCb] extends [undefined]
+    ? SynthesizedRefCb<TPath, TDocumentKey, TIsGroup>
+    : TRefCb;
+
+/**
  * Extract the update signature from refCb
  * @internal
  */
-export type ExtractUpdateSignature<T, TType> = T extends (
-  db: Firestore,
-  ...args: infer P
-) => DocumentReference
-  ? (...args: [...P, DeepPartial<TType> & DotNotationUpdate<TType>]) => Promise<TType>
-  : never;
+export type ExtractUpdateSignature<T, TType> = IsAny<T> extends true
+  ? (...args: any[]) => Promise<TType>
+  : T extends (db: Firestore, ...args: infer P) => DocumentReference
+    ? (
+        ...args: [...P, DeepPartial<TType> & DotNotationUpdate<TType>]
+      ) => Promise<TType>
+    : never;
 
 /**
  * Check if an object type has any method properties (e.g. Timestamp.toDate, GeoPoint.isEqual)
@@ -339,6 +422,10 @@ export interface RepositoryConfig<
   /** Zod schema attached when using createRepositoryConfig(schema)(config). Used by the admin server. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schema?: import("zod").ZodObject<any>;
+  /**
+   * @deprecated `refCb` is no longer needed — `documentRef` is automatically generated from `path`
+   * (e.g. `path: "residences/{residenceId}/res_events"`). Kept optional for backward compatibility.
+   */
   refCb?: TRefCb;
   relationalKeys?: TRelationalKeys;
   /**
@@ -351,14 +438,23 @@ export interface RepositoryConfig<
   history?: import("../history/types").HistoryConfigForModel<T> & {
     enabled: THistoryEnabled;
   };
-  documentRef: TRefCb extends undefined
-    ? TIsGroup extends true
-      ? (...pathSegments: string[]) => DocumentReference
-      : (docId: string) => DocumentReference
-    : ExtractDocumentRefSignature<TRefCb>;
-  update: TRefCb extends undefined
-    ? TIsGroup extends true
-      ? (...args: [...string[], DeepPartial<T> & DotNotationUpdate<T>]) => Promise<T>
-      : (docId: string, data: DeepPartial<T> & DotNotationUpdate<T>) => Promise<T>
-    : ExtractUpdateSignature<TRefCb, T>;
+  documentRef: IsAny<TRefCb> extends true
+    ? (...args: any[]) => DocumentReference
+    : [TRefCb] extends [undefined]
+      ? TIsGroup extends true
+        ? (...pathSegments: string[]) => DocumentReference
+        : (docId: string) => DocumentReference
+      : ExtractDocumentRefSignature<TRefCb>;
+  update: IsAny<TRefCb> extends true
+    ? (...args: any[]) => Promise<T>
+    : [TRefCb] extends [undefined]
+      ? TIsGroup extends true
+        ? (
+            ...args: [...string[], DeepPartial<T> & DotNotationUpdate<T>]
+          ) => Promise<T>
+        : (
+            docId: string,
+            data: DeepPartial<T> & DotNotationUpdate<T>,
+          ) => Promise<T>
+      : ExtractUpdateSignature<TRefCb, T>;
 }

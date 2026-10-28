@@ -96,7 +96,7 @@ const triggers = createHistoryTriggers(repos, {
 export const { residences_onHistory } = triggers;
 ```
 
-For `collectionGroup` repos, set `triggerPath` in the per-repo override (same constraint as sync triggers).
+For `collectionGroup` repos (`isGroup: true`), the trigger path is **automatically derived** when `path` is a template (e.g. `path: "residences/{residenceId}/res_events"` → `"residences/{residenceId}/res_events/{docId}"`). You only need to set `triggerPath` in the per-repo override if `path` only contains the leaf collection name.
 
 ### 3. Read history from your code
 

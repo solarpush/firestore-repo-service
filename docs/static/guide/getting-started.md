@@ -71,7 +71,6 @@ const repositoryMapping = {
     pathKey:     "documentPath",
     createdKey:  "createdAt",
     updatedKey:  "updatedAt",
-    refCb: (db: Firestore, docId: string) => db.collection("users").doc(docId),
   }),
 
   posts: createRepositoryConfig(postSchema)({
@@ -83,7 +82,6 @@ const repositoryMapping = {
     pathKey:     "documentPath",
     createdKey:  "createdAt",
     updatedKey:  "updatedAt",
-    refCb: (db: Firestore, docId: string) => db.collection("posts").doc(docId),
   }),
 };
 

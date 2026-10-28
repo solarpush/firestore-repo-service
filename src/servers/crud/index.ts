@@ -85,6 +85,8 @@ export function createCrudServer<
       pathKey: (cfg.repo as any)._pathKey ?? undefined,
       isGroup: !!(cfg.repo as any)._isGroup,
       parentKeys,
+      documentPathTemplate:
+        (cfg.repo as any)._documentPathTemplate ?? undefined,
       createdKey: (cfg.repo as any)._createdKey ?? undefined,
       pageSize: cfg.pageSize ?? 25,
       filterableFields,

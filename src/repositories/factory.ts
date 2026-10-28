@@ -13,6 +13,10 @@ import { createQueryMethods } from "../methods/query";
 import { createPopulateMethods } from "../methods/relations";
 import { createSystemMethods } from "../methods/system";
 import { createTransactionMethods } from "../methods/transaction";
+import {
+  buildDocumentRefFromTemplate,
+  parsePathTemplate,
+} from "../shared/path-template";
 import type { RepositoryConfig } from "../shared/types";
 import type { ConfiguredRepository } from "./types";
 
@@ -46,6 +50,20 @@ function extractParentKeys(refCb: unknown): string[] {
  * repository, so it can back a {@link makeLazyRepo} overlay.
  */
 export function buildRepoStaticMeta(config: any): Record<string, unknown> {
+  const documentKey = (config?.documentKey as string | undefined) ?? "docId";
+  const isGroup = !!config?.isGroup;
+  const parsedPath = parsePathTemplate(
+    typeof config?.path === "string" ? config.path : "",
+    documentKey,
+    isGroup,
+  );
+  const parentKeys =
+    parsedPath.parentKeys.length > 0
+      ? parsedPath.parentKeys
+      : isGroup
+        ? extractParentKeys(config?.refCb)
+        : [];
+
   const systemKeys = [
     config?.documentKey,
     config?.pathKey,
@@ -60,9 +78,12 @@ export function buildRepoStaticMeta(config: any): Record<string, unknown> {
     schema: config?.schema,
     _systemKeys: systemKeys,
     _pathKey: (config?.pathKey as string | undefined) ?? null,
-    _isGroup: !!config?.isGroup,
+    _isGroup: isGroup,
     _createdKey: (config?.createdKey as string | undefined) ?? null,
-    _parentKeys: config?.isGroup ? extractParentKeys(config?.refCb) : [],
+    _parentKeys: parentKeys,
+    _documentPathTemplate: parsedPath.documentPathTemplate,
+    _collectionId:
+      typeof config?.path === "string" ? parsedPath.collectionId : null,
     relationalKeys: config?.relationalKeys,
     _historyConfig: historyConfig,
     _historySubcollection: historyConfig?.enabled
@@ -70,7 +91,8 @@ export function buildRepoStaticMeta(config: any): Record<string, unknown> {
       : undefined,
     // Collection path of a non-group repo (== resolved `ref.path`). Lets
     // trigger builders derive the document path without resolving the db.
-    _collectionPath: typeof config?.path === "string" ? config.path : null,
+    _collectionPath:
+      typeof config?.path === "string" ? parsedPath.collectionPath : null,
   };
 }
 
@@ -119,16 +141,40 @@ export function createRepository<
   config: T,
   allRepositories: Record<string, any> = {},
 ): ConfiguredRepository<T> {
+  const documentKey = config.documentKey as string;
+  const parsedPath = parsePathTemplate(
+    config.path,
+    documentKey,
+    !!config.isGroup,
+  );
+  const parentKeys =
+    parsedPath.parentKeys.length > 0
+      ? parsedPath.parentKeys
+      : config.isGroup
+        ? extractParentKeys(config.refCb)
+        : [];
+
   // Create collection reference
   const collectionRef: CollectionReference | Query = config.isGroup
-    ? db.collectionGroup(config.path)
-    : db.collection(config.path);
+    ? db.collectionGroup(parsedPath.collectionId)
+    : db.collection(parsedPath.collectionPath);
 
   // Keep actual collection for create operations
-  const actualCollection = config.isGroup ? null : db.collection(config.path);
+  const actualCollection = config.isGroup
+    ? null
+    : db.collection(parsedPath.collectionPath);
 
-  // Create document reference function
-  const documentRef = (...args: any[]) => (config.refCb as any)(db, ...args);
+  // Create document reference function (auto-generated from path template when refCb is omitted)
+  const documentRef =
+    typeof config.refCb === "function"
+      ? (...args: any[]) => (config.refCb as any)(db, ...args)
+      : (...args: any[]) =>
+          buildDocumentRefFromTemplate(
+            db,
+            parsedPath.documentPathTemplate ??
+              `${parsedPath.collectionPath}/{${documentKey}}`,
+            args,
+          );
 
   // Create all method groups
   const getMethods = createGetMethods(
@@ -136,7 +182,7 @@ export function createRepository<
     config.foreignKeys,
     actualCollection,
     documentRef,
-    config.documentKey as string,
+    documentKey,
   );
   const queryMethods = createQueryMethods(
     collectionRef as Query,
@@ -148,10 +194,12 @@ export function createRepository<
   const crudMethods = createCrudMethods(
     actualCollection,
     documentRef,
-    config.documentKey as string,
+    documentKey,
     config.pathKey as string | undefined,
     config.createdKey as string | undefined,
     config.updatedKey as string | undefined,
+    parentKeys,
+    parsedPath.documentPathTemplate,
   );
   const batchMethods = createBatchMethods(
     db,
@@ -241,10 +289,13 @@ export function createRepository<
     _pathKey: (config.pathKey as string | undefined) ?? null,
     // Whether this is a collectionGroup repository
     _isGroup: !!config.isGroup,
-    // Parent key field names auto-detected from refCb signature
-    _parentKeys: config.isGroup
-      ? extractParentKeys(config.refCb)
-      : [],
+    // Parent key field names auto-detected from path template or refCb signature
+    _parentKeys: parentKeys,
+    // Full document path template (e.g. "prevention/prev_rules/prev_workshops/{workshopId}/prev_events/{docId}")
+    _documentPathTemplate: parsedPath.documentPathTemplate,
+    // Resolved collection ID and collection path
+    _collectionId: parsedPath.collectionId,
+    _collectionPath: parsedPath.collectionPath,
     // Expose createdKey so server handlers can inject it when using set() for creates
     _createdKey: (config.createdKey as string | undefined) ?? null,
   } as unknown as ConfiguredRepository<T>;

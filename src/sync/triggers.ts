@@ -27,6 +27,7 @@
  * ```
  */
 
+import { parsePathTemplate } from "../shared/path-template";
 import { serializeDocument } from "./serializer";
 import type { RepoSyncConfig, SyncEvent, SyncTriggersConfig } from "./types";
 
@@ -56,6 +57,8 @@ interface SyncRepoMeta {
   documentKey: string;
   /** Collection path of a non-group repo. */
   collectionPath: string | null;
+  /** Auto-derived document trigger path template when path is a full template. */
+  documentPathTemplate: string | null;
 }
 
 function syncMetaFromConfig(cfg: any): SyncRepoMeta {
@@ -65,18 +68,35 @@ function syncMetaFromConfig(cfg: any): SyncRepoMeta {
     cfg?.createdKey,
     cfg?.updatedKey,
   ].filter((k): k is string => typeof k === "string");
+  const rawPath = typeof cfg?.path === "string" ? cfg.path : null;
+  const parsed = rawPath
+    ? parsePathTemplate(rawPath, cfg?.documentKey ?? "docId")
+    : null;
   return {
     isGroup: !!cfg?.isGroup,
     documentKey: systemKeys[0] ?? "docId",
-    collectionPath: typeof cfg?.path === "string" ? cfg.path : null,
+    collectionPath: parsed ? parsed.collectionPath : null,
+    documentPathTemplate:
+      parsed && (!cfg?.isGroup || parsed.collectionPath.includes("/"))
+        ? parsed.documentPathTemplate
+        : null,
   };
 }
 
 function syncMetaFromRepo(repo: any): SyncRepoMeta {
+  const collectionPath = repo?._collectionPath ?? repo?.ref?.path ?? null;
+  const docTemplate =
+    typeof repo?._documentPathTemplate === "string"
+      ? repo._documentPathTemplate
+      : null;
   return {
     isGroup: !!repo?._isGroup,
     documentKey: repo?._systemKeys?.[0] ?? "docId",
-    collectionPath: repo?.ref?.path ?? null,
+    collectionPath,
+    documentPathTemplate:
+      docTemplate && (!repo?._isGroup || (collectionPath && collectionPath.includes("/")))
+        ? docTemplate
+        : null,
   };
 }
 
@@ -152,17 +172,20 @@ export function createSyncTriggers<M extends Record<string, any>>(
     let documentPath: string | null;
 
     if (meta.isGroup) {
-      if (!repoCfg?.triggerPath) {
+      const resolvedGroupPath =
+        repoCfg?.triggerPath ?? meta.documentPathTemplate;
+      if (!resolvedGroupPath) {
         console.warn(
           `[SyncTriggers] Skipping collection-group repo "${repoName}". ` +
-            "Provide a triggerPath in the sync repos config for group collections.",
+            "Provide a triggerPath in the sync repos config for group collections or use a full path template.",
         );
         continue;
       }
-      documentPath = repoCfg.triggerPath;
+      documentPath = resolvedGroupPath;
     } else {
       documentPath =
         repoCfg?.triggerPath ??
+        meta.documentPathTemplate ??
         buildDocumentPath(repoName, meta.collectionPath);
     }
     if (!documentPath) continue;

@@ -88,7 +88,7 @@ export function createBatchMethods(
           if (pathKey) {
             enrichedData[pathKey] = docRef.path;
           }
-          if (createdKey) {
+          if (createdKey && enrichedData[createdKey] === undefined) {
             enrichedData[createdKey] = now();
           }
           if (updatedKey) {

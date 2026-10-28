@@ -56,14 +56,12 @@ const repositoryMapping = {
     isGroup: false,
     foreignKeys: ["docId", "email"] as const,
     queryKeys: ["name", "isActive"] as const,
-    refCb: (db: Firestore, docId: string) => doc(db, "users", docId),
   }),
   posts: createRepositoryConfig<PostModel>()({
     path: "posts",
     isGroup: false,
     foreignKeys: ["docId", "userId"] as const,
     queryKeys: ["status"] as const,
-    refCb: (db: Firestore, docId: string) => doc(db, "posts", docId),
   }),
 };
 
@@ -112,25 +110,40 @@ const updated = await repos.users.update("user123", {
 
 ### `createRepositoryConfig()`
 
-| Option        | Description                                         |
-| ------------- | --------------------------------------------------- |
-| `path`        | Collection path in Firestore                        |
-| `isGroup`     | `true` for collection group, `false` for simple     |
-| `foreignKeys` | Keys for `get.by*` methods (single document lookup) |
-| `queryKeys`   | Keys for `query.by*` methods (multi-document query) |
-| `refCb`       | Function that returns the document reference        |
+| Option        | Description                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------- |
+| `path`        | Collection path or typed template (e.g. `"users"` or `"posts/{postId}/comments"`)                       |
+| `isGroup`     | `true` for collection group / subcollection, `false` for root collection                                |
+| `foreignKeys` | Keys for `get.by*` methods (single document lookup)                                                     |
+| `queryKeys`   | Keys for `query.by*` methods (multi-document query)                                                     |
+| `refCb`       | *(Optional, `@deprecated`)* Legacy function returning the `DocumentReference` (auto-derived from `path`)|
 
-**Sub-collection example:**
+**Sub-collection example (with typed path template):**
+
+Every `{param}` placeholder inside `path` is validated at compile-time against `keyof Model`, and its left-to-right order automatically types `documentRef`, `set`, `update`, and `delete`. Static intermediate documents (not wrapped in `{...}`, such as `"prev_rules"` in `"prevention/prev_rules/prev_workshops/{workshopId}/prev_events"`) are resolved automatically without requiring extra parameters.
 
 ```typescript
-comments: createRepositoryConfig<CommentModel>()({
-  path: "comments",
+comments: createRepositoryConfig(commentSchema)({
+  path: "posts/{postId}/comments",
   isGroup: true,
   foreignKeys: ["docId"] as const,
   queryKeys: ["postId", "userId"] as const,
-  refCb: (db, postId, commentId) =>
-    doc(db, "posts", postId, "comments", commentId),
+  documentKey: "docId",
+  pathKey: "documentPath",
+  createdKey: "createdAt",
+  updatedKey: "updatedAt",
 });
+
+// Create in a sub-collection (extracts postId from data, auto-generates docId & documentPath)
+const comment = await repos.comments.create({
+  postId: "post123",
+  userId: "user456",
+  content: "Hello!",
+});
+
+// Update / Delete use the ordered parent keys from the path template: (postId, docId)
+await repos.comments.update("post123", comment.docId, { content: "Updated!" });
+await repos.comments.delete("post123", comment.docId);
 ```
 
 ### Query options

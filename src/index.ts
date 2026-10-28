@@ -11,15 +11,22 @@ import type { z } from "zod";
 export type {
   DeepPartial,
   DotNotationUpdate,
+  EffectiveRefCb,
   ExtractDocumentRefSignature,
+  ExtractParentParams,
+  ExtractPathParams,
   ExtractUpdateSignature,
   FieldPath,
   GetOptions,
   GetResult,
+  InvalidPathParams,
+  PathParamsToArgsTuple,
   QueryOptions,
   RelationalKeys,
   RelationConfig,
   RepositoryConfig,
+  SynthesizedRefCb,
+  ValidatedPath,
   WhereClause,
 } from "./shared/types";
 
@@ -76,7 +83,12 @@ export type { DateHandlingMode } from "./shared/date-config";
 
 import { createRepository } from "./repositories/factory";
 import type { ConfiguredRepository } from "./repositories/types";
-import type { RelationConfig, RepositoryConfig } from "./shared/types";
+import type {
+  EffectiveRefCb,
+  RelationConfig,
+  RepositoryConfig,
+  ValidatedPath,
+} from "./shared/types";
 
 // ============================================
 // Repository Configuration Helper
@@ -139,13 +151,14 @@ export function createRepositoryConfig<TSchema extends z.ZodObject<any>>(
   const TQueryKeys extends readonly (keyof z.infer<TSchema>)[],
   const TIsGroup extends boolean,
   const TDocumentKey extends keyof z.infer<TSchema>,
+  const TPath extends string = string,
   const TPathKey extends keyof z.infer<TSchema> | undefined = undefined,
   const TCreatedKey extends keyof z.infer<TSchema> | undefined = undefined,
   const TUpdatedKey extends keyof z.infer<TSchema> | undefined = undefined,
   const THistoryEnabled extends boolean = false,
   TRefCb = undefined,
 >(config: {
-  path: string;
+  path: ValidatedPath<TPath, z.infer<TSchema>>;
   isGroup: TIsGroup;
   foreignKeys: TForeignKeys;
   queryKeys: TQueryKeys;
@@ -153,7 +166,11 @@ export function createRepositoryConfig<TSchema extends z.ZodObject<any>>(
   pathKey?: TPathKey;
   createdKey?: TCreatedKey;
   updatedKey?: TUpdatedKey;
-  refCb: TRefCb;
+  /**
+   * @deprecated `refCb` is no longer needed — `documentRef` is automatically generated from `path`
+   * (e.g. `path: "residences/{residenceId}/res_events"`). Kept optional for backward compatibility.
+   */
+  refCb?: TRefCb;
   /**
    * Optional change-history configuration. Set `enabled: true` to expose
    * `repo.history.*` and have `createHistoryTriggers(...)` register a trigger
@@ -167,7 +184,7 @@ export function createRepositoryConfig<TSchema extends z.ZodObject<any>>(
   TForeignKeys,
   TQueryKeys,
   TIsGroup,
-  TRefCb,
+  EffectiveRefCb<TPath, TDocumentKey & string, TIsGroup, TRefCb>,
   {},
   TDocumentKey,
   TPathKey,
@@ -317,7 +334,10 @@ export function buildRepositoryRelations<
           TCreatedKey,
           TUpdatedKey,
           THistoryEnabled
-        >
+        > &
+          (TMapping[K] extends { schema: infer TSchema }
+            ? { schema: TSchema }
+            : {})
       : TMapping[K]
     : TMapping[K];
 } {

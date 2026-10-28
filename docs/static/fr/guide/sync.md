@@ -139,7 +139,9 @@ adapters: [
 
 ### Collection Groups (`triggerPath`)
 
-Pour les repos avec `isGroup: true`, vous **devez** fournir un `triggerPath` :
+Pour les repos avec `isGroup: true`, si la configuration du repository utilise déjà un template de chemin complet (ex: `path: "posts/{postId}/comments"`), le chemin du trigger (`"posts/{postId}/comments/{docId}"`) est **déduit automatiquement** !
+
+Si la configuration du repository ne contient que le nom de la sous-collection (`path: "comments"`), ou si vous souhaitez le surcharger, fournissez `triggerPath` :
 
 ```typescript
 repos: {

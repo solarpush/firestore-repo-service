@@ -151,7 +151,15 @@ export function createadminsyncServer(
       : (repoMapping as Record<string, any>)[name];
 
     const isGroup = !!(repo as any)._isGroup;
-    if (!hasExplicitRepos && isGroup && !repoCfg?.triggerPath) {
+    const collectionPath = (repo as any)._collectionPath as string | undefined;
+    const hasTemplateTriggerPath =
+      typeof collectionPath === "string" && collectionPath.includes("/");
+    if (
+      !hasExplicitRepos &&
+      isGroup &&
+      !repoCfg?.triggerPath &&
+      !hasTemplateTriggerPath
+    ) {
       continue;
     }
 

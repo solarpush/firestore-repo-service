@@ -161,7 +161,7 @@ export function createBulkMethods(
 
         // Auto-set createdKey and updatedKey
         const enrichedData = { ...data };
-        if (createdKey) {
+        if (createdKey && enrichedData[createdKey] === undefined) {
           enrichedData[createdKey] = now();
         }
         if (updatedKey) {

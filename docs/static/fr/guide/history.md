@@ -96,7 +96,7 @@ const triggers = createHistoryTriggers(repos, {
 export const { residences_onHistory } = triggers;
 ```
 
-Pour les repos `collectionGroup`, définissez `triggerPath` dans l'override par repo (même contrainte que les triggers de sync).
+Pour les repos `collectionGroup` (`isGroup: true`), le `triggerPath` est **déduit automatiquement** dès lors que `path` utilise un template complet (ex: `path: "residences/{residenceId}/res_events"` → `"residences/{residenceId}/res_events/{docId}"`). Vous n'avez besoin de définir `triggerPath` manuellement que si `path` ne contient que le nom de la sous-collection.
 
 ### 3. Lire l'historique depuis votre code
 

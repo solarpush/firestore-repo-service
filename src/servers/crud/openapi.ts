@@ -1064,8 +1064,32 @@ export function generateOpenAPISpec(
     // Create schema
     let createSchemaName: string | null = null;
     const createShape = buildShape(entry.createFields);
+    if (entry.isGroup && entry.parentKeys && entry.parentKeys.length > 0) {
+      const schemaShape = (entry.schema as any)?.shape ?? {};
+      for (const pk of entry.parentKeys) {
+        if (!createShape[pk] && schemaShape[pk]) {
+          createShape[pk] = schemaShape[pk];
+        }
+      }
+    }
     if (Object.keys(createShape).length > 0) {
-      schemas[createName] = zodToJsonSchema(z.object(createShape));
+      const createJsonSchema = zodToJsonSchema(z.object(createShape));
+      if (entry.isGroup && entry.parentKeys && entry.parentKeys.length > 0) {
+        const reqSet = new Set<string>(
+          Array.isArray(createJsonSchema.required)
+            ? createJsonSchema.required
+            : [],
+        );
+        for (const pk of entry.parentKeys) {
+          if ((createJsonSchema.properties as Record<string, unknown> | undefined)?.[pk]) {
+            reqSet.add(pk);
+          }
+        }
+        if (reqSet.size > 0) {
+          createJsonSchema.required = Array.from(reqSet);
+        }
+      }
+      schemas[createName] = createJsonSchema;
       createSchemaName = createName;
     }
 

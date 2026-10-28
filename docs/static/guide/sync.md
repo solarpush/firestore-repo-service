@@ -139,7 +139,9 @@ adapters: [
 
 ### Collection Groups (`triggerPath`)
 
-For repos with `isGroup: true`, you **must** provide a `triggerPath`:
+For repos with `isGroup: true`, if your repository config uses a full path template (e.g. `path: "posts/{postId}/comments"`), the trigger path (`"posts/{postId}/comments/{docId}"`) is **inferred automatically**!
+
+If your repository config only specifies the leaf collection name (`path: "comments"`), or if you want to override the pattern, provide `triggerPath`:
 
 ```typescript
 repos: {
